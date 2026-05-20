@@ -1,0 +1,2052 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="GalExcleTools.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="TFAC剧情箱-轮椅版"
+    mc:Ignorable="d">
+
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid>
+        <Grid.Resources>
+            <Style x:Key="PanelBorderStyle" TargetType="Border">
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
+            </Style>
+            <Style x:Key="PageTitleStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="28" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="16" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="SubtleTextStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+        </Grid.Resources>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border
+            x:Name="AppTitleBar"
+            Grid.Row="0"
+            Padding="18,0,170,0"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="0,0,0,1"
+            Background="{ThemeResource LayerFillColorDefaultBrush}">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="36" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Width="32" Height="32" CornerRadius="7" VerticalAlignment="Center">
+                    <Image Source="ms-appx:///Assets/AppIcon.png" Stretch="UniformToFill" />
+                </Border>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="0">
+                    <TextBlock Text="TFAC剧情箱-轮椅版" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="1.2.0" Style="{StaticResource SubtleTextStyle}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <NavigationView
+            x:Name="ShellNavigation"
+            Grid.Row="1"
+            CompactPaneLength="64"
+            IsBackButtonVisible="Collapsed"
+            IsPaneOpen="False"
+            IsSettingsVisible="False"
+            OpenPaneLength="286"
+            PaneDisplayMode="LeftCompact"
+            SelectionChanged="ShellNavigation_SelectionChanged"
+            SelectionFollowsFocus="Disabled">
+            <NavigationView.MenuItems>
+                <NavigationViewItem x:Name="WorkbenchNavItem" Content="项目工作台" IsSelected="True" Tag="Workbench">
+                    <NavigationViewItem.Icon>
+                        <SymbolIcon Symbol="Library" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="AssetLibraryNavItem" Content="素材库" Tag="AssetLibrary">
+                    <NavigationViewItem.Icon>
+                        <SymbolIcon Symbol="Pictures" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="UnrealSyncNavItem" Content="虚幻同步台" Tag="UnrealSync">
+                    <NavigationViewItem.Icon>
+                        <SymbolIcon Symbol="Sync" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItem x:Name="GlobalSettingsNavItem" Content="整体设置" Tag="Settings">
+                    <NavigationViewItem.Icon>
+                        <SymbolIcon Symbol="Setting" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.FooterMenuItems>
+
+            <Grid Padding="20" RowSpacing="14">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid x:Name="WorkbenchPage" RowSpacing="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="项目工作台" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="项目会关联一个素材库，故事填表时从该素材库读取索引。" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
+                        <Button
+                            Grid.Column="1"
+                            Width="40"
+                            Height="40"
+                            Padding="0"
+                            VerticalAlignment="Center"
+                            Click="ShowCreateProjectPageButton_Click"
+                            ToolTipService.ToolTip="创建项目">
+                            <SymbolIcon Symbol="Add" />
+                        </Button>
+                    </Grid>
+
+                    <InfoBar
+                        x:Name="UnrealSyncWorkbenchTipInfoBar"
+                        Grid.Row="1"
+                        Margin="0,4,0,0"
+                        IsOpen="False"
+                        IsClosable="False" />
+
+                    <ScrollViewer
+                        x:Name="ProjectsScrollViewer"
+                        Grid.Row="1"
+                        VerticalScrollBarVisibility="Auto">
+                        <GridView
+                            x:Name="ProjectsGridView"
+                            SelectionMode="None" />
+                    </ScrollViewer>
+
+                    <Border x:Name="WorkspaceStatusBorder" Grid.Row="3" Style="{StaticResource PanelBorderStyle}">
+                        <Grid Padding="14,10" ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="WorkspaceStatusText" VerticalAlignment="Center" Style="{StaticResource SubtleTextStyle}" />
+                            <Button Grid.Column="1" Content="刷新项目" Click="RefreshProjectsButton_Click" />
+                        </Grid>
+                    </Border>
+                    <Border
+                        x:Name="StorySidePanelWorkbenchHidden"
+                        Visibility="Collapsed"
+                        Grid.Row="1"
+                        Grid.RowSpan="2"
+                        Canvas.ZIndex="30"
+                        Width="46"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Stretch"
+                        Background="#B3FFFFFF"
+                        PointerEntered="StorySidePanel_PointerEntered"
+                        PointerExited="StorySidePanel_PointerExited">
+                        <Grid>
+                            <TextBlock
+                                x:Name="StorySidePanelArrowWorkbenchHidden"
+                                Text="‹"
+                                FontSize="32"
+                                Foreground="#202020"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Margin="10,0,0,0" />
+                            <ScrollViewer
+                                x:Name="StorySidePanelContentWorkbenchHidden"
+                                Margin="58,24,18,24"
+                                Opacity="0"
+                                HorizontalScrollBarVisibility="Disabled"
+                                VerticalScrollBarVisibility="Auto">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="章节工具栏" Foreground="#202020" FontSize="18" FontWeight="SemiBold" />
+                                    <Button Content="更换背景图" Height="36" HorizontalAlignment="Stretch" Click="ChangeStoryBackgroundButton_Click" />
+                                    <Button Content="更换BGM" Height="36" HorizontalAlignment="Stretch" Click="ChangeStoryBgmButton_Click" />
+                                    <Button Content="更换环境音" Height="36" HorizontalAlignment="Stretch" Click="ChangeStorySceneButton_Click" />
+                                    <Button Content="填写函数" Height="36" HorizontalAlignment="Stretch" Click="ChooseStoryFunctionButton_Click" />
+                                    <Button Content="清空函数" Height="36" HorizontalAlignment="Stretch" Click="ClearStoryFunctionButton_Click" />
+                                    <Button Content="生成小节CSV" Height="36" HorizontalAlignment="Stretch" Click="ExportStorySectionsButton_Click" />
+                                    <Grid Height="40" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示完整立绘" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowFullCharacterArtCheckBoxWorkbenchHidden" Grid.Column="1" VerticalAlignment="Center" Checked="StoryCharacterDisplayCheckBox_Changed" Unchecked="StoryCharacterDisplayCheckBox_Changed" />
+                                    </Grid>
+                                    <Grid Height="40" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示4号位" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowCharacterSlot4CheckBoxWorkbenchHidden" Grid.Column="1" VerticalAlignment="Center" Checked="StorySlotVisibilityCheckBox_Changed" Unchecked="StorySlotVisibilityCheckBox_Changed" />
+                                    </Grid>
+                                    <Grid Height="40" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示5号位" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowCharacterSlot5CheckBoxWorkbenchHidden" Grid.Column="1" VerticalAlignment="Center" Checked="StorySlotVisibilityCheckBox_Changed" Unchecked="StorySlotVisibilityCheckBox_Changed" />
+                                    </Grid>
+                                    <TextBlock x:Name="StoryAssetStatusTextWorkbenchHidden" Foreground="#555555" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+                    <Border
+                        x:Name="StorySidePanelWorkbenchHidden2"
+                        Visibility="Collapsed"
+                        Grid.Row="1"
+                        Grid.RowSpan="2"
+                        Canvas.ZIndex="30"
+                        Width="46"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Stretch"
+                        Background="#B3FFFFFF"
+                        PointerEntered="StorySidePanel_PointerEntered"
+                        PointerExited="StorySidePanel_PointerExited">
+                        <Grid>
+                            <TextBlock
+                                x:Name="StorySidePanelArrowWorkbenchHidden2"
+                                Text="‹"
+                                FontSize="32"
+                                Foreground="#202020"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Margin="10,0,0,0" />
+                            <ScrollViewer
+                                x:Name="StorySidePanelContentWorkbenchHidden2"
+                                Margin="58,24,18,24"
+                                Opacity="0"
+                                HorizontalScrollBarVisibility="Disabled"
+                                VerticalScrollBarVisibility="Auto">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="章节工具栏" Foreground="#202020" FontSize="18" FontWeight="SemiBold" />
+                                    <Button Content="更换背景图" Height="36" HorizontalAlignment="Stretch" Click="ChangeStoryBackgroundButton_Click" />
+                                    <Button Content="更换BGM" Height="36" HorizontalAlignment="Stretch" Click="ChangeStoryBgmButton_Click" />
+                                    <Button Content="更换环境音" Height="36" HorizontalAlignment="Stretch" Click="ChangeStorySceneButton_Click" />
+                                    <Button Content="填写函数" Height="36" HorizontalAlignment="Stretch" Click="ChooseStoryFunctionButton_Click" />
+                                    <Button Content="清空函数" Height="36" HorizontalAlignment="Stretch" Click="ClearStoryFunctionButton_Click" />
+                                    <Button Content="生成小节CSV" Height="36" HorizontalAlignment="Stretch" Click="ExportStorySectionsButton_Click" />
+                                    <Grid Height="40" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示完整立绘" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowFullCharacterArtCheckBoxWorkbenchHidden2" Grid.Column="1" VerticalAlignment="Center" Checked="StoryCharacterDisplayCheckBox_Changed" Unchecked="StoryCharacterDisplayCheckBox_Changed" />
+                                    </Grid>
+                                    <Grid Height="40" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示4号位" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowCharacterSlot4CheckBoxWorkbenchHidden2" Grid.Column="1" VerticalAlignment="Center" Checked="StorySlotVisibilityCheckBox_Changed" Unchecked="StorySlotVisibilityCheckBox_Changed" />
+                                    </Grid>
+                                    <Grid Height="40" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示5号位" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowCharacterSlot5CheckBoxWorkbenchHidden2" Grid.Column="1" VerticalAlignment="Center" Checked="StorySlotVisibilityCheckBox_Changed" Unchecked="StorySlotVisibilityCheckBox_Changed" />
+                                    </Grid>
+                                    <TextBlock x:Name="StoryAssetStatusTextWorkbenchHidden2" Foreground="#555555" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <Grid
+                    x:Name="ProjectDetailPage"
+                    Visibility="Collapsed"
+                    RowSpacing="14">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            x:Name="ProjectDetailCloseButton"
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Click="CloseProjectDetailButton_Click"
+                            ToolTipService.ToolTip="返回项目工作台">
+                            <SymbolIcon Symbol="Back" />
+                        </Button>
+                        <ScrollViewer
+                            Grid.Column="1"
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Auto"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Border
+                                    Padding="14,8"
+                                    CornerRadius="6"
+                                    BorderThickness="1"
+                                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                    Background="{ThemeResource AccentFillColorSecondaryBrush}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="项目" />
+                                        <TextBlock x:Name="ProjectDetailTabTitleText" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <ScrollViewer
+                        x:Name="ProjectDetailScrollViewer"
+                        Grid.Row="1"
+                        VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="12">
+                            <Border Style="{StaticResource PanelBorderStyle}">
+                                <StackPanel Padding="18" Spacing="8">
+                                    <TextBlock Text="项目数据" Style="{StaticResource SectionTitleStyle}" />
+                                    <TextBlock x:Name="ProjectDetailInfoText" Style="{StaticResource SubtleTextStyle}" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelBorderStyle}">
+                                <StackPanel Padding="18" Spacing="12">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="章节" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock Text="章节卡代表一个故事章节。当前先记录中文显示名称和英文代号，后续会挂接剧情表格。" Style="{StaticResource SubtleTextStyle}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="新建章节" Click="AddChapterButton_Click" />
+                                    </Grid>
+                                    <InfoBar
+                                        x:Name="ChapterInfoBar"
+                                        IsOpen="False"
+                                        IsClosable="True" />
+                                    <GridView
+                                        x:Name="ChaptersGridView"
+                                        AllowDrop="True"
+                                        DragOver="ChaptersGridView_DragOver"
+                                        Drop="ChaptersGridView_Drop"
+                                        MaxWidth="980"
+                                        HorizontalAlignment="Left"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
+                        <ScrollViewer
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Auto"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                            <StackPanel Padding="12" Orientation="Horizontal" Spacing="14">
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock Text="名称" VerticalAlignment="Center" />
+                                    <TextBox x:Name="ProjectDetailNameTextBox" Width="150" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock Text="英文代号" VerticalAlignment="Center" />
+                                    <TextBox x:Name="ProjectDetailCodeTextBox" Width="150" />
+                                </StackPanel>
+                                <Button Content="保存项目设置" Click="SaveProjectInlineSettingsButton_Click" />
+                                <Button Content="更改目标素材库" Click="ProjectDetailChangeAssetLibraryButton_Click" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+
+                <Grid
+                    x:Name="StoryEditorPage"
+                    Visibility="Collapsed"
+                    RowSpacing="12"
+                    IsTabStop="True"
+                    PointerPressed="StoryEditorPage_PointerPressed"
+                    KeyDown="StoryEditorPage_KeyDown">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            x:Name="StoryEditorBackButton"
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Click="CloseStoryEditorButton_Click"
+                            ToolTipService.ToolTip="返回章节列表">
+                            <SymbolIcon Symbol="Back" />
+                        </Button>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock x:Name="StoryEditorTitleText" Style="{StaticResource SectionTitleStyle}" />
+                            <TextBlock x:Name="StoryEditorCsvPathText" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
+                        <StackPanel
+                            x:Name="StoryTransientTipsPanel"
+                            Grid.Column="2"
+                            MinWidth="320"
+                            Spacing="8" />
+                    </Grid>
+
+                    <Grid
+                        x:Name="StoryEditorBodyGrid"
+                        Grid.Row="1"
+                        Grid.RowSpan="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                            <Grid
+                                x:Name="StorySettingsPane"
+                                Grid.Column="1"
+                                Width="46"
+                                Background="#B3FFFFFF">
+                                <Button
+                                    Width="46"
+                                    Height="56"
+                                    Padding="0"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    Click="ToggleStorySettingsPaneButton_Click">
+                                    <SymbolIcon Symbol="Setting" />
+                                </Button>
+                                <ScrollViewer
+                                    x:Name="StorySidePanelContent"
+                                    Margin="58,24,18,24"
+                                    Opacity="0"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Text="章节工具栏" Foreground="#202020" FontSize="18" FontWeight="SemiBold" />
+                                        <Button x:Name="StoryUndoButton" Content="撤回上一步" Height="36" HorizontalAlignment="Stretch" Click="UndoStoryEditorButton_Click" IsEnabled="False" />
+                                        <Grid Height="40" ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="调试模式" Foreground="#202020" VerticalAlignment="Center" />
+                                            <CheckBox x:Name="StoryDebugModeCheckBox" Grid.Column="1" VerticalAlignment="Center" Checked="StoryDebugModeCheckBox_Changed" Unchecked="StoryDebugModeCheckBox_Changed" />
+                                        </Grid>
+                                        <Expander Header="快捷跳转" IsExpanded="True">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Button Content="上一节" Height="36" HorizontalAlignment="Stretch" Click="PreviousStorySectionButton_Click" />
+                                                <Button Grid.Column="1" Content="下一节" Height="36" HorizontalAlignment="Stretch" Click="NextStorySectionButton_Click" />
+                                            </Grid>
+                                        </Expander>
+                                        <Expander Header="基础素材" IsExpanded="True">
+                                            <StackPanel Spacing="10">
+                                                <TextBlock x:Name="StoryCurrentBackgroundText" Tag="BGindex" Foreground="#555555" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                        <Button Content="更换背景图" Tag="BGindex" Height="36" HorizontalAlignment="Stretch" Click="ChangeStoryBackgroundButton_Click" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                        <TextBlock x:Name="StoryCurrentBgmText" Tag="BGM" Foreground="#555555" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                        <Button Content="更换BGM" Tag="BGM" Height="36" HorizontalAlignment="Stretch" Click="ChangeStoryBgmButton_Click" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                        <TextBlock x:Name="StoryCurrentSceneText" Tag="Scene" Foreground="#555555" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                        <Button Content="更换环境音" Tag="Scene" Height="36" HorizontalAlignment="Stretch" Click="ChangeStorySceneButton_Click" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                            </StackPanel>
+                                        </Expander>
+                                        <Expander Header="函数" IsExpanded="True">
+                                            <StackPanel Spacing="10">
+                                                <TextBlock x:Name="StoryCurrentFunctionText" Foreground="#555555" TextWrapping="Wrap" />
+                                                <Button Content="添加函数" Height="36" HorizontalAlignment="Stretch" Click="ChooseStoryFunctionButton_Click" />
+                                                <Button x:Name="StoryViewChoicesButton" Content="查看选项" Height="36" HorizontalAlignment="Stretch" Visibility="Collapsed" Click="ViewStoryChoicesButton_Click" />
+                                                <Button x:Name="StoryRemoveFunctionButton" Content="移除函数" Height="36" HorizontalAlignment="Stretch" Click="RemoveStoryFunctionButton_Click" />
+                                                <Button x:Name="StoryClearFunctionButton" Content="清空函数" Height="36" HorizontalAlignment="Stretch" Click="ClearStoryFunctionButton_Click" />
+                                            </StackPanel>
+                                        </Expander>
+                                        <Expander Header="行数据" IsExpanded="False">
+                                            <StackPanel Spacing="10">
+                                                <Button Content="清空当前行数据" Height="36" HorizontalAlignment="Stretch" Click="ClearCurrentStoryRowButton_Click" />
+                                            </StackPanel>
+                                        </Expander>
+                                        <Expander Header="显示设置" IsExpanded="True">
+                                            <StackPanel Spacing="8">
+                                                <Grid Height="40" ColumnSpacing="12">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="显示完整立绘" Foreground="#202020" VerticalAlignment="Center" />
+                                                    <CheckBox x:Name="ShowFullCharacterArtCheckBox" Grid.Column="1" VerticalAlignment="Center" Checked="StoryCharacterDisplayCheckBox_Changed" Unchecked="StoryCharacterDisplayCheckBox_Changed" />
+                                                </Grid>
+                                                <Grid Height="40" ColumnSpacing="12">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="显示完整章节长度" Foreground="#202020" VerticalAlignment="Center" />
+                                                    <CheckBox x:Name="ShowFullChapterLengthCheckBox" Grid.Column="1" VerticalAlignment="Center" Checked="StoryChapterLengthDisplayCheckBox_Changed" Unchecked="StoryChapterLengthDisplayCheckBox_Changed" />
+                                                </Grid>
+                                                <Grid Height="40" ColumnSpacing="12">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="显示4号位" Foreground="#202020" VerticalAlignment="Center" />
+                                                    <CheckBox x:Name="ShowCharacterSlot4CheckBox" Grid.Column="1" VerticalAlignment="Center" Checked="StorySlotVisibilityCheckBox_Changed" Unchecked="StorySlotVisibilityCheckBox_Changed" />
+                                                </Grid>
+                                                <Grid Height="40" ColumnSpacing="12">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="显示5号位" Foreground="#202020" VerticalAlignment="Center" />
+                                                    <CheckBox x:Name="ShowCharacterSlot5CheckBox" Grid.Column="1" VerticalAlignment="Center" Checked="StorySlotVisibilityCheckBox_Changed" Unchecked="StorySlotVisibilityCheckBox_Changed" />
+                                                </Grid>
+                                            </StackPanel>
+                                        </Expander>
+                                        <TextBlock x:Name="StoryAssetStatusText" Foreground="#555555" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Grid>
+                        <Grid Grid.Column="0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Background="Black">
+                        <Image x:Name="StoryBackgroundImage" Stretch="UniformToFill" Opacity="0.72" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="StoryCharacterSlot1" Grid.Column="0" Grid.ColumnSpan="2" Margin="10,28,6,172" />
+                            <Border x:Name="StoryCharacterSlot2" Grid.Column="2" Grid.ColumnSpan="2" Margin="6,50,6,172" />
+                            <Border x:Name="StoryCharacterSlot3" Grid.Column="4" Grid.ColumnSpan="2" Margin="6,16,6,172" />
+                            <Border x:Name="StoryCharacterSlot4" Grid.Column="6" Grid.ColumnSpan="2" Margin="6,50,6,172" Visibility="Collapsed" />
+                            <Border x:Name="StoryCharacterSlot5" Grid.Column="8" Grid.ColumnSpan="2" Margin="6,28,10,172" Visibility="Collapsed" />
+                        </Grid>
+
+                        <Border
+                            x:Name="StorySidePanelLegacy"
+                            Visibility="Collapsed"
+                            Width="46"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Stretch"
+                            Background="#B3FFFFFF"
+                            PointerEntered="StorySidePanel_PointerEntered"
+                            PointerExited="StorySidePanel_PointerExited">
+                            <Grid>
+                                <TextBlock
+                                    x:Name="StorySidePanelArrowLegacy"
+                                    Text="‹"
+                                    FontSize="32"
+                                    Foreground="#202020"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    Margin="10,0,0,0" />
+                                <StackPanel
+                                    x:Name="StorySidePanelContentLegacy"
+                                    Margin="46,24,18,24"
+                                    Spacing="14"
+                                    Opacity="0">
+                                    <TextBlock Text="章节工具栏" Foreground="#202020" FontSize="18" FontWeight="SemiBold" />
+                                    <Button Content="更换背景图" Click="ChangeStoryBackgroundButton_Click" />
+                                    <Button Content="更换BGM" Click="ChangeStoryBgmButton_Click" />
+                                    <Button Content="更换环境音" Click="ChangeStorySceneButton_Click" />
+                                    <Button Content="填写函数" Click="ChooseStoryFunctionButton_Click" />
+                                    <Button Content="清空函数" Click="ClearStoryFunctionButton_Click" />
+                                    <Button Content="生成小节CSV" Click="ExportStorySectionsButton_Click" />
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示完整立绘" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowFullCharacterArtCheckBoxLegacy" Grid.Column="1" Checked="StoryCharacterDisplayCheckBox_Changed" Unchecked="StoryCharacterDisplayCheckBox_Changed" />
+                                    </Grid>
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示4号位" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowCharacterSlot4CheckBoxLegacy" Grid.Column="1" IsChecked="True" Checked="StorySlotVisibilityCheckBox_Changed" Unchecked="StorySlotVisibilityCheckBox_Changed" />
+                                    </Grid>
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示5号位" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowCharacterSlot5CheckBoxLegacy" Grid.Column="1" IsChecked="True" Checked="StorySlotVisibilityCheckBox_Changed" Unchecked="StorySlotVisibilityCheckBox_Changed" />
+                                    </Grid>
+                                    <TextBlock x:Name="StoryAssetStatusTextLegacy" Foreground="#555555" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <Border
+                        Grid.Row="2"
+                        Margin="0,-170,0,0"
+                        MinHeight="170"
+                        Background="#B3FFFFFF"
+                        BorderBrush="#66FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="6">
+                        <Grid Padding="18" ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="220" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="8">
+                                <TextBox
+                                    x:Name="StorySpeakerTextBox"
+                                    Header="当前说话人"
+                                    TextChanged="StorySpeakerTextBox_TextChanged" />
+                                <Border
+                                    x:Name="StorySpeakerPreviewSlot"
+                                    Width="190"
+                                    Height="124"
+                                    Background="#22FFFFFF"
+                                    BorderBrush="#66FFFFFF"
+                                    BorderThickness="1"
+                                    CornerRadius="6">
+                                    <TextBlock
+                                        Text="说话人立绘"
+                                        Foreground="#555555"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                            </StackPanel>
+                            <TextBox
+                                x:Name="StoryTextTextBox"
+                                Grid.Column="1"
+                                Header="剧情文本"
+                                AcceptsReturn="True"
+                                TextWrapping="Wrap"
+                                FontSize="20"
+                                MinHeight="118"
+                                TextChanged="StoryTextTextBox_TextChanged" />
+                            <StackPanel Grid.Column="2" Spacing="10" VerticalAlignment="Bottom">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                                    <TextBlock Text="第" Foreground="#202020" FontSize="20" VerticalAlignment="Center" />
+                                    <TextBox
+                                        x:Name="StoryRowIndexTextBox"
+                                        Width="72"
+                                        MinHeight="34"
+                                        FontSize="18"
+                                        TextAlignment="Center"
+                                        InputScope="Number"
+                                        KeyDown="StoryRowIndexTextBox_KeyDown"
+                                        LostFocus="StoryRowIndexTextBox_LostFocus" />
+                                    <TextBlock
+                                        x:Name="StoryRowTotalText"
+                                        Foreground="#202020"
+                                        FontSize="20"
+                                        VerticalAlignment="Center" />
+                                </StackPanel>
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="小节" VerticalAlignment="Center" />
+                                    <ComboBox
+                                        x:Name="StorySectionComboBox"
+                                        Grid.Column="1"
+                                        MinWidth="120"
+                                        SelectionChanged="StorySectionComboBox_SelectionChanged" />
+                                    <Button
+                                        Grid.Column="2"
+                                        Width="34"
+                                        Height="32"
+                                        Padding="0"
+                                        Content="+"
+                                        Click="AddStorySectionButton_Click" />
+                                </Grid>
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="上一句" Click="PreviousStoryRowButton_Click" />
+                                    <Button x:Name="InsertStoryRowHereButton" Grid.Column="1" Content="原地新建" Click="InsertStoryRowHereButton_Click" />
+                                    <Button Grid.Column="2" Content="下一句" Click="NextStoryRowButton_Click" />
+                                </Grid>
+                                <Button Content="删除此句" Click="DeleteStoryRowButton_Click" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <Border
+                        x:Name="StorySidePanelLegacy2"
+                        Visibility="Collapsed"
+                        Grid.Row="1"
+                        Grid.RowSpan="2"
+                        Canvas.ZIndex="30"
+                        Width="46"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Stretch"
+                        Background="#B3FFFFFF"
+                        PointerEntered="StorySidePanel_PointerEntered"
+                        PointerExited="StorySidePanel_PointerExited">
+                        <Grid>
+                            <TextBlock
+                                x:Name="StorySidePanelArrowLegacy2"
+                                Text="‹"
+                                FontSize="32"
+                                Foreground="#202020"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Margin="10,0,0,0" />
+                            <ScrollViewer
+                                x:Name="StorySidePanelContentLegacy2"
+                                Margin="58,24,18,24"
+                                Opacity="0"
+                                HorizontalScrollBarVisibility="Disabled"
+                                VerticalScrollBarVisibility="Auto">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="章节工具栏" Foreground="#202020" FontSize="18" FontWeight="SemiBold" />
+                                    <Button Content="更换背景图" Height="36" HorizontalAlignment="Stretch" Click="ChangeStoryBackgroundButton_Click" />
+                                    <Button Content="更换BGM" Height="36" HorizontalAlignment="Stretch" Click="ChangeStoryBgmButton_Click" />
+                                    <Button Content="更换环境音" Height="36" HorizontalAlignment="Stretch" Click="ChangeStorySceneButton_Click" />
+                                    <Button Content="填写函数" Height="36" HorizontalAlignment="Stretch" Click="ChooseStoryFunctionButton_Click" />
+                                    <Button Content="清空函数" Height="36" HorizontalAlignment="Stretch" Click="ClearStoryFunctionButton_Click" />
+                                    <Button Content="生成小节CSV" Height="36" HorizontalAlignment="Stretch" Click="ExportStorySectionsButton_Click" />
+                                    <Grid Height="40" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示完整立绘" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowFullCharacterArtCheckBoxLegacy2" Grid.Column="1" VerticalAlignment="Center" Checked="StoryCharacterDisplayCheckBox_Changed" Unchecked="StoryCharacterDisplayCheckBox_Changed" />
+                                    </Grid>
+                                    <Grid Height="40" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示4号位" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowCharacterSlot4CheckBoxLegacy2" Grid.Column="1" VerticalAlignment="Center" Checked="StorySlotVisibilityCheckBox_Changed" Unchecked="StorySlotVisibilityCheckBox_Changed" />
+                                    </Grid>
+                                    <Grid Height="40" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示5号位" Foreground="#202020" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowCharacterSlot5CheckBoxLegacy2" Grid.Column="1" VerticalAlignment="Center" Checked="StorySlotVisibilityCheckBox_Changed" Unchecked="StorySlotVisibilityCheckBox_Changed" />
+                                    </Grid>
+                                    <TextBlock x:Name="StoryAssetStatusTextLegacy2" Foreground="#555555" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+                        </Grid>
+                    </Grid>
+	                    <StackPanel
+	                        x:Name="StoryFunctionTipsPanel"
+                        Grid.Row="0"
+                        Grid.RowSpan="3"
+                        MaxWidth="520"
+                        Spacing="6"
+                        Margin="0,10,22,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+	                        Canvas.ZIndex="90" />
+	                    <StackPanel
+	                        x:Name="StoryFloatingTipsPanel"
+	                        Grid.Row="0"
+	                        Grid.RowSpan="3"
+	                        MaxWidth="520"
+	                        Spacing="6"
+	                        Margin="0,10,22,0"
+	                        HorizontalAlignment="Right"
+	                        VerticalAlignment="Top"
+	                        Canvas.ZIndex="91" />
+	                </Grid>
+
+                <Grid x:Name="AssetLibraryPage" Visibility="Collapsed" RowSpacing="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="素材库" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="素材库先于项目存在。项目创建时必须选择一个素材库，之后故事正文会从这里读取背景图、立绘合集和音乐索引。" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
+                        <Button
+                            Grid.Column="1"
+                            Width="40"
+                            Height="40"
+                            Padding="0"
+                            VerticalAlignment="Center"
+                            Click="ShowCreateAssetLibraryPageButton_Click"
+                            ToolTipService.ToolTip="创建素材库">
+                            <SymbolIcon Symbol="Add" />
+                        </Button>
+                    </Grid>
+
+                    <ScrollViewer
+                        x:Name="AssetLibrariesScrollViewer"
+                        Grid.Row="1"
+                        VerticalScrollBarVisibility="Auto">
+                        <GridView
+                            x:Name="AssetLibrariesGridView"
+                            SelectionMode="None" />
+                    </ScrollViewer>
+
+                    <Border x:Name="AssetLibraryStatusBorder" Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
+                        <Grid Padding="14,10" ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="AssetLibraryStatusText" VerticalAlignment="Center" Style="{StaticResource SubtleTextStyle}" />
+                            <Button Grid.Column="1" Content="刷新素材库" Click="RefreshAssetLibrariesButton_Click" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <Grid x:Name="CreateProjectPage" Visibility="Collapsed" RowSpacing="18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Click="CancelCreateProjectButton_Click"
+                            ToolTipService.ToolTip="返回项目工作台">
+                            <SymbolIcon Symbol="Back" />
+                        </Button>
+                        <StackPanel Grid.Column="1" Spacing="6">
+                            <TextBlock Text="创建项目" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="项目必须选择一个素材库。项目缩略图和项目元数据会单独保存，不会写入素材库。" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Grid.Row="1" MaxWidth="760" HorizontalAlignment="Left" Style="{StaticResource PanelBorderStyle}">
+                        <StackPanel Padding="22" Spacing="18">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="项目缩略图" Style="{StaticResource SectionTitleStyle}" />
+                                <Button
+                                    Width="260"
+                                    Height="180"
+                                    Padding="0"
+                                    HorizontalAlignment="Left"
+                                    Click="ChooseProjectThumbnailButton_Click"
+                                    ToolTipService.ToolTip="选择自定义项目缩略图">
+                                    <Grid>
+                                        <Border Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="6" />
+                                        <Image x:Name="CreateProjectThumbnailImage" Stretch="Uniform" Visibility="Collapsed" />
+                                        <Image x:Name="CreateProjectDefaultThumbnail" Source="ms-appx:///Assets/DefaultProjectThumbnail.png" Stretch="Uniform" />
+                                    </Grid>
+                                </Button>
+                            </StackPanel>
+
+                            <TextBox
+                                x:Name="CreateProjectNameTextBox"
+                                Header="项目名称"
+                                MaxWidth="420"
+                                PlaceholderText="例如：星海序章" />
+
+                            <TextBox
+                                x:Name="CreateProjectCodeTextBox"
+                                Header="项目英文代号"
+                                MaxWidth="420"
+                                PlaceholderText="例如：StarPrologue" />
+
+                            <ComboBox
+                                x:Name="ProjectAssetLibraryComboBox"
+                                Header="素材库"
+                                MaxWidth="420"
+                                PlaceholderText="选择项目使用的素材库" />
+
+                            <InfoBar
+                                x:Name="CreateProjectInfoBar"
+                                IsOpen="False"
+                                Severity="Error" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
+                        <Grid Padding="14,10" ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="创建后会生成项目文件夹、Tools、Excel，并记录关联素材库。" VerticalAlignment="Center" Style="{StaticResource SubtleTextStyle}" />
+                            <Button Grid.Column="1" Content="取消" Click="CancelCreateProjectButton_Click" />
+                            <Button Grid.Column="2" Content="确定" Click="CreateProjectButton_Click" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <Grid x:Name="AssetLibraryDetailPage" Visibility="Collapsed" RowSpacing="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Click="BackToAssetLibraryPageButton_Click"
+                            ToolTipService.ToolTip="返回素材库">
+                            <SymbolIcon Symbol="Back" />
+                        </Button>
+                        <StackPanel Grid.Column="1" Spacing="6">
+                            <TextBlock x:Name="AssetLibraryDetailTitleText" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="分类会和素材库文件夹保持同步。当前先实现背景图导入和展示，后续分类会沿用同一套结构。" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <ScrollViewer
+                        x:Name="AssetLibraryDetailScrollViewer"
+                        Grid.Row="1"
+                        VerticalScrollBarVisibility="Auto"
+                        PointerWheelChanged="AssetLibraryDetailScrollViewer_PointerWheelChanged">
+                        <StackPanel Spacing="10">
+                            <Expander x:Name="BackgroundImagesExpander" Header="背景图" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel
+                                    x:Name="BackgroundImagesDropZone"
+                                    Spacing="12"
+                                    AllowDrop="True"
+                                    Background="Transparent"
+                                    HorizontalAlignment="Stretch"
+                                    DragEnter="BackgroundImagesDropZone_DragEnter"
+                                    DragOver="BackgroundImagesDropZone_DragOver"
+                                    Drop="BackgroundImagesDropZone_Drop">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="背景图文件夹中的图片会显示在这里。导入时会复制到当前素材库的“背景图”文件夹。" Style="{StaticResource SubtleTextStyle}" />
+                                        <Button Grid.Column="1" Content="导入背景图" Click="AddBackgroundImagesButton_Click" />
+                                    </Grid>
+                                    <GridView
+                                        x:Name="BackgroundImagesGridView"
+                                        AllowDrop="True"
+                                        CanDragItems="True"
+                                        CanReorderItems="True"
+                                        ReorderMode="Enabled"
+                                        DragItemsStarting="BackgroundImagesGridView_DragItemsStarting"
+                                        DragOver="BackgroundImagesGridView_DragOver"
+                                        DragItemsCompleted="BackgroundImagesGridView_DragItemsCompleted"
+                                        HorizontalAlignment="Stretch"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+
+                            <Expander x:Name="CharactersExpander" Header="立绘" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel
+                                    x:Name="CharacterDropZone"
+                                    Spacing="12"
+                                    AllowDrop="True"
+                                    Background="Transparent"
+                                    HorizontalAlignment="Stretch"
+                                    DragEnter="CharacterDropZone_DragEnter"
+                                    DragOver="CharacterDropZone_DragOver"
+                                    Drop="CharacterDropZone_Drop">
+                                    <TextBlock Text="角色卡固定按名字管理，不支持拖动排序。后续会支持拖入角色压缩包识别角色卡。" Style="{StaticResource SubtleTextStyle}" />
+                                    <GridView
+                                        x:Name="CharacterGridView"
+                                        Padding="14,8,24,16"
+                                        HorizontalAlignment="Stretch"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+                            <Expander x:Name="MusicExpander" Header="音乐" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel
+                                    x:Name="MusicDropZone"
+                                    Spacing="12"
+                                    AllowDrop="True"
+                                    Background="Transparent"
+                                    HorizontalAlignment="Stretch"
+                                    DragEnter="MusicDropZone_DragEnter"
+                                    DragOver="MusicDropZone_DragOver"
+                                    Drop="MusicDropZone_Drop">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="音乐文件夹只收录 wav。导入时会追加到当前顺序的末尾。" Style="{StaticResource SubtleTextStyle}" />
+                                        <Button Grid.Column="1" Content="导入音乐" Click="AddMusicButton_Click" />
+                                    </Grid>
+                                    <GridView
+                                        x:Name="MusicGridView"
+                                        AllowDrop="True"
+                                        CanDragItems="True"
+                                        CanReorderItems="True"
+                                        ReorderMode="Enabled"
+                                        DragItemsStarting="MusicGridView_DragItemsStarting"
+                                        DragOver="MusicGridView_DragOver"
+                                        DragItemsCompleted="MusicGridView_DragItemsCompleted"
+                                        MaxWidth="870"
+                                        HorizontalAlignment="Left"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+                            <Expander x:Name="AmbientSoundExpander" Header="环境音" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel
+                                    x:Name="AmbientSoundDropZone"
+                                    Spacing="12"
+                                    AllowDrop="True"
+                                    Background="Transparent"
+                                    HorizontalAlignment="Stretch"
+                                    DragEnter="AmbientSoundDropZone_DragEnter"
+                                    DragOver="AmbientSoundDropZone_DragOver"
+                                    Drop="AmbientSoundDropZone_Drop">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="环境音文件夹只收录 wav。命名为 Sc00_备注，并连接剧情表 Scene 列。" Style="{StaticResource SubtleTextStyle}" />
+                                        <Button Grid.Column="1" Content="导入环境音" Click="AddAmbientSoundButton_Click" />
+                                    </Grid>
+                                    <GridView
+                                        x:Name="AmbientSoundGridView"
+                                        AllowDrop="True"
+                                        CanDragItems="True"
+                                        CanReorderItems="True"
+                                        ReorderMode="Enabled"
+                                        DragItemsStarting="AmbientSoundGridView_DragItemsStarting"
+                                        DragOver="AmbientSoundGridView_DragOver"
+                                        DragItemsCompleted="AmbientSoundGridView_DragItemsCompleted"
+                                        MaxWidth="870"
+                                        HorizontalAlignment="Left"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+                            <Expander x:Name="SoundEffectExpander" Header="特殊音效" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel
+                                    x:Name="SoundEffectDropZone"
+                                    Spacing="12"
+                                    AllowDrop="True"
+                                    Background="Transparent"
+                                    HorizontalAlignment="Stretch"
+                                    DragEnter="SoundEffectDropZone_DragEnter"
+                                    DragOver="SoundEffectDropZone_DragOver"
+                                    Drop="SoundEffectDropZone_Drop">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="特殊音效文件夹只收录 wav。命名为 SE00_备注，剧情列后续接入。" Style="{StaticResource SubtleTextStyle}" />
+                                        <Button Grid.Column="1" Content="导入特殊音效" Click="AddSoundEffectButton_Click" />
+                                    </Grid>
+                                    <GridView
+                                        x:Name="SoundEffectGridView"
+                                        AllowDrop="True"
+                                        CanDragItems="True"
+                                        CanReorderItems="True"
+                                        ReorderMode="Enabled"
+                                        DragItemsStarting="SoundEffectGridView_DragItemsStarting"
+                                        DragOver="SoundEffectGridView_DragOver"
+                                        DragItemsCompleted="SoundEffectGridView_DragItemsCompleted"
+                                        MaxWidth="870"
+                                        HorizontalAlignment="Left"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+                            <Expander x:Name="FunctionExpander" Header="函数" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel Spacing="12">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="函数本质是写入剧情表 Custom 列的 FString，用作虚幻事件触发指示器。函数卡不参与排序。" Style="{StaticResource SubtleTextStyle}" />
+                                        <Button Grid.Column="1" Content="新建函数" Click="AddFunctionButton_Click" />
+                                    </Grid>
+                                    <GridView
+                                        x:Name="FunctionGridView"
+                                        MaxWidth="870"
+                                        HorizontalAlignment="Left"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+                            <Expander x:Name="CharacterFilterExpander" Header="角色滤镜" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="角色滤镜只作为 VFX 索引，不关联文件。VFX00 固定为空；拖动卡片可调整其他滤镜顺序。" Style="{StaticResource SubtleTextStyle}" />
+                                    <GridView
+                                        x:Name="CharacterFilterGridView"
+                                        Padding="22,14,22,18"
+                                        AllowDrop="True"
+                                        CanDragItems="True"
+                                        CanReorderItems="True"
+                                        ReorderMode="Enabled"
+                                        DragItemsStarting="CharacterFilterGridView_DragItemsStarting"
+                                        DragOver="CharacterFilterGridView_DragOver"
+                                        DragItemsCompleted="CharacterFilterGridView_DragItemsCompleted"
+                                        MaxWidth="870"
+                                        HorizontalAlignment="Left"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <Border x:Name="AssetLibraryDetailStatusBorder" Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
+                        <TextBlock x:Name="AssetLibraryDetailStatusText" Padding="14,10" Style="{StaticResource SubtleTextStyle}" />
+                    </Border>
+                </Grid>
+
+                <Grid
+                    x:Name="CharacterDetailPage"
+                    Visibility="Collapsed"
+                    RowSpacing="14">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            x:Name="CharacterDetailCloseButton"
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Click="CloseCharacterDetailButton_Click"
+                            ToolTipService.ToolTip="返回素材库">
+                            <SymbolIcon Symbol="Back" />
+                        </Button>
+                        <ScrollViewer
+                            Grid.Column="1"
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Auto"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Border
+                                    Padding="14,8"
+                                    CornerRadius="6"
+                                    BorderThickness="1"
+                                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                    Background="{ThemeResource AccentFillColorSecondaryBrush}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="角色立绘" />
+                                        <TextBlock x:Name="CharacterDetailTabTitleText" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                        <InfoBar
+                            x:Name="CharacterDetailInfoBar"
+                            Grid.Column="2"
+                            MinWidth="320"
+                            IsOpen="False"
+                            IsClosable="True" />
+                    </Grid>
+
+                    <ScrollViewer
+                        x:Name="CharacterDetailScrollViewer"
+                        Grid.Row="1"
+                        VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="10">
+                            <Border Style="{StaticResource PanelBorderStyle}">
+                                <Grid Padding="20">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="分层预览：DN_Cloth → FC_Face → AD_Adorn → VFX" Style="{StaticResource SubtleTextStyle}" />
+                                    <Grid Grid.Row="1" Margin="0,18,0,0" MinHeight="600" Background="Transparent">
+                                        <Border
+                                            x:Name="CharacterPreviewSurface"
+                                            Width="660"
+                                            Height="560"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            IsTabStop="True"
+                                            PointerEntered="CharacterPreviewSurface_PointerEntered"
+                                            PointerExited="CharacterPreviewSurface_PointerExited"
+                                            RightTapped="CharacterPreviewSurface_RightTapped"
+                                            KeyDown="CharacterPreviewSurface_KeyDown"
+                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Background="{ThemeResource LayerFillColorDefaultBrush}">
+                                            <Grid>
+                                                <TextBlock x:Name="CharacterPreviewEmptyText" Text="选择下方图层后在这里叠加预览" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <Image x:Name="CharacterPreviewClothImage" Stretch="Uniform" />
+                                                <Image x:Name="CharacterPreviewFaceImage" Stretch="Uniform" />
+                                                <Image x:Name="CharacterPreviewAdornImage" Stretch="Uniform" />
+                                                <Image x:Name="CharacterPreviewVfxImage" Stretch="Uniform" />
+                                            </Grid>
+                                        </Border>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Expander x:Name="CharacterClothExpander" Header="服装 DN_Cloth" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel
+                                    x:Name="CharacterClothDropZone"
+                                    Spacing="8"
+                                    AllowDrop="True"
+                                    Background="Transparent"
+                                    DragEnter="CharacterClothDropZone_DragEnter"
+                                    DragOver="CharacterClothDropZone_DragOver"
+                                    Drop="CharacterClothDropZone_Drop">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="服装是最底层。表情和装饰需要声明适用的服装范围，例如 DN00-02。" Style="{StaticResource SubtleTextStyle}" />
+                                        <Button Grid.Column="1" Content="导入服装" Click="AddCharacterClothesButton_Click" />
+                                    </Grid>
+                                    <GridView
+                                        x:Name="CharacterClothGridView"
+                                        AllowDrop="True"
+                                        CanDragItems="True"
+                                        CanReorderItems="True"
+                                        IsItemClickEnabled="True"
+                                        ReorderMode="Enabled"
+                                        DragItemsStarting="CharacterClothGridView_DragItemsStarting"
+                                        DragOver="CharacterClothGridView_DragOver"
+                                        DragItemsCompleted="CharacterClothGridView_DragItemsCompleted"
+                                        ItemClick="CharacterLayerGridView_ItemClick"
+                                        Padding="14,8,24,16"
+                                        HorizontalAlignment="Stretch"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+                            <Expander x:Name="CharacterFaceExpander" Header="表情 FC_Face" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel
+                                    x:Name="CharacterFaceDropZone"
+                                    Spacing="8"
+                                    AllowDrop="True"
+                                    Background="Transparent"
+                                    DragEnter="CharacterFaceDropZone_DragEnter"
+                                    DragOver="CharacterFaceDropZone_DragOver"
+                                    Drop="CharacterFaceDropZone_Drop">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="表情命名为 FC00_备注；适用服装范围写入元数据，不再塞进文件名。" Style="{StaticResource SubtleTextStyle}" />
+                                        <Button Grid.Column="1" Content="导入表情" Click="AddCharacterFacesButton_Click" />
+                                    </Grid>
+                                    <GridView
+                                        x:Name="CharacterFaceGridView"
+                                        AllowDrop="True"
+                                        CanDragItems="True"
+                                        CanReorderItems="True"
+                                        IsItemClickEnabled="True"
+                                        ReorderMode="Enabled"
+                                        DragItemsStarting="CharacterFaceGridView_DragItemsStarting"
+                                        DragOver="CharacterFaceGridView_DragOver"
+                                        DragItemsCompleted="CharacterFaceGridView_DragItemsCompleted"
+                                        ItemClick="CharacterLayerGridView_ItemClick"
+                                        Padding="14,8,24,16"
+                                        HorizontalAlignment="Stretch"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+                            <Expander x:Name="CharacterAdornExpander" Header="装饰 AD_Adorn" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel
+                                    x:Name="CharacterAdornDropZone"
+                                    Spacing="8"
+                                    AllowDrop="True"
+                                    Background="Transparent"
+                                    DragEnter="CharacterAdornDropZone_DragEnter"
+                                    DragOver="CharacterAdornDropZone_DragOver"
+                                    Drop="CharacterAdornDropZone_Drop">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="装饰命名为 AD00_备注；适用服装范围写入元数据，不再塞进文件名。" Style="{StaticResource SubtleTextStyle}" />
+                                        <Button Grid.Column="1" Content="导入装饰" Click="AddCharacterAdornsButton_Click" />
+                                    </Grid>
+                                    <GridView
+                                        x:Name="CharacterAdornGridView"
+                                        AllowDrop="True"
+                                        CanDragItems="True"
+                                        CanReorderItems="True"
+                                        IsItemClickEnabled="True"
+                                        ReorderMode="Enabled"
+                                        DragItemsStarting="CharacterAdornGridView_DragItemsStarting"
+                                        DragOver="CharacterAdornGridView_DragOver"
+                                        DragItemsCompleted="CharacterAdornGridView_DragItemsCompleted"
+                                        ItemClick="CharacterLayerGridView_ItemClick"
+                                        Padding="14,8,24,16"
+                                        HorizontalAlignment="Stretch"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+                            <Expander x:Name="CharacterVfxExpander" Header="VFX 滤镜" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="滤镜默认全服装可用。这里作为索引显示，不打开详情页。" Style="{StaticResource SubtleTextStyle}" />
+                                    <GridView x:Name="CharacterVfxGridView" Padding="14,8,24,16" HorizontalAlignment="Stretch" SelectionMode="None" />
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
+                        <ScrollViewer
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Auto"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                            <StackPanel Padding="12" Orientation="Horizontal" Spacing="14">
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock Text="名称" VerticalAlignment="Center" />
+                                    <TextBox x:Name="CharacterNameTextBox" Width="150" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock Text="英文代号" VerticalAlignment="Center" />
+                                    <TextBox x:Name="CharacterCodeTextBox" Width="150" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock Text="代表色" VerticalAlignment="Center" />
+                                    <TextBox x:Name="CharacterColorTextBox" Width="110" PlaceholderText="#RRGGBB" />
+                                </StackPanel>
+                                <Button Content="保存设置" Click="SaveCharacterInlineSettingsButton_Click" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+
+                <Grid
+                    x:Name="BackgroundImageViewerPage"
+                    Visibility="Collapsed"
+                    RowSpacing="14"
+                    KeyDown="BackgroundImageViewerPage_KeyDown">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            x:Name="BackgroundImageViewerCloseButton"
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Click="CloseBackgroundImageViewerButton_Click"
+                            ToolTipService.ToolTip="退出图片查看">
+                            <SymbolIcon Symbol="Back" />
+                        </Button>
+                        <ScrollViewer
+                            Grid.Column="1"
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Auto"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Border
+                                    Padding="14,8"
+                                    CornerRadius="6"
+                                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    Background="{ThemeResource AccentFillColorSecondaryBrush}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="图片查看" />
+                                        <TextBlock x:Name="BackgroundImageViewerTabTitleText" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <Border Grid.Row="1" Style="{StaticResource PanelBorderStyle}">
+                        <Grid
+                            x:Name="BackgroundImageViewerCanvas"
+                            Background="Transparent"
+                            DoubleTapped="BackgroundImageViewerCanvas_DoubleTapped"
+                            PointerWheelChanged="BackgroundImageViewerCanvas_PointerWheelChanged"
+                            PointerPressed="BackgroundImageViewerCanvas_PointerPressed"
+                            PointerMoved="BackgroundImageViewerCanvas_PointerMoved"
+                            PointerReleased="BackgroundImageViewerCanvas_PointerReleased"
+                            PointerCanceled="BackgroundImageViewerCanvas_PointerCanceled"
+                            PointerCaptureLost="BackgroundImageViewerCanvas_PointerCaptureLost">
+                            <Image
+                                x:Name="BackgroundImageViewerImage"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Stretch="Uniform"
+                                RenderTransformOrigin="0.5,0.5">
+                                <Image.RenderTransform>
+                                    <CompositeTransform x:Name="BackgroundImageViewerTransform" />
+                                </Image.RenderTransform>
+                            </Image>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
+                        <ScrollViewer
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Auto"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                            <StackPanel Padding="12" Orientation="Horizontal" Spacing="10">
+                                <Button Content="设置备注" Click="BackgroundImageViewerRemarkButton_Click" />
+                                <Button Content="删除" Click="BackgroundImageViewerDeleteButton_Click" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+
+                <Grid
+                    x:Name="MusicPlayerPage"
+                    Visibility="Collapsed"
+                    RowSpacing="14"
+                    KeyDown="MusicPlayerPage_KeyDown">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            x:Name="MusicPlayerCloseButton"
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Click="CloseMusicPlayerButton_Click"
+                            ToolTipService.ToolTip="退出音乐查看">
+                            <SymbolIcon Symbol="Back" />
+                        </Button>
+                        <ScrollViewer
+                            Grid.Column="1"
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Auto"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Border
+                                    Padding="14,8"
+                                    CornerRadius="6"
+                                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    Background="{ThemeResource AccentFillColorSecondaryBrush}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="音乐播放" />
+                                        <TextBlock x:Name="MusicPlayerTabTitleText" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <Border Grid.Row="1" Style="{StaticResource PanelBorderStyle}">
+                        <Grid Padding="24">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+                                <SymbolIcon Symbol="Audio" />
+                                <TextBlock x:Name="MusicPlayerTrackTitleText" FontSize="24" FontWeight="SemiBold" TextAlignment="Center" />
+                            </StackPanel>
+                            <MediaPlayerElement
+                                x:Name="MusicPlayerElement"
+                                Width="0"
+                                Height="0"
+                                AutoPlay="False"
+                                AreTransportControlsEnabled="False" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
+                        <ScrollViewer
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Auto"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                            <StackPanel Padding="12" Orientation="Horizontal" Spacing="10">
+                                <Button Content="上一曲" Click="PreviousMusicButton_Click" />
+                                <Button x:Name="MusicPlayPauseButton" Content="播放" Click="MusicPlayPauseButton_Click" />
+                                <Button Content="下一曲" Click="NextMusicButton_Click" />
+                                <Button Content="设置备注" Click="MusicPlayerRemarkButton_Click" />
+                                <Button Content="删除" Click="MusicPlayerDeleteButton_Click" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+
+                <Grid x:Name="CreateAssetLibraryPage" Visibility="Collapsed" RowSpacing="18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Click="CancelCreateAssetLibraryButton_Click"
+                            ToolTipService.ToolTip="返回素材库">
+                            <SymbolIcon Symbol="Back" />
+                        </Button>
+                        <StackPanel Grid.Column="1" Spacing="6">
+                            <TextBlock Text="创建素材库" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="素材库用于集中管理背景图、立绘合集和音乐，项目会引用这里的素材索引。" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Grid.Row="1" MaxWidth="760" HorizontalAlignment="Left" Style="{StaticResource PanelBorderStyle}">
+                        <StackPanel Padding="22" Spacing="18">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="素材库缩略图" Style="{StaticResource SectionTitleStyle}" />
+                                <Button
+                                    Width="260"
+                                    Height="180"
+                                    Padding="0"
+                                    HorizontalAlignment="Left"
+                                    Click="ChooseAssetLibraryThumbnailButton_Click"
+                                    ToolTipService.ToolTip="选择自定义素材库缩略图">
+                                    <Grid>
+                                        <Border Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="6" />
+                                        <Image x:Name="CreateAssetLibraryThumbnailImage" Stretch="Uniform" Visibility="Collapsed" />
+                                        <Image x:Name="CreateAssetLibraryDefaultThumbnail" Source="ms-appx:///Assets/DefaultProjectThumbnail.png" Stretch="Uniform" />
+                                    </Grid>
+                                </Button>
+                            </StackPanel>
+
+                            <TextBox
+                                x:Name="CreateAssetLibraryNameTextBox"
+                                Header="素材库名称"
+                                MaxWidth="420"
+                                PlaceholderText="例如：星海序章素材合集" />
+
+                            <InfoBar
+                                x:Name="CreateAssetLibraryInfoBar"
+                                IsOpen="False"
+                                Severity="Error" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
+                        <Grid Padding="14,10" ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="创建后会生成：Tools、Excel、背景图、立绘合集、音乐。" VerticalAlignment="Center" Style="{StaticResource SubtleTextStyle}" />
+                            <Button Grid.Column="1" Content="取消" Click="CancelCreateAssetLibraryButton_Click" />
+                            <Button Grid.Column="2" Content="确定" Click="CreateAssetLibraryButton_Click" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <ScrollViewer
+                    x:Name="UnrealSyncPage"
+                    Visibility="Collapsed"
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled">
+                    <Grid Padding="0,0,12,0" RowSpacing="14">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="虚幻同步台" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="把工作台项目和素材库同步到指定 Unreal 项目的内容目录。同步会手动触发，避免编辑时频繁导入造成卡顿。" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
+
+                        <Border Grid.Row="1" Style="{StaticResource PanelBorderStyle}">
+                            <StackPanel Padding="18" Spacing="12">
+                                <TextBlock Text="选择工作台项目" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock Text="选择项目后，下方虚幻引擎、虚幻项目和目标内容文件夹会自动读取这个项目保存的关联。" Style="{StaticResource SubtleTextStyle}" />
+                                <GridView
+                                    x:Name="UnrealSyncProjectCardsGridView"
+                                    SelectionMode="None" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
+                            <Grid Padding="18" RowSpacing="14">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="关联设置" Style="{StaticResource SectionTitleStyle}" />
+
+                                <Grid Grid.Row="1" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox
+                                        x:Name="UnrealEnginePathTextBox"
+                                        Header="虚幻引擎"
+                                        IsReadOnly="True"
+                                        PlaceholderText="选择 UnrealEditor.exe 或 UnrealEditor-Cmd.exe" />
+                                    <Button
+                                        Grid.Column="1"
+                                        Margin="0,28,0,0"
+                                        Content="选择引擎"
+                                        Click="ChooseUnrealEngineButton_Click" />
+                                </Grid>
+
+                                <Grid Grid.Row="2" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox
+                                        x:Name="UnrealProjectPathTextBox"
+                                        Header="虚幻项目"
+                                        IsReadOnly="True"
+                                        PlaceholderText="选择 .uproject 文件" />
+                                    <Button
+                                        Grid.Column="1"
+                                        Margin="0,28,0,0"
+                                        Content="选择项目"
+                                        Click="ChooseUnrealProjectButton_Click" />
+                                </Grid>
+
+                                <Grid Grid.Row="3" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox
+                                        x:Name="UnrealSyncProjectComboBox"
+                                        Header="工作台项目"
+                                        PlaceholderText="选择要同步的工作台项目"
+                                        Visibility="Collapsed"
+                                        SelectionChanged="UnrealSyncProjectComboBox_SelectionChanged" />
+                                    <TextBox
+                                        x:Name="UnrealContentFolderTextBox"
+                                        Header="目标内容文件夹"
+                                        IsReadOnly="True"
+                                        PlaceholderText="选择 Content 下的目录，例如 AssetMaterial\\Narrative" />
+                                    <Button
+                                        Grid.Column="1"
+                                        Margin="0,28,0,0"
+                                        Content="关联文件夹"
+                                        Click="ChooseUnrealContentFolderButton_Click" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Row="3" Style="{StaticResource PanelBorderStyle}">
+                            <Grid Padding="18" RowSpacing="12">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="同步预检" Style="{StaticResource SectionTitleStyle}" />
+                                    <Button Grid.Column="1" Content="重新检测" Click="CheckUnrealSyncButton_Click" />
+                                    <Button Grid.Column="2" Content="全部重新同步" Click="RunFullUnrealSyncButton_Click" />
+                                </Grid>
+
+                                <Button
+                                    x:Name="RunUnrealSyncButton"
+                                    Grid.Row="1"
+                                    Height="56"
+                                    HorizontalAlignment="Stretch"
+                                    FontSize="18"
+                                    FontWeight="SemiBold"
+                                    Content="确认同步到虚幻"
+                                    Click="RunUnrealSyncButton_Click" />
+
+                                <InfoBar
+                                    x:Name="UnrealSyncStatusInfoBar"
+                                    Grid.Row="2"
+                                    IsOpen="True"
+                                    IsClosable="False"
+                                    Severity="Informational"
+                                    Title="等待关联"
+                                    Message="请选择引擎、虚幻项目、工作台项目和目标内容文件夹。" />
+
+                                <StackPanel
+                                    x:Name="UnrealSyncProgressPanel"
+                                    Grid.Row="3"
+                                    Spacing="6"
+                                    Visibility="Collapsed">
+                                    <ProgressBar
+                                        x:Name="UnrealSyncProgressBar"
+                                        IsIndeterminate="True" />
+                                    <TextBlock x:Name="UnrealSyncProgressText" Style="{StaticResource SubtleTextStyle}" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="4" Spacing="8">
+                                    <TextBlock x:Name="UnrealSyncSummaryText" Style="{StaticResource SubtleTextStyle}" />
+                                    <ItemsControl x:Name="UnrealSyncPlanItemsControl" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Row="4" Style="{StaticResource PanelBorderStyle}">
+                            <StackPanel Padding="18" Spacing="8">
+                                <TextBlock Text="导入路线" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock Text="素材源文件不会直接变成 .uasset。同步按钮会生成导入清单和 Python 脚本，并调用 Unreal Editor 的自动导入接口，让引擎生成或更新 .uasset。" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="CSV 表格会作为同步清单的一部分送入 ExcelTexts 目录；后续如果要绑定具体 DataTable RowStruct，需要在 Unreal 侧补一段专用导入脚本或插件接口。" Style="{StaticResource SubtleTextStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </ScrollViewer>
+
+                <ScrollViewer
+                    x:Name="SettingsPage"
+                    Visibility="Collapsed"
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled">
+                    <Grid Padding="0" ColumnSpacing="18">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="320" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="整体设置" Style="{StaticResource PageTitleStyle}" />
+                        <TextBlock Text="这些设置影响所有项目。程序启动时会先检查整体项目位置，不存在则自动创建。" Style="{StaticResource SubtleTextStyle}" />
+                    </StackPanel>
+
+                    <Border Grid.Row="1" Margin="0,20,0,0" HorizontalAlignment="Stretch" Style="{StaticResource PanelBorderStyle}">
+                        <StackPanel Padding="18" Spacing="14">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="整体项目位置" Style="{StaticResource SectionTitleStyle}" />
+                                <Button
+                                    Width="28"
+                                    Height="28"
+                                    Padding="0"
+                                    VerticalAlignment="Center"
+                                    Click="ShowProjectRootHelpButton_Click"
+                                    ToolTipService.ToolTip="查看整体项目位置说明">
+                                    <SymbolIcon Symbol="Help" />
+                                </Button>
+                            </StackPanel>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox
+                                    x:Name="ProjectRootPathTextBox"
+                                    Header="文件目录"
+                                    IsReadOnly="True" />
+                                <Button
+                                    Grid.Column="1"
+                                    Margin="0,28,0,0"
+                                    Content="选择位置"
+                                    Click="ChooseProjectRootButton_Click"
+                                    ToolTipService.ToolTip="选择父目录，程序会自动在其中创建 GalExcelProject 文件夹。" />
+                            </Grid>
+                            <InfoBar
+                                x:Name="ProjectRootStatusInfoBar"
+                                IsOpen="True"
+                                Severity="Success"
+                                Title="目录已就绪" />
+                        </StackPanel>
+                    </Border>
+
+                    <Expander Grid.Row="2" Margin="0,14,0,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="True">
+                        <Expander.Header>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="辅助显示" Style="{StaticResource SectionTitleStyle}" />
+                                <Button
+                                    Width="28"
+                                    Height="28"
+                                    Padding="0"
+                                    VerticalAlignment="Center"
+                                    Click="ShowLogHelpButton_Click"
+                                    ToolTipService.ToolTip="查看辅助显示说明">
+                                    <SymbolIcon Symbol="Help" />
+                                </Button>
+                            </StackPanel>
+                        </Expander.Header>
+
+                        <StackPanel Padding="18" Spacing="0">
+                            <Grid MinHeight="44" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="显示工作区路径" VerticalAlignment="Center" />
+                                <CheckBox
+                                    x:Name="WorkspacePathVisibleCheckBox"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Checked="LogSettingControl_Changed"
+                                    Unchecked="LogSettingControl_Changed" />
+                            </Grid>
+                            <Grid MinHeight="44" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="开启 log 功能" VerticalAlignment="Center" />
+                                <CheckBox
+                                    x:Name="LogEnabledCheckBox"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Checked="LogSettingControl_Changed"
+                                    Unchecked="LogSettingControl_Changed" />
+                            </Grid>
+                            <Grid MinHeight="44" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="log 输出用户操作" VerticalAlignment="Center" />
+                                <CheckBox
+                                    x:Name="LogUserOperationsCheckBox"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Checked="LogSettingControl_Changed"
+                                    Unchecked="LogSettingControl_Changed" />
+                            </Grid>
+                            <Grid MinHeight="44" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="log 输出提示" VerticalAlignment="Center" />
+                                <CheckBox
+                                    x:Name="LogWarningCheckBox"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Checked="LogSettingControl_Changed"
+                                    Unchecked="LogSettingControl_Changed" />
+                            </Grid>
+                            <Grid MinHeight="44" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="log 输出错误提示" VerticalAlignment="Center" />
+                                <CheckBox
+                                    x:Name="LogErrorCheckBox"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Checked="LogSettingControl_Changed"
+                                    Unchecked="LogSettingControl_Changed" />
+                            </Grid>
+                        </StackPanel>
+                    </Expander>
+
+                    <Expander Grid.Row="3" Margin="0,14,0,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="True">
+                        <Expander.Header>
+                            <TextBlock Text="素材库显示" Style="{StaticResource SectionTitleStyle}" />
+                        </Expander.Header>
+
+                        <StackPanel Padding="18" Spacing="12">
+                            <TextBlock Text="整体页面滚动速度" />
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Slider
+                                    x:Name="AssetLibraryScrollSpeedSlider"
+                                    Minimum="0.5"
+                                    Maximum="3"
+                                    StepFrequency="0.1"
+                                    ValueChanged="AssetLibraryScrollSpeedSlider_ValueChanged" />
+                                <TextBlock
+                                    x:Name="AssetLibraryScrollSpeedValueText"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+                            <TextBlock Text="剧情文本字号" Margin="0,10,0,0" />
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Slider
+                                    x:Name="StoryTextFontSizeSlider"
+                                    Minimum="16"
+                                    Maximum="32"
+                                    StepFrequency="1"
+                                    ValueChanged="StoryTextFontSizeSlider_ValueChanged" />
+                                <TextBlock
+                                    x:Name="StoryTextFontSizeValueText"
+                                    Grid.Column="1"
+                                    MinWidth="44"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+                        </StackPanel>
+                    </Expander>
+
+                    <Border Grid.Column="1" Grid.Row="0" Grid.RowSpan="4" Style="{StaticResource PanelBorderStyle}">
+                        <StackPanel Padding="20" Spacing="18">
+                            <Border Width="96" Height="96" CornerRadius="18" HorizontalAlignment="Left">
+                                <Image Source="ms-appx:///Assets/AppIcon.png" Stretch="UniformToFill" />
+                            </Border>
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="关于" Style="{StaticResource SectionTitleStyle}" FontSize="20" />
+                                <TextBlock Text="TFAC剧情箱-轮椅版" FontWeight="SemiBold" FontSize="18" TextWrapping="Wrap" />
+                                <TextBlock Text="版本 1.2.0" Style="{StaticResource SubtleTextStyle}" />
+                            </StackPanel>
+                            <TextBlock
+                                Text="面向视觉小说项目的剧情表、素材库、章节修复与 Unreal 同步工具。目标是把高频编辑动作做得更轻，把危险同步动作做得更可见。"
+                                Style="{StaticResource SubtleTextStyle}" />
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="版本命名" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock
+                                    Text="采用 主版本.功能版本.修订版本。1.2.0 表示当前处于第二轮功能扩展；小修复递增到 1.2.1，新功能组递增到 1.3.0。"
+                                    Style="{StaticResource SubtleTextStyle}" />
+                            </StackPanel>
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="制作人员" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock Text="企划 / 使用设计：柳雨" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="程序协作：Codex" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="项目方向：少按钮、强快捷键、规整布局、清晰进度与可回退操作。" Style="{StaticResource SubtleTextStyle}" />
+                            </StackPanel>
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="当前重点" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock Text="章节编辑、素材索引同步、虚幻数据表对接、备份还原、修复提示。" Style="{StaticResource SubtleTextStyle}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                    </Grid>
+                </ScrollViewer>
+
+                <Border x:Name="LogPanelBorder" Grid.Row="1" Style="{StaticResource PanelBorderStyle}">
+                    <Grid Padding="12" RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="输出日志" Style="{StaticResource SectionTitleStyle}" />
+                            <Button Grid.Column="1" Content="清空" Click="ClearLogButton_Click" />
+                        </Grid>
+                        <ScrollViewer
+                            x:Name="LogScrollViewer"
+                            Grid.Row="1"
+                            MaxHeight="150"
+                            VerticalScrollBarVisibility="Auto"
+                            HorizontalScrollBarVisibility="Disabled">
+                            <ItemsControl x:Name="LogItemsControl" />
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+            </Grid>
+        </NavigationView>
+    </Grid>
+</Window>

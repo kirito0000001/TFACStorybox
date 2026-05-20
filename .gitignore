@@ -1,0 +1,23 @@
+# Build output
+bin/
+obj/
+AppPackages/
+
+# Visual Studio / IDE state
+.vs/
+.idea/
+*.user
+*.suo
+
+# Windows and temporary files
+Thumbs.db
+Desktop.ini
+*.tmp
+*.log
+
+# Package and publish artifacts
+*.appx
+*.appxbundle
+*.msix
+*.msixbundle
+*.cer
