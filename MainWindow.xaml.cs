@@ -1,22 +1,32 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
+using GalExcleTools.Services;
+using GalExcleTools.ViewModels;
+using GalExcleTools.Views;
+using static GalExcleTools.Services.ColorUtility;
+using static GalExcleTools.Services.FileSystemUtility;
+using static GalExcleTools.Services.TextUtility;
+using static GalExcleTools.Services.WorkspacePathUtility;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
+using Microsoft.Windows.AppNotifications;
+using Microsoft.Windows.AppNotifications.Builder;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics;
@@ -32,81 +42,106 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow : Window
     {
-        private const string ProjectRootFolderName = "GalExcelProject";
-        private const string DefaultProjectRootPath = @"D:\GalExcelProject";
         private const string ToolsFolderName = "Tools";
-        private const string ExcelFolderName = "Excel";
-        private const string BackgroundFolderName = "背景图";
-        private const string CharacterFolderName = "立绘";
-        private const string MusicFolderName = "音乐";
-        private const string AmbientSoundFolderName = "环境音";
-        private const string SoundEffectFolderName = "特殊音效";
-        private const string FunctionFolderName = "函数";
-        private const string FunctionIndexFileName = "functions.json";
-        private const string ChoiceFunctionCategory = "触发选项";
-        private const string ChoiceFunctionTemplateId = "default-choice";
-        private const string ChoiceFunctionTemplateIndicator = "自动生成当前章节小节Choice";
-        private const string JumpFunctionCategory = "跳转";
-        private const string ChapterJumpFunctionTemplateId = "default-into-chapter";
-        private const string ChapterJumpFunctionTemplateIndicator = "IntoChapter_{章节}";
-        private const string SegmentJumpFunctionTemplateId = "default-into-segment";
-        private const string SegmentJumpFunctionTemplateIndicator = "IntoSegment_{小节}";
-        private const string BgmFunctionTemplateId = "default-bgm-control";
-        private const string BgmFunctionTemplateIndicator = "BGM_Start/BGM_Stop";
-        private const string CharacterFilterFolderName = "角色滤镜";
-        private const string CharacterFilterIndexFileName = "vfx-filters.json";
         private const string NoStoryCharacterChoice = "__NO_STORY_CHARACTER__";
-        private const string ProjectMetaFileName = "project.meta.json";
-        private const string AssetLibraryMetaFileName = "asset-library.meta.json";
-        private const string ChapterMetaFileName = "chapter.meta.json";
-        private const string StorySectionsFileName = "story.sections.json";
-        private const string StoryChoiceNotesFileName = "story.choice-notes.json";
-        private const string StorySectionExportsFolderName = "SectionCsv";
-        private const string UnrealStorySectionCacheFolderName = "UnrealStorySections";
         private const string ChapterBackupsFolderName = "ChapterBackups";
         private const string ProjectBackupsFolderName = "ProjectBackups";
         private const string AssetLibraryBackupsFolderName = "AssetLibraryBackups";
-        private const string UnrealBackupsFolderName = "UnrealBackups";
         private const string UnrealAssetIndexTablesFolderName = "UnrealAssetIndexTables";
-        private const int MaxFolderBackupCount = 3;
-        private const string ChaptersFolderName = "Chapters";
-        private const string DefaultThumbnailUri = "ms-appx:///Assets/DefaultProjectThumbnail.png";
-        private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
-        private static readonly HashSet<string> ConvertibleImageExtensions =
-            new([".jpg", ".jpeg", ".webp"], StringComparer.OrdinalIgnoreCase);
-        private static readonly string[] MusicExtensions = [".wav"];
-
-        private static readonly string SettingsDirectoryPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "GalExcleTools");
-        private static readonly string SettingsFilePath = Path.Combine(SettingsDirectoryPath, "settings.json");
-
+        private const double PageEntranceOffsetX = -96;
+        private static readonly TimeSpan PageEntranceDuration = TimeSpan.FromMilliseconds(280);
         private readonly JsonSerializerOptions _jsonOptions = new()
         {
             WriteIndented = true
         };
+        private readonly AppSettingsService _appSettingsService = new();
+        private readonly ProjectWorkspaceService _projectWorkspaceService = new();
+        private readonly ProjectRootMigrationService _projectRootMigrationService = new();
+        private readonly AudioAssetService _audioAssetService = new();
+        private readonly BackgroundImageService _backgroundImageService = new();
+        private readonly CharacterLayerAssetService _characterLayerAssetService = new();
+        private readonly CharacterFilterService _characterFilterService = new();
+        private readonly CharacterWorkspaceService _characterWorkspaceService;
+        private readonly FolderBackupService _folderBackupService;
+        private readonly UnrealSyncService _unrealSyncService = new();
+        private readonly StoryCsvService _storyCsvService = new();
+        private readonly StoryStateService _storyStateService = new();
+        private readonly StoryEditorService _storyEditorService;
+        private readonly StorySessionService _storySessionService;
+        private readonly ChapterRepairService _chapterRepairService;
+        private readonly StoryAssetIndexSyncService _storyAssetIndexSyncService;
+        private readonly IDialogService _dialogService;
+        private readonly IShortcutService _shortcutService;
+        private readonly IUiSoundService _uiSoundService;
+        private readonly StoryDialogService _storyDialogService;
+        private readonly FunctionDialogService _functionDialogService;
         private readonly MediaPlayer _storyBgmPlayer = new();
         private readonly MediaPlayer _storyScenePlayer = new();
 
-        private string _projectRootPath = DefaultProjectRootPath;
+        private string _projectRootPath = AppSettingsService.DefaultProjectRootPath;
         private string? _selectedProjectThumbnailPath;
         private string? _selectedAssetLibraryThumbnailPath;
         private AssetLibraryInfo? _currentAssetLibrary;
-        private ChapterInfo? _currentStoryChapter;
-        private AssetLibraryInfo? _currentStoryAssetLibrary;
-        private readonly List<StoryRow> _storyRows = [];
-        private readonly Dictionary<string, int> _storyRowSections = new(StringComparer.OrdinalIgnoreCase);
+        private readonly StoryEditorViewModel _storyEditorViewModel = new();
+        private ChapterInfo? _currentStoryChapter
+        {
+            get => _storyEditorViewModel.Chapter;
+            set => _storyEditorViewModel.Chapter = value;
+        }
+
+        private AssetLibraryInfo? _currentStoryAssetLibrary
+        {
+            get => _storyEditorViewModel.AssetLibrary;
+            set => _storyEditorViewModel.AssetLibrary = value;
+        }
+
+        private List<StoryRow> _storyRows => _storyEditorViewModel.Rows;
+        private Dictionary<string, int> _storyRowSections => _storyEditorViewModel.RowSections;
         private readonly Dictionary<string, BitmapImage> _storyPreviewImageCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, string> _storyCharacterPreviewKeys = new();
-        private int _currentStoryRowIndex;
+        private int _currentStoryRowIndex
+        {
+            get => _storyEditorViewModel.CurrentRowIndex;
+            set => _storyEditorViewModel.CurrentRowIndex = value;
+        }
+
         private StoryCharacterSlotClipboard? _storyCharacterSlotClipboard;
         private StoryAssetClipboard? _storyAssetClipboard;
-        private bool _isLoadingStoryRow;
-        private bool _isStoryRowDirty;
-        private bool _isUpdatingStoryRowIndexText;
-        private bool _isUpdatingStorySectionOptions;
-        private bool _isPersistingStoryRows;
-        private string? _currentStoryCsvPath;
+        private bool _isLoadingStoryRow
+        {
+            get => _storyEditorViewModel.IsLoadingRow;
+            set => _storyEditorViewModel.IsLoadingRow = value;
+        }
+
+        private bool _isStoryRowDirty
+        {
+            get => _storyEditorViewModel.IsRowDirty;
+            set => _storyEditorViewModel.IsRowDirty = value;
+        }
+
+        private bool _isUpdatingStoryRowIndexText
+        {
+            get => _storyEditorViewModel.IsUpdatingRowIndexText;
+            set => _storyEditorViewModel.IsUpdatingRowIndexText = value;
+        }
+
+        private bool _isUpdatingStorySectionOptions
+        {
+            get => _storyEditorViewModel.IsUpdatingSectionOptions;
+            set => _storyEditorViewModel.IsUpdatingSectionOptions = value;
+        }
+
+        private bool _isPersistingStoryRows
+        {
+            get => _storyEditorViewModel.IsPersistingRows;
+            set => _storyEditorViewModel.IsPersistingRows = value;
+        }
+
+        private string? _currentStoryCsvPath
+        {
+            get => _storyEditorViewModel.CsvPath;
+            set => _storyEditorViewModel.CsvPath = value;
+        }
         private string? _storyBackgroundPreviewKey;
         private int _storyBackgroundTransitionMode;
         private bool _storyBgmPlaybackSuppressed;
@@ -132,9 +167,7 @@ namespace GalExcleTools
         private GridViewItem? _draggingCharacterFaceItem;
         private GridViewItem? _draggingCharacterAdornItem;
         private string? _viewingBackgroundImagePath;
-        private string? _viewingCharacterClothPath;
-        private string? _viewingCharacterFacePath;
-        private string? _viewingCharacterAdornPath;
+        private CharacterLayerViewerState? _viewingCharacterLayer;
         private string? _playingMusicPath;
         private AudioAssetKind _playingAudioKind = AudioAssetKind.Music;
         private string? _storyBgmPath;
@@ -156,16 +189,65 @@ namespace GalExcleTools
         private readonly DispatcherQueueTimer _refreshDelayTimer;
         private readonly DispatcherQueueTimer? _storyEditSaveTimer;
         private readonly DispatcherQueueTimer _storyPaneAnimationTimer;
+        private readonly DispatcherQueueTimer _globalProgressElapsedTimer;
         private double _storyPaneAnimationTargetWidth = 46;
         private readonly Dictionary<InfoBar, DispatcherQueueTimer> _storyTransientTipTimers = new();
-        private readonly List<StoryEditorUndoState> _storyUndoStack = [];
+        private List<StoryEditorUndoState> _storyUndoStack => _storyEditorViewModel.UndoStack;
+        private readonly Stopwatch _globalProgressStopwatch = new();
+        private string _globalProgressOperationTitle = string.Empty;
+        private bool _isGlobalProgressVisible;
+        private double _globalProgressLastPercent;
+        private CancellationTokenSource? _globalProgressCancellation;
+        private bool _isWindowActive = true;
         private bool _refreshBackgroundImagesAfterDelay;
-        private bool _isStoryDebugModeEnabled;
+        private bool _isStoryDebugModeEnabled
+        {
+            get => _storyEditorViewModel.IsDebugModeEnabled;
+            set => _storyEditorViewModel.IsDebugModeEnabled = value;
+        }
+        private bool _isChangingShellSelectionInternally;
         private const int MaxStoryUndoCount = 80;
 
         public MainWindow()
         {
             InitializeComponent();
+            StoryEditorPage.DataContext = _storyEditorViewModel;
+            _characterWorkspaceService = new CharacterWorkspaceService(_jsonOptions);
+            _folderBackupService = new FolderBackupService(_jsonOptions);
+            _uiSoundService = new UiSoundService();
+            _dialogService = new WinUiDialogService(() => Content.XamlRoot, _uiSoundService);
+            _shortcutService = new ShortcutService(_dialogService);
+            _storyDialogService = new StoryDialogService(_dialogService);
+            _functionDialogService = new FunctionDialogService(_dialogService, _uiSoundService);
+            _storyEditorViewModel.ConfigureCommands(
+                UndoStoryEditorOperation,
+                NavigatePreviousStoryRow,
+                NavigateNextStoryRow,
+                InsertStoryRowHere,
+                DeleteCurrentStoryRow,
+                () => NavigateStorySection(-1),
+                () => NavigateStorySection(1),
+                AddStorySection,
+                () => ChooseStoryAssetIndexAsync("更换背景图", "BGindex", GetStoryBackgroundChoices()),
+                () => ChooseStoryAssetIndexAsync("更换BGM", "BGM", GetStoryBgmChoices()),
+                () => ChooseStoryAssetIndexAsync("更换环境音", "Scene", GetStorySceneChoices()),
+                ChooseStoryFunctionAsync,
+                ShowCurrentStoryChoicesAsync,
+                RemoveStoryFunctionAsync,
+                ClearStoryFunction,
+                ClearCurrentStoryRow);
+            _storyEditorService = new StoryEditorService(_storyCsvService);
+            _storySessionService = new StorySessionService(_storyCsvService, _storyStateService, _storyEditorService);
+            _chapterRepairService = new ChapterRepairService(_storyCsvService);
+            _storyAssetIndexSyncService = new StoryAssetIndexSyncService(
+                GetProjects,
+                ResolveProjectAssetLibrary,
+                GetProjectStoryCsvPaths,
+                GetChaptersFolderPath,
+                _projectWorkspaceService.ReadChapterInfo,
+                _storyCsvService);
+            DisableListItemEntranceTransitions();
+            Activated += MainWindow_Activated;
             ApplyCustomTitleBar();
             ApplyWindowIcon();
             AppWindow.Resize(new SizeInt32(1500, 920));
@@ -179,17 +261,68 @@ namespace GalExcleTools
             _storyPaneAnimationTimer = DispatcherQueue.CreateTimer();
             _storyPaneAnimationTimer.Interval = TimeSpan.FromMilliseconds(16);
             _storyPaneAnimationTimer.Tick += StoryPaneAnimationTimer_Tick;
+            _globalProgressElapsedTimer = DispatcherQueue.CreateTimer();
+            _globalProgressElapsedTimer.Interval = TimeSpan.FromSeconds(1);
+            _globalProgressElapsedTimer.Tick += GlobalProgressElapsedTimer_Tick;
             _storyBgmPlayer.IsLoopingEnabled = true;
             _storyScenePlayer.IsLoopingEnabled = true;
 
-            _appSettings = LoadAppSettings();
+            _appSettings = _appSettingsService.Load();
+            _uiSoundService.IsEnabled = _appSettings.UiSoundEnabled;
             ApplyLogSettingsToUi();
             ApplyUnrealSyncSettingsToUi();
             ApplyStoryTextFontSizeToUi();
-            _projectRootPath = string.IsNullOrWhiteSpace(_appSettings.ProjectRootPath) ? DefaultProjectRootPath : _appSettings.ProjectRootPath;
+            _projectRootPath = _appSettingsService.ResolveProjectRootPath(_appSettings);
             EnsureProjectRootDirectory(_projectRootPath);
             AppendLog(LogKind.Info, "程序启动，已检查整体项目目录。");
             ShowWorkbenchPage();
+        }
+
+        private void MainWindow_Activated(object sender, WindowActivatedEventArgs args)
+        {
+            _isWindowActive = args.WindowActivationState != WindowActivationState.Deactivated;
+        }
+
+        private void PlayPositiveSound()
+        {
+            _uiSoundService.Play(UiSoundKind.Positive);
+        }
+
+        private void PlayNegativeSound()
+        {
+            _uiSoundService.Play(UiSoundKind.Negative);
+        }
+
+        private void PlaySelectionSound()
+        {
+            _uiSoundService.Play(UiSoundKind.Selection);
+        }
+
+        private void DisableListItemEntranceTransitions()
+        {
+            GridView[] gridViews =
+            [
+                ProjectsGridView,
+                ChaptersGridView,
+                AssetLibrariesGridView,
+                BackgroundImagesGridView,
+                CharacterGridView,
+                MusicGridView,
+                AmbientSoundGridView,
+                SoundEffectGridView,
+                FunctionGridView,
+                CharacterFilterGridView,
+                CharacterClothGridView,
+                CharacterFaceGridView,
+                CharacterAdornGridView,
+                CharacterVfxGridView,
+                UnrealSyncProjectCardsGridView
+            ];
+
+            foreach (var gridView in gridViews)
+            {
+                gridView.ItemContainerTransitions = null;
+            }
         }
 
         private void ApplyWindowIcon()
@@ -228,6 +361,7 @@ namespace GalExcleTools
                 LogUserOperationsCheckBox.IsChecked = _appSettings.LogUserOperations;
                 LogWarningCheckBox.IsChecked = _appSettings.LogWarnings;
                 LogErrorCheckBox.IsChecked = _appSettings.LogErrors;
+                UiSoundEnabledCheckBox.IsChecked = _appSettings.UiSoundEnabled;
                 AssetLibraryScrollSpeedSlider.Value = _appSettings.AssetLibraryScrollSpeedMultiplier;
                 StoryTextFontSizeSlider.Value = Math.Clamp(_appSettings.StoryTextFontSize, 16, 32);
                 ShowFullChapterLengthCheckBox.IsChecked = _appSettings.ShowFullStoryChapterLength;
@@ -271,6 +405,8 @@ namespace GalExcleTools
             _appSettings.LogUserOperations = LogUserOperationsCheckBox.IsChecked == true;
             _appSettings.LogWarnings = LogWarningCheckBox.IsChecked == true;
             _appSettings.LogErrors = LogErrorCheckBox.IsChecked == true;
+            _appSettings.UiSoundEnabled = UiSoundEnabledCheckBox.IsChecked == true;
+            _uiSoundService.IsEnabled = _appSettings.UiSoundEnabled;
             SaveAppSettings();
             UpdateLogOptionEnabledState();
             UpdateAuxiliaryDisplayVisibility();
@@ -413,7 +549,7 @@ namespace GalExcleTools
 
         private void EnsureProjectRootDirectory(string projectRootPath)
         {
-            Directory.CreateDirectory(projectRootPath);
+            _appSettingsService.EnsureProjectRootDirectory(projectRootPath);
 
             ProjectRootPathTextBox.Text = projectRootPath;
             ProjectRootStatusInfoBar.Message = $"已确认目录存在：{projectRootPath}";
@@ -454,32 +590,12 @@ namespace GalExcleTools
 
         private List<AssetLibraryInfo> GetAssetLibraries()
         {
-            if (!Directory.Exists(_projectRootPath))
-            {
-                return [];
-            }
-
-            return Directory
-                .EnumerateDirectories(_projectRootPath)
-                .Where(path => File.Exists(Path.Combine(path, ToolsFolderName, AssetLibraryMetaFileName)))
-                .Select(ReadAssetLibraryInfo)
-                .OrderByDescending(library => library.LastEditedAt)
-                .ToList();
+            return _projectWorkspaceService.GetAssetLibraries(_projectRootPath);
         }
 
         private List<ProjectInfo> GetProjects()
         {
-            if (!Directory.Exists(_projectRootPath))
-            {
-                return [];
-            }
-
-            return Directory
-                .EnumerateDirectories(_projectRootPath)
-                .Where(path => File.Exists(Path.Combine(path, ToolsFolderName, ProjectMetaFileName)))
-                .Select(ReadProjectInfo)
-                .OrderByDescending(project => project.LastEditedAt)
-                .ToList();
+            return _projectWorkspaceService.GetProjects(_projectRootPath);
         }
 
         private void LoadProjects()
@@ -532,162 +648,41 @@ namespace GalExcleTools
             }
         }
 
-        private ProjectInfo ReadProjectInfo(string projectPath)
-        {
-            var projectName = Path.GetFileName(projectPath);
-            var toolsPath = Path.Combine(projectPath, ToolsFolderName);
-            var metaPath = Path.Combine(toolsPath, ProjectMetaFileName);
-            var meta = ReadJson<ProjectMeta>(metaPath) ?? new ProjectMeta();
-            var thumbnailPath = ResolveThumbnailPath(toolsPath, meta.ThumbnailFileName);
-
-            return new ProjectInfo(
-                string.IsNullOrWhiteSpace(meta.ProjectName) ? projectName : meta.ProjectName,
-                string.IsNullOrWhiteSpace(meta.ProjectCode) ? Path.GetFileName(projectPath) : meta.ProjectCode,
-                Path.GetFileName(projectPath),
-                projectPath,
-                thumbnailPath,
-                string.IsNullOrWhiteSpace(meta.AssetLibraryName) ? "未关联素材库" : meta.AssetLibraryName,
-                meta.AssetLibraryFolderName,
-                meta.LastEditedAt == default ? Directory.GetLastWriteTime(projectPath) : meta.LastEditedAt);
-        }
-
-        private AssetLibraryInfo ReadAssetLibraryInfo(string assetLibraryPath)
-        {
-            var libraryName = Path.GetFileName(assetLibraryPath);
-            var toolsPath = Path.Combine(assetLibraryPath, ToolsFolderName);
-            var metaPath = Path.Combine(toolsPath, AssetLibraryMetaFileName);
-            var meta = ReadJson<AssetLibraryMeta>(metaPath) ?? new AssetLibraryMeta();
-            var thumbnailPath = ResolveThumbnailPath(toolsPath, meta.ThumbnailFileName);
-
-            return new AssetLibraryInfo(
-                string.IsNullOrWhiteSpace(meta.AssetLibraryName) ? libraryName : meta.AssetLibraryName,
-                Path.GetFileName(assetLibraryPath),
-                assetLibraryPath,
-                thumbnailPath,
-                meta.LastEditedAt == default ? Directory.GetLastWriteTime(assetLibraryPath) : meta.LastEditedAt);
-        }
-
-        private static string? ResolveThumbnailPath(string toolsPath, string? thumbnailFileName)
-        {
-            if (string.IsNullOrWhiteSpace(thumbnailFileName))
-            {
-                return null;
-            }
-
-            var thumbnailPath = Path.Combine(toolsPath, thumbnailFileName);
-            return File.Exists(thumbnailPath) ? thumbnailPath : null;
-        }
-
-        private static T? ReadJson<T>(string path)
-        {
-            if (!File.Exists(path))
-            {
-                return default;
-            }
-
-            try
-            {
-                return JsonSerializer.Deserialize<T>(File.ReadAllText(path));
-            }
-            catch
-            {
-                return default;
-            }
-        }
-
         private GridViewItem CreateProjectCard(ProjectInfo project)
         {
-            var item = CreateBaseCard(project);
-            var flyout = new MenuFlyout();
-            var renameItem = new MenuFlyoutItem
-            {
-                Text = "重命名"
-            };
-            renameItem.Click += async (_, _) => await RenameProjectAsync(project);
-            flyout.Items.Add(renameItem);
-
-            var changeLibraryItem = new MenuFlyoutItem
-            {
-                Text = "更改目标素材库"
-            };
-            changeLibraryItem.Click += async (_, _) => await ChangeProjectAssetLibraryAsync(project);
-            flyout.Items.Add(changeLibraryItem);
-
-            var openFolderItem = new MenuFlyoutItem
-            {
-                Text = "打开文件夹"
-            };
-            openFolderItem.Click += (_, _) => OpenFolderInExplorer(project.Path);
-            flyout.Items.Add(openFolderItem);
-
-            var backupItem = new MenuFlyoutItem
-            {
-                Text = "备份"
-            };
-            backupItem.Click += async (_, _) => await BackupProjectFromUiAsync(project);
-            flyout.Items.Add(backupItem);
-
-            var restoreItem = new MenuFlyoutItem
-            {
-                Text = "还原"
-            };
-            restoreItem.Click += async (_, _) => await RestoreProjectFromUiAsync(project);
-            flyout.Items.Add(restoreItem);
-
-            var deleteItem = new MenuFlyoutItem
-            {
-                Text = "删除"
-            };
-            deleteItem.Click += async (_, _) => await DeleteProjectAsync(project);
-            flyout.Items.Add(deleteItem);
-            item.ContextFlyout = flyout;
-            item.Tapped += ProjectCard_Tapped;
-            item.Content = CreateCardContent(project.ThumbnailPath, project.Name, $"{project.Code} | 素材库：{project.AssetLibraryName}", $"上次打开时间 {project.LastEditedAt:yyyy-MM-dd HH:mm}");
-            return item;
+            return DashboardCardFactory.CreateInfoCard(
+                project,
+                project.ThumbnailPath,
+                project.Name,
+                $"{project.Code} | 素材库：{project.AssetLibraryName}",
+                $"上次打开时间 {project.LastEditedAt:yyyy-MM-dd HH:mm}",
+                ProjectCard_Tapped,
+                GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("重命名", async (_, _) => await RenameProjectAsync(project)),
+                GridViewItemFactory.CreateMenuItem("更改目标素材库", async (_, _) => await ChangeProjectAssetLibraryAsync(project)),
+                GridViewItemFactory.CreateMenuItem("打开文件夹", (_, _) => OpenFolderInExplorer(project.Path)),
+                GridViewItemFactory.CreateMenuItem("导出", async (_, _) => await ExportProjectFromUiAsync(project)),
+                GridViewItemFactory.CreateMenuItem("备份", async (_, _) => await BackupProjectFromUiAsync(project)),
+                GridViewItemFactory.CreateMenuItem("还原", async (_, _) => await RestoreProjectFromUiAsync(project)),
+                GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteProjectAsync(project))));
         }
 
         private GridViewItem CreateAssetLibraryCard(AssetLibraryInfo assetLibrary)
         {
-            var item = CreateBaseCard(assetLibrary);
-            var flyout = new MenuFlyout();
-            var renameItem = new MenuFlyoutItem
-            {
-                Text = "重命名"
-            };
-            renameItem.Click += async (_, _) => await RenameAssetLibraryAsync(assetLibrary);
-            flyout.Items.Add(renameItem);
-
-            var openFolderItem = new MenuFlyoutItem
-            {
-                Text = "打开文件夹"
-            };
-            openFolderItem.Click += (_, _) => OpenFolderInExplorer(assetLibrary.Path);
-            flyout.Items.Add(openFolderItem);
-
-            var backupItem = new MenuFlyoutItem
-            {
-                Text = "备份"
-            };
-            backupItem.Click += async (_, _) => await BackupAssetLibraryFromUiAsync(assetLibrary);
-            flyout.Items.Add(backupItem);
-
-            var restoreItem = new MenuFlyoutItem
-            {
-                Text = "还原"
-            };
-            restoreItem.Click += async (_, _) => await RestoreAssetLibraryFromUiAsync(assetLibrary);
-            flyout.Items.Add(restoreItem);
-
-            var deleteItem = new MenuFlyoutItem
-            {
-                Text = "删除"
-            };
-            deleteItem.Click += async (_, _) => await DeleteAssetLibraryAsync(assetLibrary);
-            flyout.Items.Add(deleteItem);
-            item.ContextFlyout = flyout;
-            item.Tapped += AssetLibraryCard_Tapped;
-            item.Content = CreateCardContent(assetLibrary.ThumbnailPath, assetLibrary.Name, "素材合集", $"上次编辑时间 {assetLibrary.LastEditedAt:yyyy-MM-dd HH:mm}");
-            return item;
+            return DashboardCardFactory.CreateInfoCard(
+                assetLibrary,
+                assetLibrary.ThumbnailPath,
+                assetLibrary.Name,
+                "素材合集",
+                $"上次编辑时间 {assetLibrary.LastEditedAt:yyyy-MM-dd HH:mm}",
+                AssetLibraryCard_Tapped,
+                GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("重命名", async (_, _) => await RenameAssetLibraryAsync(assetLibrary)),
+                GridViewItemFactory.CreateMenuItem("打开文件夹", (_, _) => OpenFolderInExplorer(assetLibrary.Path)),
+                GridViewItemFactory.CreateMenuItem("导出", async (_, _) => await ExportAssetLibraryFromUiAsync(assetLibrary)),
+                GridViewItemFactory.CreateMenuItem("备份", async (_, _) => await BackupAssetLibraryFromUiAsync(assetLibrary)),
+                GridViewItemFactory.CreateMenuItem("还原", async (_, _) => await RestoreAssetLibraryFromUiAsync(assetLibrary)),
+                GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteAssetLibraryAsync(assetLibrary))));
         }
 
         private void OpenFolderInExplorer(string folderPath)
@@ -717,7 +712,7 @@ namespace GalExcleTools
                 var backup = await ShowFolderBackupProgressDialogAsync(
                     "正在备份项目",
                     project.Name,
-                    progress => Task.Run(() => CreateFolderBackup(project.Path, ProjectBackupsFolderName, project.Code, note, progress)));
+                    progress => Task.Run(() => _folderBackupService.CreateBackup(project.Path, ProjectBackupsFolderName, project.Code, note, progress, GetGlobalProgressCancellationToken())));
                 LoadProjects();
                 RequestDelayedRefresh();
                 AppendLog(LogKind.User, $"备份项目：{project.Name} -> {backup.Path}");
@@ -728,11 +723,47 @@ namespace GalExcleTools
             }
         }
 
+        private async Task ExportProjectFromUiAsync(ProjectInfo project)
+        {
+            try
+            {
+                var picker = new FileSavePicker
+                {
+                    SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+                    SuggestedFileName = $"{SanitizeBackupFileName(project.Code)}_{DateTime.Now:yyyyMMdd_HHmmss}"
+                };
+                picker.FileTypeChoices.Add("TFACStorybox 项目包", [".zip"]);
+                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+
+                var exportFile = await picker.PickSaveFileAsync();
+                if (exportFile is null)
+                {
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(exportFile.Path))
+                {
+                    AppendLog(LogKind.Warning, "导出项目失败：请选择本机文件夹里的保存位置。");
+                    return;
+                }
+
+                var export = await ShowFolderBackupProgressDialogAsync(
+                    "正在导出项目",
+                    project.Name,
+                    progress => Task.Run(() => _folderBackupService.ExportToZip(project.Path, exportFile.Path, progress, GetGlobalProgressCancellationToken())));
+                AppendLog(LogKind.User, $"导出项目：{project.Name} -> {export.Path}");
+            }
+            catch (Exception ex)
+            {
+                AppendLog(LogKind.Error, "导出项目失败。", ex);
+            }
+        }
+
         private async Task RestoreProjectFromUiAsync(ProjectInfo project)
         {
             try
             {
-                var backups = GetFolderBackups(project.Path, ProjectBackupsFolderName);
+                var backups = _folderBackupService.GetBackups(project.Path, ProjectBackupsFolderName);
                 if (backups.Count == 0)
                 {
                     AppendLog(LogKind.Warning, $"项目没有可还原的备份：{project.Name}");
@@ -745,13 +776,19 @@ namespace GalExcleTools
                     return;
                 }
 
-                RestoreFolderBackup(project.Path, ProjectBackupsFolderName, selectedBackup);
+                ShowGlobalProgress("还原项目", project.Name);
+                UpdateGlobalProgress("正在还原项目备份...", 15, selectedBackup.DisplayName);
+                await Task.Run(() => _folderBackupService.Restore(project.Path, ProjectBackupsFolderName, selectedBackup));
+                CompleteGlobalProgress("项目还原完成", selectedBackup.DisplayName);
+                await HideGlobalProgressAfterDelayAsync();
                 LoadProjects();
                 RequestDelayedRefresh();
                 AppendLog(LogKind.User, $"还原项目：{project.Name} <- {selectedBackup.Path}");
             }
             catch (Exception ex)
             {
+                CompleteGlobalProgress("项目还原失败", ex.Message);
+                await HideGlobalProgressAfterDelayAsync();
                 AppendLog(LogKind.Error, "还原项目失败。", ex);
             }
         }
@@ -769,7 +806,7 @@ namespace GalExcleTools
                 var backup = await ShowFolderBackupProgressDialogAsync(
                     "正在备份素材库",
                     assetLibrary.Name,
-                    progress => Task.Run(() => CreateFolderBackup(assetLibrary.Path, AssetLibraryBackupsFolderName, assetLibrary.FolderName, note, progress)));
+                    progress => Task.Run(() => _folderBackupService.CreateBackup(assetLibrary.Path, AssetLibraryBackupsFolderName, assetLibrary.FolderName, note, progress, GetGlobalProgressCancellationToken())));
                 LoadAssetLibraries();
                 LoadProjects();
                 LoadAssetLibraryOptions();
@@ -782,11 +819,47 @@ namespace GalExcleTools
             }
         }
 
+        private async Task ExportAssetLibraryFromUiAsync(AssetLibraryInfo assetLibrary)
+        {
+            try
+            {
+                var picker = new FileSavePicker
+                {
+                    SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+                    SuggestedFileName = $"{SanitizeBackupFileName(assetLibrary.FolderName)}_{DateTime.Now:yyyyMMdd_HHmmss}"
+                };
+                picker.FileTypeChoices.Add("TFACStorybox 素材库包", [".zip"]);
+                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+
+                var exportFile = await picker.PickSaveFileAsync();
+                if (exportFile is null)
+                {
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(exportFile.Path))
+                {
+                    AppendLog(LogKind.Warning, "导出素材库失败：请选择本机文件夹里的保存位置。");
+                    return;
+                }
+
+                var export = await ShowFolderBackupProgressDialogAsync(
+                    "正在导出素材库",
+                    assetLibrary.Name,
+                    progress => Task.Run(() => _folderBackupService.ExportToZip(assetLibrary.Path, exportFile.Path, progress, GetGlobalProgressCancellationToken())));
+                AppendLog(LogKind.User, $"导出素材库：{assetLibrary.Name} -> {export.Path}");
+            }
+            catch (Exception ex)
+            {
+                AppendLog(LogKind.Error, "导出素材库失败。", ex);
+            }
+        }
+
         private async Task RestoreAssetLibraryFromUiAsync(AssetLibraryInfo assetLibrary)
         {
             try
             {
-                var backups = GetFolderBackups(assetLibrary.Path, AssetLibraryBackupsFolderName);
+                var backups = _folderBackupService.GetBackups(assetLibrary.Path, AssetLibraryBackupsFolderName);
                 if (backups.Count == 0)
                 {
                     AppendLog(LogKind.Warning, $"素材库没有可还原的备份：{assetLibrary.Name}");
@@ -799,7 +872,11 @@ namespace GalExcleTools
                     return;
                 }
 
-                RestoreFolderBackup(assetLibrary.Path, AssetLibraryBackupsFolderName, selectedBackup);
+                ShowGlobalProgress("还原素材库", assetLibrary.Name);
+                UpdateGlobalProgress("正在还原素材库备份...", 15, selectedBackup.DisplayName);
+                await Task.Run(() => _folderBackupService.Restore(assetLibrary.Path, AssetLibraryBackupsFolderName, selectedBackup));
+                CompleteGlobalProgress("素材库还原完成", selectedBackup.DisplayName);
+                await HideGlobalProgressAfterDelayAsync();
                 LoadAssetLibraries();
                 LoadProjects();
                 LoadAssetLibraryOptions();
@@ -808,393 +885,15 @@ namespace GalExcleTools
             }
             catch (Exception ex)
             {
+                CompleteGlobalProgress("素材库还原失败", ex.Message);
+                await HideGlobalProgressAfterDelayAsync();
                 AppendLog(LogKind.Error, "还原素材库失败。", ex);
             }
         }
 
-        private FolderBackupEntry CreateFolderBackup(
-            string folderPath,
-            string backupsFolderName,
-            string nameSeed,
-            string note,
-            IProgress<FolderBackupProgress>? progress = null)
-        {
-            if (!Directory.Exists(folderPath))
-            {
-                throw new DirectoryNotFoundException($"文件夹不存在：{folderPath}");
-            }
-
-            var backupsPath = GetFolderBackupsPath(folderPath, backupsFolderName);
-            Directory.CreateDirectory(backupsPath);
-
-            var createdAt = DateTime.Now;
-            var safeName = SanitizeBackupFileName(nameSeed);
-            var safeNote = SanitizeBackupFileName(note);
-            var noteSuffix = string.IsNullOrWhiteSpace(safeNote) ? string.Empty : $"_{safeNote}";
-            var backupPath = Path.Combine(backupsPath, $"{safeName}_{createdAt:yyyyMMdd_HHmmss}{noteSuffix}.zip");
-            var duplicateIndex = 1;
-            while (File.Exists(backupPath))
-            {
-                backupPath = Path.Combine(backupsPath, $"{safeName}_{createdAt:yyyyMMdd_HHmmss}{noteSuffix}_{duplicateIndex}.zip");
-                duplicateIndex++;
-            }
-
-            progress?.Report(new FolderBackupProgress("正在扫描要写入备份的文件...", 0, 0, 0, 0, 0, null));
-            var files = EnumerateFolderBackupFiles(folderPath, backupsPath).ToList();
-            var totalBytes = files.Sum(filePath => new FileInfo(filePath).Length);
-
-            using (var archive = ZipFile.Open(backupPath, ZipArchiveMode.Create))
-            {
-                long completedBytes = 0;
-                for (var index = 0; index < files.Count; index++)
-                {
-                    var filePath = files[index];
-                    var fileLength = new FileInfo(filePath).Length;
-                    var relativePath = Path.GetRelativePath(folderPath, filePath).Replace('\\', '/');
-                    var percent = files.Count == 0
-                        ? 90
-                        : Math.Min(90, Math.Max(1, completedBytes * 90d / Math.Max(1, totalBytes)));
-                    progress?.Report(new FolderBackupProgress(
-                        $"正在压缩 {index + 1}/{files.Count}：{relativePath}",
-                        percent,
-                        index,
-                        files.Count,
-                        completedBytes,
-                        totalBytes,
-                        relativePath));
-                    archive.CreateEntryFromFile(filePath, relativePath, CompressionLevel.Optimal);
-                    completedBytes += fileLength;
-                }
-            }
-
-            progress?.Report(new FolderBackupProgress("正在写入备份备注...", 94, files.Count, files.Count, totalBytes, totalBytes, null));
-            var meta = new FolderBackupMeta
-            {
-                CreatedAt = createdAt,
-                Note = NormalizeBackupNote(note)
-            };
-            File.WriteAllText(GetBackupMetaPath(backupPath), JsonSerializer.Serialize(meta, _jsonOptions));
-
-            progress?.Report(new FolderBackupProgress("正在清理旧备份，最多保留 3 份...", 97, files.Count, files.Count, totalBytes, totalBytes, null));
-            PruneFolderBackups(folderPath, backupsFolderName);
-            progress?.Report(new FolderBackupProgress("备份完成。", 100, files.Count, files.Count, totalBytes, totalBytes, null));
-            return BuildFolderBackupEntry(backupPath);
-        }
-
-        private static IEnumerable<string> EnumerateFolderBackupFiles(string folderPath, string currentBackupsPath)
-        {
-            return Directory
-                .EnumerateFiles(folderPath, "*", SearchOption.AllDirectories)
-                .Where(filePath => !ShouldSkipFolderBackupFile(filePath, currentBackupsPath));
-        }
-
-        private static bool ShouldSkipFolderBackupFile(string filePath, string currentBackupsPath)
-        {
-            if (IsPathInsideDirectory(filePath, currentBackupsPath))
-            {
-                return true;
-            }
-
-            var segments = Path.GetRelativePath(Path.GetPathRoot(Path.GetFullPath(filePath))!, filePath)
-                .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return segments.Any(segment =>
-                string.Equals(segment, ProjectBackupsFolderName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(segment, AssetLibraryBackupsFolderName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(segment, ChapterBackupsFolderName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(segment, UnrealBackupsFolderName, StringComparison.OrdinalIgnoreCase));
-        }
-
-        private static void RestoreFolderBackup(string folderPath, string backupsFolderName, FolderBackupEntry backup)
-        {
-            if (!Directory.Exists(folderPath))
-            {
-                throw new DirectoryNotFoundException($"文件夹不存在：{folderPath}");
-            }
-
-            if (!File.Exists(backup.Path))
-            {
-                throw new FileNotFoundException("选择的备份文件不存在。", backup.Path);
-            }
-
-            var tempPath = Path.Combine(Path.GetTempPath(), "GalExcleTools", "FolderRestore", Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(tempPath);
-            try
-            {
-                ZipFile.ExtractToDirectory(backup.Path, tempPath);
-                ClearFolderForRestore(folderPath, backupsFolderName);
-                CopyDirectoryContents(tempPath, folderPath);
-            }
-            finally
-            {
-                if (Directory.Exists(tempPath))
-                {
-                    Directory.Delete(tempPath, recursive: true);
-                }
-            }
-        }
-
-        private static void ClearFolderForRestore(string folderPath, string backupsFolderName)
-        {
-            var backupsPath = GetFolderBackupsPath(folderPath, backupsFolderName);
-            Directory.CreateDirectory(backupsPath);
-
-            var folderRoot = Path.GetFullPath(folderPath);
-            var backupsRoot = Path.GetFullPath(backupsPath);
-
-            foreach (var filePath in Directory.EnumerateFiles(folderRoot, "*", SearchOption.AllDirectories))
-            {
-                if (IsPathInsideDirectory(filePath, backupsRoot))
-                {
-                    continue;
-                }
-
-                File.Delete(filePath);
-            }
-
-            foreach (var directoryPath in Directory.EnumerateDirectories(folderRoot, "*", SearchOption.AllDirectories).OrderByDescending(path => path.Length))
-            {
-                if (PathsEqual(directoryPath, backupsRoot) || IsPathInsideDirectory(directoryPath, backupsRoot))
-                {
-                    continue;
-                }
-
-                if (!Directory.EnumerateFileSystemEntries(directoryPath).Any())
-                {
-                    Directory.Delete(directoryPath);
-                }
-            }
-        }
-
-        private static void CopyDirectoryContents(string sourcePath, string targetPath)
-        {
-            foreach (var directoryPath in Directory.EnumerateDirectories(sourcePath, "*", SearchOption.AllDirectories))
-            {
-                var relativePath = Path.GetRelativePath(sourcePath, directoryPath);
-                Directory.CreateDirectory(Path.Combine(targetPath, relativePath));
-            }
-
-            foreach (var filePath in Directory.EnumerateFiles(sourcePath, "*", SearchOption.AllDirectories))
-            {
-                var relativePath = Path.GetRelativePath(sourcePath, filePath);
-                var targetFilePath = Path.Combine(targetPath, relativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(targetFilePath)!);
-                File.Copy(filePath, targetFilePath, overwrite: true);
-            }
-        }
-
-        private static void PruneFolderBackups(string folderPath, string backupsFolderName)
-        {
-            foreach (var backup in GetFolderBackups(folderPath, backupsFolderName).Skip(MaxFolderBackupCount))
-            {
-                DeleteFolderBackup(backup);
-            }
-        }
-
-        private static void DeleteFolderBackup(FolderBackupEntry backup)
-        {
-            if (File.Exists(backup.Path))
-            {
-                File.Delete(backup.Path);
-            }
-
-            var metaPath = GetBackupMetaPath(backup.Path);
-            if (File.Exists(metaPath))
-            {
-                File.Delete(metaPath);
-            }
-        }
-
-        private static List<FolderBackupEntry> GetFolderBackups(string folderPath, string backupsFolderName)
-        {
-            var backupsPath = GetFolderBackupsPath(folderPath, backupsFolderName);
-            if (!Directory.Exists(backupsPath))
-            {
-                return [];
-            }
-
-            return Directory
-                .EnumerateFiles(backupsPath, "*.zip", SearchOption.TopDirectoryOnly)
-                .Select(BuildFolderBackupEntry)
-                .OrderByDescending(backup => backup.CreatedAt)
-                .ToList();
-        }
-
-        private static FolderBackupEntry BuildFolderBackupEntry(string backupPath)
-        {
-            var fileInfo = new FileInfo(backupPath);
-            var meta = ReadJson<FolderBackupMeta>(GetBackupMetaPath(backupPath));
-            var createdAt = meta?.CreatedAt is { } metaCreatedAt && metaCreatedAt != default
-                ? metaCreatedAt
-                : fileInfo.LastWriteTime;
-            var note = NormalizeBackupNote(meta?.Note ?? string.Empty);
-            var noteText = string.IsNullOrWhiteSpace(note) ? "无备注" : note;
-            var displayName = $"{createdAt:yyyy-MM-dd HH:mm:ss} · {noteText} · {FormatFileSize(fileInfo.Length)}";
-            return new FolderBackupEntry(backupPath, createdAt, fileInfo.Length, note, displayName);
-        }
-
-        private static string GetFolderBackupsPath(string folderPath, string backupsFolderName)
-        {
-            return Path.Combine(folderPath, ToolsFolderName, backupsFolderName);
-        }
-
-        private static string GetBackupMetaPath(string backupPath)
-        {
-            return $"{backupPath}.meta.json";
-        }
-
-        private static string NormalizeBackupNote(string? note)
-        {
-            return Regex.Replace(note ?? string.Empty, @"\s+", " ").Trim();
-        }
-
-        private static string SanitizeBackupFileName(string value)
-        {
-            var invalidChars = Path.GetInvalidFileNameChars().ToHashSet();
-            var normalized = NormalizeBackupNote(value);
-            var sanitized = new string(normalized.Where(ch => !invalidChars.Contains(ch)).ToArray()).Trim();
-            if (string.IsNullOrWhiteSpace(sanitized))
-            {
-                return "Backup";
-            }
-
-            return sanitized.Length > 40 ? sanitized[..40] : sanitized;
-        }
-
-        private static string FormatFileSize(long byteCount)
-        {
-            string[] units = ["B", "KB", "MB", "GB"];
-            var size = (double)byteCount;
-            var unitIndex = 0;
-            while (size >= 1024 && unitIndex < units.Length - 1)
-            {
-                size /= 1024;
-                unitIndex++;
-            }
-
-            return unitIndex == 0 ? $"{byteCount} {units[unitIndex]}" : $"{size:0.##} {units[unitIndex]}";
-        }
-
         private GridViewItem CreateAddCard(string title, string subtitle, TappedEventHandler tappedHandler)
         {
-            var item = CreateBaseCard(null);
-            item.Tapped += tappedHandler;
-            ToolTipService.SetToolTip(item, title);
-            item.Content = CreateCardContent(null, title, subtitle, string.Empty, showAddIcon: true);
-            return item;
-        }
-
-        private static GridViewItem CreateBaseCard(object? tag)
-        {
-            return new GridViewItem
-            {
-                Width = 260,
-                Height = 318,
-                Margin = new Thickness(0, 0, 18, 18),
-                Tag = tag
-            };
-        }
-
-        private StackPanel CreateCardContent(string? thumbnailPath, string title, string subtitle, string footer, bool showAddIcon = false)
-        {
-            var panel = new StackPanel
-            {
-                Spacing = 8
-            };
-            ToolTipService.SetToolTip(panel, title);
-
-            panel.Children.Add(CreateThumbnail(thumbnailPath, 236, 178, showAddIcon));
-            panel.Children.Add(new TextBlock
-            {
-                Text = title,
-                FontSize = 24,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                TextAlignment = TextAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis
-            });
-            panel.Children.Add(new TextBlock
-            {
-                Text = subtitle,
-                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush,
-                TextAlignment = TextAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis
-            });
-
-            if (!string.IsNullOrWhiteSpace(footer))
-            {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = footer,
-                    Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush,
-                    TextAlignment = TextAlignment.Center,
-                    FontSize = 12
-                });
-            }
-
-            return panel;
-        }
-
-        private FrameworkElement CreateThumbnail(string? thumbnailPath, double width, double height, bool showAddIcon)
-        {
-            var grid = new Grid
-            {
-                Width = width,
-                Height = height
-            };
-
-            grid.Children.Add(new Border
-            {
-                CornerRadius = new CornerRadius(6),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.White),
-                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(1)
-            });
-
-            if (showAddIcon)
-            {
-                grid.Children.Add(new TextBlock
-                {
-                    Text = "+",
-                    FontSize = 84,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black),
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                });
-                return grid;
-            }
-
-            var image = new Image
-            {
-                Stretch = Stretch.Uniform
-            };
-
-            if (string.IsNullOrWhiteSpace(thumbnailPath) || !File.Exists(thumbnailPath))
-            {
-                image.Source = new BitmapImage(new Uri(DefaultThumbnailUri));
-            }
-            else
-            {
-                _ = LoadThumbnailFromFileAsync(image, thumbnailPath);
-            }
-
-            grid.Children.Add(image);
-            return grid;
-        }
-
-        private static async Task LoadThumbnailFromFileAsync(Image image, string thumbnailPath)
-        {
-            try
-            {
-                var file = await StorageFile.GetFileFromPathAsync(thumbnailPath);
-                using var stream = await file.OpenReadAsync();
-                var bitmap = new BitmapImage();
-                await bitmap.SetSourceAsync(stream);
-                image.Source = bitmap;
-            }
-            catch
-            {
-                image.Source = new BitmapImage(new Uri(DefaultThumbnailUri));
-            }
+            return DashboardCardFactory.CreateAddCard(title, subtitle, tappedHandler);
         }
 
         private async Task LoadStoryPreviewImageAsync(Image image, string imagePath)
@@ -1205,7 +904,7 @@ namespace GalExcleTools
             }
             catch
             {
-                image.Source = new BitmapImage(new Uri(DefaultThumbnailUri));
+                image.Source = ThumbnailFactory.CreateDefaultBitmap();
             }
         }
 
@@ -1226,6 +925,7 @@ namespace GalExcleTools
 
         private void AddProjectCard_Tapped(object sender, TappedRoutedEventArgs e)
         {
+            PlayPositiveSound();
             ShowCreateProjectPage();
             AppendLog(LogKind.User, "打开创建项目页面。");
             e.Handled = true;
@@ -1233,6 +933,7 @@ namespace GalExcleTools
 
         private void AddAssetLibraryCard_Tapped(object sender, TappedRoutedEventArgs e)
         {
+            PlayPositiveSound();
             ShowCreateAssetLibraryPage();
             AppendLog(LogKind.User, "打开创建素材库页面。");
             e.Handled = true;
@@ -1242,8 +943,9 @@ namespace GalExcleTools
         {
             if (sender is GridViewItem { Tag: ProjectInfo project })
             {
+                PlaySelectionSound();
                 TouchProjectLastEditedAt(project);
-                ShowProjectDetailPage(ReadProjectInfo(project.Path));
+                ShowProjectDetailPage(_projectWorkspaceService.ReadProjectInfo(project.Path));
                 RequestDelayedRefresh();
                 AppendLog(LogKind.User, $"打开项目：{project.Name}");
                 e.Handled = true;
@@ -1254,6 +956,7 @@ namespace GalExcleTools
         {
             if (sender is GridViewItem { Tag: AssetLibraryInfo assetLibrary })
             {
+                PlaySelectionSound();
                 TouchAssetLibraryLastEditedAt(assetLibrary);
                 ShowAssetLibraryDetailPage(assetLibrary);
                 AppendLog(LogKind.User, $"打开素材库：{assetLibrary.Name}");
@@ -1284,6 +987,7 @@ namespace GalExcleTools
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
+            PlayPageEntrance(ProjectDetailPage);
             ProjectDetailCloseButton.Focus(FocusState.Programmatic);
         }
 
@@ -1294,6 +998,7 @@ namespace GalExcleTools
 
         private void CloseProjectDetailButton_Click(object sender, RoutedEventArgs e)
         {
+            PlayNegativeSound();
             ShowWorkbenchPage();
         }
 
@@ -1304,6 +1009,7 @@ namespace GalExcleTools
                 return;
             }
 
+            PlayPositiveSound();
             try
             {
                 await SaveProjectSettingsAsync(
@@ -1328,7 +1034,7 @@ namespace GalExcleTools
             await ChangeProjectAssetLibraryAsync(_currentProject);
             if (Directory.Exists(_currentProject.Path))
             {
-                ShowProjectDetailPage(ReadProjectInfo(_currentProject.Path));
+                ShowProjectDetailPage(_projectWorkspaceService.ReadProjectInfo(_currentProject.Path));
             }
         }
 
@@ -1339,9 +1045,7 @@ namespace GalExcleTools
             {
                 var chaptersFolderPath = GetChaptersFolderPath(project);
                 Directory.CreateDirectory(chaptersFolderPath);
-                chapters = Directory
-                    .EnumerateDirectories(chaptersFolderPath)
-                    .Select(ReadChapterInfo)
+                chapters = _projectWorkspaceService.GetChapters(project)
                     .OrderBy(chapter => chapter.Code)
                     .ToList();
             }
@@ -1363,55 +1067,21 @@ namespace GalExcleTools
 
         private GridViewItem CreateChapterCard(ChapterInfo chapter)
         {
-            var item = CreateBaseCard(chapter);
-            var flyout = new MenuFlyout();
-            var editItem = new MenuFlyoutItem
-            {
-                Text = "修改"
-            };
-            editItem.Click += async (_, _) => await EditChapterFromUiAsync(chapter);
-            flyout.Items.Add(editItem);
-
-            var importSectionItem = new MenuFlyoutItem
-            {
-                Text = "导入小节"
-            };
-            importSectionItem.Click += async (_, _) => await ImportStorySectionsFromUiAsync(chapter);
-            flyout.Items.Add(importSectionItem);
-
-            var backupItem = new MenuFlyoutItem
-            {
-                Text = "备份"
-            };
-            backupItem.Click += async (_, _) => await BackupChapterFromUiAsync(chapter);
-            flyout.Items.Add(backupItem);
-
-            var restoreItem = new MenuFlyoutItem
-            {
-                Text = "还原"
-            };
-            restoreItem.Click += async (_, _) => await RestoreChapterFromUiAsync(chapter);
-            flyout.Items.Add(restoreItem);
-
-            var repairItem = new MenuFlyoutItem
-            {
-                Text = "修复"
-            };
-            repairItem.Click += async (_, _) => await RepairChapterIndexesFromUiAsync(chapter);
-            flyout.Items.Add(repairItem);
-
-            var deleteItem = new MenuFlyoutItem
-            {
-                Text = "删除"
-            };
-            deleteItem.Click += async (_, _) => await DeleteChapterFromUiAsync(chapter);
-            flyout.Items.Add(deleteItem);
-            item.ContextFlyout = flyout;
-            item.Tapped += (_, _) => OpenStoryEditorFromUi(chapter);
-
-            var typeName = ChapterTypeOptions.FirstOrDefault(option => option.Kind == chapter.Type)?.DisplayName ?? chapter.Type;
-            item.Content = CreateCardContent(null, chapter.Name, $"{typeName} | {chapter.Code}", $"上次编辑时间 {chapter.LastEditedAt:yyyy-MM-dd HH:mm}");
-            return item;
+            var typeName = ChapterTypes.Options.FirstOrDefault(option => option.Kind == chapter.Type)?.DisplayName ?? chapter.Type;
+            return DashboardCardFactory.CreateInfoCard(
+                chapter,
+                null,
+                chapter.Name,
+                $"{typeName} | {chapter.Code}",
+                $"上次编辑时间 {chapter.LastEditedAt:yyyy-MM-dd HH:mm}",
+                (_, _) => OpenStoryEditorFromUi(chapter),
+                GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("修改", async (_, _) => await EditChapterFromUiAsync(chapter)),
+                GridViewItemFactory.CreateMenuItem("导入小节", async (_, _) => await ImportStorySectionsFromUiAsync(chapter)),
+                GridViewItemFactory.CreateMenuItem("备份", async (_, _) => await BackupChapterFromUiAsync(chapter)),
+                GridViewItemFactory.CreateMenuItem("还原", async (_, _) => await RestoreChapterFromUiAsync(chapter)),
+                GridViewItemFactory.CreateMenuItem("修复", async (_, _) => await RepairChapterIndexesFromUiAsync(chapter)),
+                GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteChapterFromUiAsync(chapter))));
         }
 
         private async void AddChapterButton_Click(object sender, RoutedEventArgs e)
@@ -1463,17 +1133,17 @@ namespace GalExcleTools
                 return;
             }
 
-            var chapterFolderName = SanitizeCharacterFolderName(input.Code);
-            var chapterPath = Path.Combine(GetChaptersFolderPath(_currentProject), chapterFolderName);
-            if (Directory.Exists(chapterPath))
+            try
             {
-                ShowChapterStatus(InfoBarSeverity.Warning, "无法创建章节", $"同名英文代号已存在：{input.Code}");
-                AppendLog(LogKind.Warning, $"无法创建章节，同名英文代号已存在：{input.Code}");
+                _projectWorkspaceService.CreateChapter(_currentProject, input);
+            }
+            catch (IOException ex)
+            {
+                ShowChapterStatus(InfoBarSeverity.Warning, "无法创建章节", ex.Message);
+                AppendLog(LogKind.Warning, $"无法创建章节：{ex.Message}");
                 return;
             }
 
-            Directory.CreateDirectory(chapterPath);
-            WriteChapterMeta(chapterPath, input);
             LoadChapters(_currentProject);
             ShowChapterStatus(InfoBarSeverity.Success, "章节已创建", $"{input.Name}（{input.Code}）");
             AppendLog(LogKind.User, $"创建章节：{input.Name}（{input.Code}）");
@@ -1507,20 +1177,17 @@ namespace GalExcleTools
                 return;
             }
 
-            var targetPath = Path.Combine(GetChaptersFolderPath(_currentProject), SanitizeCharacterFolderName(input.Code));
-            if (!PathsEqual(chapter.Path, targetPath) && Directory.Exists(targetPath))
+            try
             {
-                ShowChapterStatus(InfoBarSeverity.Warning, "无法修改章节", $"同名英文代号已存在：{input.Code}");
-                AppendLog(LogKind.Warning, $"无法修改章节，同名英文代号已存在：{input.Code}");
+                _projectWorkspaceService.UpdateChapter(_currentProject, chapter, input);
+            }
+            catch (IOException ex)
+            {
+                ShowChapterStatus(InfoBarSeverity.Warning, "无法修改章节", ex.Message);
+                AppendLog(LogKind.Warning, $"无法修改章节：{ex.Message}");
                 return;
             }
 
-            if (!PathsEqual(chapter.Path, targetPath))
-            {
-                Directory.Move(chapter.Path, targetPath);
-            }
-
-            WriteChapterMeta(targetPath, input);
             LoadChapters(_currentProject);
             ShowChapterStatus(InfoBarSeverity.Success, "章节已修改", $"{input.Name}（{input.Code}）");
             AppendLog(LogKind.User, $"修改章节：{chapter.Code} -> {input.Code}");
@@ -1554,7 +1221,7 @@ namespace GalExcleTools
                 return;
             }
 
-            Directory.Delete(chapter.Path, recursive: true);
+            _projectWorkspaceService.DeleteChapter(chapter);
             LoadChapters(_currentProject);
             ShowChapterStatus(InfoBarSeverity.Success, "章节已删除", $"{chapter.Name}（{chapter.Code}）");
             AppendLog(LogKind.User, $"删除章节：{chapter.Name}（{chapter.Code}）");
@@ -1574,7 +1241,7 @@ namespace GalExcleTools
                 var backup = await ShowFolderBackupProgressDialogAsync(
                     "正在备份章节",
                     $"{chapter.Name}（{chapter.Code}）",
-                    progress => Task.Run(() => CreateFolderBackup(chapter.Path, ChapterBackupsFolderName, chapter.Code, note, progress)));
+                    progress => Task.Run(() => _folderBackupService.CreateBackup(chapter.Path, ChapterBackupsFolderName, chapter.Code, note, progress, GetGlobalProgressCancellationToken())));
                 ShowChapterStatus(InfoBarSeverity.Success, "章节已备份", $"{chapter.Name}（{chapter.Code}）\n{backup.DisplayName}");
                 AppendLog(LogKind.User, $"备份章节：{chapter.Name}（{chapter.Code}）-> {backup.Path}");
             }
@@ -1596,7 +1263,7 @@ namespace GalExcleTools
                     return;
                 }
 
-                var backups = GetFolderBackups(chapter.Path, ChapterBackupsFolderName);
+                var backups = _folderBackupService.GetBackups(chapter.Path, ChapterBackupsFolderName);
                 if (backups.Count == 0)
                 {
                     ShowChapterStatus(InfoBarSeverity.Warning, "没有可还原的备份", "这个章节还没有创建过备份。");
@@ -1609,7 +1276,7 @@ namespace GalExcleTools
                     return;
                 }
 
-                RestoreFolderBackup(chapter.Path, ChapterBackupsFolderName, selectedBackup);
+                _folderBackupService.Restore(chapter.Path, ChapterBackupsFolderName, selectedBackup);
                 LoadChapters(_currentProject);
                 ShowChapterStatus(InfoBarSeverity.Success, "章节已还原", $"{chapter.Name}（{chapter.Code}）\n{selectedBackup.DisplayName}");
                 AppendLog(LogKind.User, $"还原章节：{chapter.Name}（{chapter.Code}）<- {selectedBackup.Path}");
@@ -1643,7 +1310,7 @@ namespace GalExcleTools
                 var scanResult = await ShowChapterRepairProgressDialogAsync(
                     "正在检查章节索引",
                     chapter,
-                    progress => Task.Run(() => ScanChapterIndexIssues(project, chapter, assetLibrary, repair: false, progress)));
+                    progress => Task.Run(() => _chapterRepairService.Scan(project, chapter, BuildChapterRepairAssetContext(assetLibrary), repair: false, progress)));
                 if (scanResult.IssueCount == 0)
                 {
                     ShowChapterStatus(InfoBarSeverity.Success, "章节索引正常", $"{chapter.Name}（{chapter.Code}）没有发现错开的素材索引。");
@@ -1660,7 +1327,7 @@ namespace GalExcleTools
                 var repairResult = await ShowChapterRepairProgressDialogAsync(
                     "正在修复章节索引",
                     chapter,
-                    progress => Task.Run(() => ScanChapterIndexIssues(project, chapter, assetLibrary, repair: true, progress)));
+                    progress => Task.Run(() => _chapterRepairService.Scan(project, chapter, BuildChapterRepairAssetContext(assetLibrary), repair: true, progress)));
                 RefreshOpenStoryRowsAfterIndexSync(repairResult.ChangedCsvPaths);
                 ShowChapterStatus(
                     repairResult.FixedCount > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
@@ -1682,245 +1349,15 @@ namespace GalExcleTools
                 : GetProjects().FirstOrDefault(project => IsPathInsideDirectory(chapter.Path, project.Path));
         }
 
-        private ChapterRepairResult ScanChapterIndexIssues(
-            ProjectInfo project,
-            ChapterInfo chapter,
-            AssetLibraryInfo assetLibrary,
-            bool repair,
-            IProgress<ChapterRepairProgress>? progress)
-        {
-            var csvFiles = GetLocalStorySectionCsvPaths(chapter)
-                .Where(file => File.Exists(file.Path))
-                .OrderBy(file => file.Section)
-                .ToList();
-            var issues = new List<ChapterRepairIssue>();
-            var changedCsvPaths = new List<string>();
-            var fixedCount = 0;
-            var context = BuildChapterRepairAssetContext(assetLibrary);
-
-            for (var csvIndex = 0; csvIndex < csvFiles.Count; csvIndex++)
-            {
-                var csvFile = csvFiles[csvIndex];
-                progress?.Report(new ChapterRepairProgress(
-                    $"正在检查第 {csvFile.Section} 小节 CSV",
-                    csvFiles.Count == 0 ? 100 : csvIndex * 90d / csvFiles.Count,
-                    csvIndex,
-                    csvFiles.Count,
-                    issues.Count,
-                    fixedCount,
-                    Path.GetFileName(csvFile.Path)));
-
-                var rows = ReadStoryRows(csvFile.Path);
-                var changed = false;
-                for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
-                {
-                    var row = rows[rowIndex];
-                    CheckRepairIndex(row, project, chapter, csvFile.Path, rowIndex, "BGindex", "背景图", context.BackgroundCount, repair, issues, ref changed, ref fixedCount);
-                    CheckRepairIndex(row, project, chapter, csvFile.Path, rowIndex, "BGM", "BGM", context.BgmCount, repair, issues, ref changed, ref fixedCount);
-                    CheckRepairIndex(row, project, chapter, csvFile.Path, rowIndex, "Scene", "环境音", context.SceneCount, repair, issues, ref changed, ref fixedCount);
-                    ValidateRepairCharacterLayer(row, project, chapter, csvFile.Path, rowIndex, "TalkChar", "TalkBody", "TalkFace", "TalkAdorn", "TalkVfx", "说话人", allowRawUnknownCharacter: true, context, repair, issues, ref changed, ref fixedCount);
-                    for (var slotIndex = 1; slotIndex <= 5; slotIndex++)
-                    {
-                        ValidateRepairCharacterLayer(row, project, chapter, csvFile.Path, rowIndex, $"Chara{slotIndex}", $"Body{slotIndex}", $"Face{slotIndex}", $"Adorn{slotIndex}", $"Vfx{slotIndex}", $"{slotIndex}号位", allowRawUnknownCharacter: false, context, repair, issues, ref changed, ref fixedCount);
-                    }
-                }
-
-                if (changed)
-                {
-                    WriteStoryRows(csvFile.Path, rows);
-                    changedCsvPaths.Add(csvFile.Path);
-                }
-            }
-
-            progress?.Report(new ChapterRepairProgress("章节索引检查完成。", 100, csvFiles.Count, csvFiles.Count, issues.Count, fixedCount, null));
-            return new ChapterRepairResult(project.Name, chapter.Name, chapter.Code, csvFiles.Count, issues.Count, fixedCount, changedCsvPaths, issues);
-        }
-
         private ChapterRepairAssetContext BuildChapterRepairAssetContext(AssetLibraryInfo assetLibrary)
         {
             var characters = GetCharactersForAssetLibrary(assetLibrary);
-            var characterAssets = characters.ToDictionary(
-                character => character.Code,
-                character => new CharacterRepairAssetCounts(
-                    GetCharacterLayerImagePaths(Path.Combine(character.Path, "DN_Cloth")).Count,
-                    GetCharacterLayerImagePaths(Path.Combine(character.Path, "FC_Face")).Count,
-                    GetCharacterLayerImagePaths(Path.Combine(character.Path, "AD_Adorn")).Count),
-                StringComparer.OrdinalIgnoreCase);
-            var characterAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var character in characters)
-            {
-                characterAliases[character.Code] = character.Code;
-                characterAliases[character.Name] = character.Code;
-            }
-
-            return new ChapterRepairAssetContext(
-                GetBackgroundImagePaths(GetBackgroundFolderPath(assetLibrary)).Count,
-                GetMusicFilePaths(GetMusicFolderPath(assetLibrary)).Count,
-                GetAudioFilePaths(GetAmbientSoundFolderPath(assetLibrary)).Count,
-                ReadCharacterFilters(assetLibrary).Count,
-                characterAliases,
-                characterAssets);
-        }
-
-        private static void ValidateRepairCharacterLayer(
-            StoryRow row,
-            ProjectInfo project,
-            ChapterInfo chapter,
-            string csvPath,
-            int rowIndex,
-            string characterColumn,
-            string bodyColumn,
-            string faceColumn,
-            string adornColumn,
-            string vfxColumn,
-            string label,
-            bool allowRawUnknownCharacter,
-            ChapterRepairAssetContext context,
-            bool repair,
-            List<ChapterRepairIssue> issues,
-            ref bool changed,
-            ref int fixedCount)
-        {
-            var characterValue = row.Get(characterColumn);
-            if (string.IsNullOrWhiteSpace(characterValue))
-            {
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, bodyColumn, $"{label}角色为空，身体索引应归零。", repair, issues, ref changed, ref fixedCount);
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, faceColumn, $"{label}角色为空，表情索引应归零。", repair, issues, ref changed, ref fixedCount);
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, adornColumn, $"{label}角色为空，装饰索引应归零。", repair, issues, ref changed, ref fixedCount);
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, vfxColumn, $"{label}角色为空，滤镜索引应归零。", repair, issues, ref changed, ref fixedCount);
-                return;
-            }
-
-            if (ContainsCjk(characterValue))
-            {
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, bodyColumn, $"{label}角色 `{characterValue}` 是中文/显示名，身体索引应归零。", repair, issues, ref changed, ref fixedCount);
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, faceColumn, $"{label}角色 `{characterValue}` 是中文/显示名，表情索引应归零。", repair, issues, ref changed, ref fixedCount);
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, adornColumn, $"{label}角色 `{characterValue}` 是中文/显示名，装饰索引应归零。", repair, issues, ref changed, ref fixedCount);
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, vfxColumn, $"{label}角色 `{characterValue}` 是中文/显示名，滤镜索引应归零。", repair, issues, ref changed, ref fixedCount);
-                return;
-            }
-
-            if (!context.CharacterAliases.TryGetValue(characterValue, out var characterCode) ||
-                !context.CharacterAssets.TryGetValue(characterCode, out var counts))
-            {
-                if (!allowRawUnknownCharacter)
-                {
-                    issues.Add(CreateChapterRepairIssue(project, chapter, csvPath, row, rowIndex, characterColumn, $"{label}角色 `{characterValue}` 不在当前素材库角色列表中，未自动改动。", canAutoFix: false));
-                }
-
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, bodyColumn, $"{label}角色 `{characterValue}` 没有匹配到立绘卡，身体索引应归零。", repair, issues, ref changed, ref fixedCount);
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, faceColumn, $"{label}角色 `{characterValue}` 没有匹配到立绘卡，表情索引应归零。", repair, issues, ref changed, ref fixedCount);
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, adornColumn, $"{label}角色 `{characterValue}` 没有匹配到立绘卡，装饰索引应归零。", repair, issues, ref changed, ref fixedCount);
-                CheckRepairDetachedCharacterLayer(row, project, chapter, csvPath, rowIndex, vfxColumn, $"{label}角色 `{characterValue}` 没有匹配到立绘卡，滤镜索引应归零。", repair, issues, ref changed, ref fixedCount);
-                return;
-            }
-
-            CheckRepairIndex(row, project, chapter, csvPath, rowIndex, bodyColumn, $"{label}身体", counts.ClothCount, repair, issues, ref changed, ref fixedCount);
-            CheckRepairIndex(row, project, chapter, csvPath, rowIndex, faceColumn, $"{label}表情", counts.FaceCount, repair, issues, ref changed, ref fixedCount);
-            CheckRepairAdornIndex(row, project, chapter, csvPath, rowIndex, adornColumn, $"{label}装饰", counts.AdornCount, repair, issues, ref changed, ref fixedCount);
-            CheckRepairIndex(row, project, chapter, csvPath, rowIndex, vfxColumn, $"{label}滤镜", context.FilterCount, repair, issues, ref changed, ref fixedCount);
-        }
-
-        private static void CheckRepairDetachedCharacterLayer(
-            StoryRow row,
-            ProjectInfo project,
-            ChapterInfo chapter,
-            string csvPath,
-            int rowIndex,
-            string columnName,
-            string message,
-            bool repair,
-            List<ChapterRepairIssue> issues,
-            ref bool changed,
-            ref int fixedCount)
-        {
-            var value = ParseInt(row.Get(columnName));
-            if (value == 0)
-            {
-                return;
-            }
-
-            issues.Add(CreateChapterRepairIssue(project, chapter, csvPath, row, rowIndex, columnName, message, canAutoFix: true));
-            if (repair)
-            {
-                row.Set(columnName, "0");
-                changed = true;
-                fixedCount++;
-            }
-        }
-
-        private static void CheckRepairIndex(
-            StoryRow row,
-            ProjectInfo project,
-            ChapterInfo chapter,
-            string csvPath,
-            int rowIndex,
-            string columnName,
-            string label,
-            int assetCount,
-            bool repair,
-            List<ChapterRepairIssue> issues,
-            ref bool changed,
-            ref int fixedCount)
-        {
-            var value = ParseInt(row.Get(columnName));
-            if (value >= 0 && value < assetCount)
-            {
-                return;
-            }
-
-            var canAutoFix = assetCount > 0 && value != 0;
-            issues.Add(CreateChapterRepairIssue(project, chapter, csvPath, row, rowIndex, columnName, $"{label}索引 {value} 超出范围；当前可用数量 {assetCount}。", canAutoFix));
-            if (repair && canAutoFix)
-            {
-                row.Set(columnName, "0");
-                changed = true;
-                fixedCount++;
-            }
-        }
-
-        private static void CheckRepairAdornIndex(
-            StoryRow row,
-            ProjectInfo project,
-            ChapterInfo chapter,
-            string csvPath,
-            int rowIndex,
-            string columnName,
-            string label,
-            int assetCount,
-            bool repair,
-            List<ChapterRepairIssue> issues,
-            ref bool changed,
-            ref int fixedCount)
-        {
-            var value = ParseInt(row.Get(columnName));
-            if (value == 0 || value > 0 && value <= assetCount)
-            {
-                return;
-            }
-
-            var canAutoFix = value != 0;
-            issues.Add(CreateChapterRepairIssue(project, chapter, csvPath, row, rowIndex, columnName, $"{label}索引 {value} 超出范围；0 表示无装饰，当前可用装饰数量 {assetCount}。", canAutoFix));
-            if (repair && canAutoFix)
-            {
-                row.Set(columnName, "0");
-                changed = true;
-                fixedCount++;
-            }
-        }
-
-        private static ChapterRepairIssue CreateChapterRepairIssue(ProjectInfo project, ChapterInfo chapter, string csvPath, StoryRow row, int rowIndex, string columnName, string message, bool canAutoFix)
-        {
-            return new ChapterRepairIssue(
-                project.Name,
-                chapter.Name,
-                chapter.Code,
-                Path.GetFileName(csvPath),
-                row.Get("Name"),
-                rowIndex + 1,
-                columnName,
-                message,
-                canAutoFix);
+            return ChapterRepairService.BuildAssetContext(
+                characters,
+                BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(assetLibrary)).Count,
+                AudioAssetService.GetFilePaths(GetMusicFolderPath(assetLibrary)).Count,
+                AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(assetLibrary)).Count,
+                _characterFilterService.Read(assetLibrary).Count);
         }
 
         private async Task ImportStorySectionsFromUiAsync(ChapterInfo chapter)
@@ -1956,7 +1393,7 @@ namespace GalExcleTools
         private async Task<List<string>?> ShowStorySectionImportDialogAsync(ChapterInfo chapter)
         {
             var selectedPaths = new List<string>();
-            ContentDialog? dialog = null;
+            ContentDialog? activeDialog = null;
 
             async Task PickCsvFilesAsync()
             {
@@ -1973,87 +1410,165 @@ namespace GalExcleTools
                     .ToList();
                 if (selectedPaths.Count > 0)
                 {
-                    dialog?.Hide();
+                    activeDialog?.Hide();
                 }
             }
 
-            var plusText = new TextBlock
+            Task AcceptDroppedFilesAsync(IReadOnlyList<string> csvPaths)
             {
-                Text = "+",
-                FontSize = 72,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-
-            var hintText = new TextBlock
-            {
-                Text = "点击选择 CSV，或把小节 CSV 拖到这里",
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
-            };
-
-            var dropZone = new Border
-            {
-                MinHeight = 260,
-                Padding = new Thickness(24),
-                Background = Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] as Brush,
-                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                AllowDrop = true,
-                Child = new StackPanel
+                selectedPaths = csvPaths.ToList();
+                if (selectedPaths.Count > 0)
                 {
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Spacing = 8,
-                    Children =
-                    {
-                        plusText,
-                        hintText
-                    }
+                    activeDialog?.Hide();
                 }
-            };
+                return Task.CompletedTask;
+            }
 
-            dropZone.Tapped += async (_, _) => await PickCsvFilesAsync();
-            dropZone.DragOver += (_, e) =>
+            var importContent = StoryDialogContentFactory.CreateStorySectionImportContent(
+                PickCsvFilesAsync,
+                AcceptDroppedFilesAsync);
+
+            await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                $"导入小节：{chapter.Name}",
+                importContent.Content,
+                string.Empty,
+                "取消",
+                DefaultButton: ContentDialogButton.Close,
+                PrimarySound: DialogSoundIntent.None,
+                ConfigureDialog: dialog => activeDialog = dialog));
+            return selectedPaths.Count > 0 ? selectedPaths : null;
+        }
+
+        private void ProjectsGridView_DragOver(object sender, DragEventArgs e)
+        {
+            if (e.DataView.Contains(StandardDataFormats.StorageItems))
             {
-                if (e.DataView.Contains(StandardDataFormats.StorageItems))
-                {
-                    e.AcceptedOperation = DataPackageOperation.Copy;
-                    e.DragUIOverride.Caption = "导入小节 CSV";
-                    e.DragUIOverride.IsCaptionVisible = true;
-                }
-            };
-            dropZone.Drop += async (_, e) =>
+                e.AcceptedOperation = DataPackageOperation.Copy;
+                e.DragUIOverride.Caption = "导入项目包";
+                e.DragUIOverride.IsCaptionVisible = true;
+            }
+        }
+
+        private async void ProjectsGridView_Drop(object sender, DragEventArgs e)
+        {
+            if (!e.DataView.Contains(StandardDataFormats.StorageItems))
             {
-                if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+                return;
+            }
+
+            try
+            {
+                var items = await e.DataView.GetStorageItemsAsync();
+                var archivePaths = items
+                    .OfType<StorageFile>()
+                    .Select(file => file.Path)
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Where(path => string.Equals(Path.GetExtension(path), ".zip", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (archivePaths.Count == 0)
                 {
+                    WorkspaceStatusText.Text = "没有可导入的项目包：请拖入项目导出的 .zip 文件。";
+                    AppendLog(LogKind.Warning, "项目导入失败：拖入内容里没有 .zip 项目包。");
                     return;
                 }
 
+                EnsureProjectRootDirectory(_projectRootPath);
+                var importedProjects = new List<ProjectInfo>();
+                ShowGlobalProgress("导入项目包", $"0 / {archivePaths.Count}");
+                for (var index = 0; index < archivePaths.Count; index++)
+                {
+                    GetGlobalProgressCancellationToken().ThrowIfCancellationRequested();
+                    var archivePath = archivePaths[index];
+                    var percent = archivePaths.Count == 0 ? 0 : index * 100d / archivePaths.Count;
+                    UpdateGlobalProgress(
+                        $"正在导入项目包 {index + 1}/{archivePaths.Count}",
+                        percent,
+                        Path.GetFileName(archivePath));
+                    importedProjects.Add(await Task.Run(() => _projectWorkspaceService.ImportProjectArchive(_projectRootPath, archivePath, GetGlobalProgressCancellationToken())));
+                }
+                CompleteGlobalProgress("项目导入完成", $"已导入 {importedProjects.Count} 个项目");
+                await HideGlobalProgressAfterDelayAsync();
+
+                LoadProjects();
+                RequestDelayedRefresh();
+                WorkspaceStatusText.Text = $"已导入 {importedProjects.Count} 个项目：{string.Join("、", importedProjects.Select(project => project.Name).Take(3))}";
+                AppendLog(LogKind.User, $"拖动导入项目：{string.Join("；", importedProjects.Select(project => $"{project.Name} -> {project.Path}"))}");
+            }
+            catch (Exception ex)
+            {
+                CompleteGlobalProgress(ex is OperationCanceledException ? "项目导入已取消" : "项目导入失败", ex.Message);
+                await HideGlobalProgressAfterDelayAsync();
+                WorkspaceStatusText.Text = $"导入项目失败：{ex.Message}";
+                AppendLog(LogKind.Error, "拖动导入项目失败。", ex);
+            }
+        }
+
+        private void AssetLibrariesGridView_DragOver(object sender, DragEventArgs e)
+        {
+            if (e.DataView.Contains(StandardDataFormats.StorageItems))
+            {
+                e.AcceptedOperation = DataPackageOperation.Copy;
+                e.DragUIOverride.Caption = "导入素材库包";
+                e.DragUIOverride.IsCaptionVisible = true;
+            }
+        }
+
+        private async void AssetLibrariesGridView_Drop(object sender, DragEventArgs e)
+        {
+            if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+            {
+                return;
+            }
+
+            try
+            {
                 var items = await e.DataView.GetStorageItemsAsync();
-                selectedPaths = items
+                var archivePaths = items
                     .OfType<StorageFile>()
                     .Select(file => file.Path)
-                    .Where(path => string.Equals(Path.GetExtension(path), ".csv", StringComparison.OrdinalIgnoreCase))
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Where(path => string.Equals(Path.GetExtension(path), ".zip", StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                if (selectedPaths.Count > 0)
+
+                if (archivePaths.Count == 0)
                 {
-                    dialog?.Hide();
+                    AssetLibraryStatusText.Text = "没有可导入的素材库包：请拖入素材库导出的 .zip 文件。";
+                    AppendLog(LogKind.Warning, "素材库导入失败：拖入内容里没有 .zip 素材库包。");
+                    return;
                 }
-            };
 
-            dialog = new ContentDialog
+                EnsureProjectRootDirectory(_projectRootPath);
+                var importedLibraries = new List<AssetLibraryInfo>();
+                ShowGlobalProgress("导入素材库包", $"0 / {archivePaths.Count}");
+                for (var index = 0; index < archivePaths.Count; index++)
+                {
+                    GetGlobalProgressCancellationToken().ThrowIfCancellationRequested();
+                    var archivePath = archivePaths[index];
+                    var percent = archivePaths.Count == 0 ? 0 : index * 100d / archivePaths.Count;
+                    UpdateGlobalProgress(
+                        $"正在导入素材库包 {index + 1}/{archivePaths.Count}",
+                        percent,
+                        Path.GetFileName(archivePath));
+                    importedLibraries.Add(await Task.Run(() => _projectWorkspaceService.ImportAssetLibraryArchive(_projectRootPath, archivePath, GetGlobalProgressCancellationToken())));
+                }
+                CompleteGlobalProgress("素材库导入完成", $"已导入 {importedLibraries.Count} 个素材库");
+                await HideGlobalProgressAfterDelayAsync();
+
+                LoadAssetLibraries();
+                LoadProjects();
+                LoadAssetLibraryOptions();
+                RequestDelayedRefresh();
+                AssetLibraryStatusText.Text = $"已导入 {importedLibraries.Count} 个素材库：{string.Join("、", importedLibraries.Select(library => library.Name).Take(3))}";
+                AppendLog(LogKind.User, $"拖动导入素材库：{string.Join("；", importedLibraries.Select(library => $"{library.Name} -> {library.Path}"))}");
+            }
+            catch (Exception ex)
             {
-                Title = $"导入小节：{chapter.Name}",
-                Content = dropZone,
-                CloseButtonText = "取消",
-                XamlRoot = Content.XamlRoot
-            };
-
-            await dialog.ShowAsync();
-            return selectedPaths.Count > 0 ? selectedPaths : null;
+                CompleteGlobalProgress(ex is OperationCanceledException ? "素材库导入已取消" : "素材库导入失败", ex.Message);
+                await HideGlobalProgressAfterDelayAsync();
+                AssetLibraryStatusText.Text = $"导入素材库失败：{ex.Message}";
+                AppendLog(LogKind.Error, "拖动导入素材库失败。", ex);
+            }
         }
 
         private void ChaptersGridView_DragOver(object sender, DragEventArgs e)
@@ -2122,7 +1637,7 @@ namespace GalExcleTools
                 return false;
             }
 
-            var compatibility = InspectStoryCsvCompatibility(sourceCsvPath);
+            var compatibility = _storyCsvService.InspectCompatibility(sourceCsvPath);
             if (!compatibility.IsCompatible)
             {
                 await ShowCsvCompatibilityFailedDialogAsync(sourceCsvPath, compatibility);
@@ -2136,10 +1651,10 @@ namespace GalExcleTools
                 return false;
             }
 
-            var rows = ReadStoryRows(sourceCsvPath);
+            var rows = _storyCsvService.ReadRows(sourceCsvPath);
             if (rows.Count == 0)
             {
-                rows.Add(CreateDefaultStoryRow());
+                rows.Add(_storyCsvService.CreateDefaultRow());
             }
 
             var chapterCode = importInput.Code;
@@ -2150,11 +1665,10 @@ namespace GalExcleTools
                 return false;
             }
 
-            Directory.CreateDirectory(chapterPath);
-            WriteChapterMeta(chapterPath, importInput);
+            _projectWorkspaceService.CreateImportedChapter(_currentProject, importInput);
 
             var targetCsvPath = Path.Combine(chapterPath, $"{chapterCode}.csv");
-            WriteStoryRows(targetCsvPath, rows);
+            _storyCsvService.WriteRows(targetCsvPath, rows);
 
             var sections = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var row in rows)
@@ -2194,89 +1708,18 @@ namespace GalExcleTools
             return await ShowChapterEditorDialogAsync(
                 "导入章节 CSV",
                 initialChapter,
-                CreateStoryCsvCompatibilityPanel(sourceCsvPath, compatibility));
+                StoryDialogContentFactory.CreateStoryCsvCompatibilityContent(sourceCsvPath, compatibility));
         }
 
         private async Task ShowCsvCompatibilityFailedDialogAsync(string sourceCsvPath, StoryCsvCompatibility compatibility)
         {
-            var dialog = new ContentDialog
-            {
-                Title = "CSV 结构不兼容",
-                Content = CreateStoryCsvCompatibilityPanel(sourceCsvPath, compatibility),
-                CloseButtonText = "知道了",
-                XamlRoot = Content.XamlRoot
-            };
-
-            await dialog.ShowAsync();
-        }
-
-        private FrameworkElement CreateStoryCsvCompatibilityPanel(string sourceCsvPath, StoryCsvCompatibility compatibility)
-        {
-            var panel = new StackPanel
-            {
-                Spacing = 8,
-                MaxWidth = 520
-            };
-
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"文件：{Path.GetFileName(sourceCsvPath)}",
-                TextWrapping = TextWrapping.Wrap
-            });
-
-            panel.Children.Add(new InfoBar
-            {
-                IsOpen = true,
-                IsClosable = false,
-                Severity = compatibility.IsCompatible ? InfoBarSeverity.Success : InfoBarSeverity.Error,
-                Title = compatibility.IsCompatible ? "结构体兼容" : "结构体不兼容",
-                Message = compatibility.IsCompatible
-                    ? "CSV 表头可以映射到当前 FStoryStruct。额外列会在导入副本中忽略。"
-                    : "CSV 表头缺少剧情表必要字段，已取消导入。"
-            });
-
-            if (compatibility.MissingColumns.Count > 0)
-            {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = $"缺少字段：{string.Join(", ", compatibility.MissingColumns)}",
-                    TextWrapping = TextWrapping.Wrap,
-                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.Firebrick)
-                });
-            }
-
-            if (compatibility.ExtraColumns.Count > 0)
-            {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = $"额外字段：{string.Join(", ", compatibility.ExtraColumns.Take(12))}{(compatibility.ExtraColumns.Count > 12 ? " ..." : string.Empty)}",
-                    TextWrapping = TextWrapping.Wrap,
-                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.DarkGoldenrod)
-                });
-            }
-
-            return panel;
-        }
-
-        private static StoryCsvCompatibility InspectStoryCsvCompatibility(string csvPath)
-        {
-            if (!File.Exists(csvPath))
-            {
-                return new StoryCsvCompatibility(false, StoryCsvColumns.ToList(), []);
-            }
-
-            var firstLine = File.ReadLines(csvPath, Encoding.UTF8).FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
-            if (string.IsNullOrWhiteSpace(firstLine))
-            {
-                return new StoryCsvCompatibility(false, StoryCsvColumns.ToList(), []);
-            }
-
-            var headers = NormalizeStoryCsvHeaders(ParseCsvLine(firstLine));
-            var headerSet = headers.ToHashSet(StringComparer.Ordinal);
-            var expectedSet = StoryCsvColumns.ToHashSet(StringComparer.Ordinal);
-            var missing = StoryCsvColumns.Where(column => !headerSet.Contains(column)).ToList();
-            var extra = headers.Where(column => !expectedSet.Contains(column)).ToList();
-            return new StoryCsvCompatibility(missing.Count == 0, missing, extra);
+            await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                "CSV 结构不兼容",
+                StoryDialogContentFactory.CreateStoryCsvCompatibilityContent(sourceCsvPath, compatibility),
+                string.Empty,
+                "知道了",
+                DefaultButton: ContentDialogButton.Close,
+                PrimarySound: DialogSoundIntent.None));
         }
 
         private string GetUniqueImportedChapterCode(string sourceName)
@@ -2332,7 +1775,7 @@ namespace GalExcleTools
             _storyEditSaveTimer?.Stop();
             _currentStoryChapter = chapter;
             _currentStoryAssetLibrary = ResolveProjectAssetLibrary(_currentProject);
-            _currentStoryCsvPath = GetChapterStoryCsvPath(chapter);
+            _currentStoryCsvPath = _storyCsvService.GetChapterCsvPath(chapter);
             ClearStoryUndoStack();
             UpdateStoryDebugModeUi();
             _storyBackgroundPreviewKey = null;
@@ -2340,8 +1783,7 @@ namespace GalExcleTools
             _storyBgmPlaybackSuppressed = false;
             ApplyStoryTextFontSizeToUi();
             UpdateStoryEditorHeader();
-            StoryEditorCsvPathText.Text = _currentStoryCsvPath;
-            StoryAssetStatusText.Text = _currentStoryAssetLibrary is null
+            _storyEditorViewModel.AssetStatusText = _currentStoryAssetLibrary is null
                 ? "当前项目未关联素材库。"
                 : $"素材库：{_currentStoryAssetLibrary.Name}";
 
@@ -2351,6 +1793,7 @@ namespace GalExcleTools
             PersistCurrentStoryRowsToFiles();
 
             _currentStoryRowIndex = Math.Clamp(chapter.LastEditedRowIndex, 0, _storyRows.Count - 1);
+            _storyEditorViewModel.RefreshCommandStates();
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
             UpdateStoryCharacterSlotLayout();
             LoadStoryRowIntoUi();
@@ -2367,6 +1810,7 @@ namespace GalExcleTools
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
+            PlayPageEntrance(StoryEditorPage);
             StoryEditorBackButton.Focus(FocusState.Programmatic);
             StoryEditorPage.Focus(FocusState.Programmatic);
             _ = WarmStoryPreviewImageCacheAsync();
@@ -2375,6 +1819,7 @@ namespace GalExcleTools
 
         private void CloseStoryEditorButton_Click(object sender, RoutedEventArgs e)
         {
+            PlayNegativeSound();
             SaveCurrentStoryRow();
             SaveCurrentChapterProgress();
             _storyEditSaveTimer?.Stop();
@@ -2387,11 +1832,6 @@ namespace GalExcleTools
             {
                 ShowWorkbenchPage();
             }
-        }
-
-        private void UndoStoryEditorButton_Click(object sender, RoutedEventArgs e)
-        {
-            UndoStoryEditorOperation();
         }
 
         private void StoryDebugModeCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -2407,6 +1847,8 @@ namespace GalExcleTools
             {
                 InsertStoryRowHereButton.Visibility = _isStoryDebugModeEnabled ? Visibility.Collapsed : Visibility.Visible;
             }
+
+            _storyEditorViewModel.RefreshCommandStates();
         }
 
         private StoryEditorUndoState? CaptureStoryUndoState(string description)
@@ -2421,7 +1863,7 @@ namespace GalExcleTools
                 new Dictionary<string, int>(_storyRowSections, StringComparer.OrdinalIgnoreCase),
                 Math.Clamp(_currentStoryRowIndex, 0, _storyRows.Count - 1),
                 description,
-                _currentStoryChapter is null ? null : CloneStoryChoiceNoteState(ReadStoryChoiceNoteState(_currentStoryChapter)));
+                _currentStoryChapter is null ? null : StoryStateService.CloneChoiceNotes(_storyStateService.ReadChoiceNotes(_currentStoryChapter)));
             _storyUndoStack.Add(state);
             if (_storyUndoStack.Count > MaxStoryUndoCount)
             {
@@ -2441,10 +1883,7 @@ namespace GalExcleTools
 
         private void UpdateStoryUndoState()
         {
-            if (StoryUndoButton is not null)
-            {
-                StoryUndoButton.IsEnabled = _storyUndoStack.Count > 0;
-            }
+            _storyEditorViewModel.RefreshUndoState();
         }
 
         private void UndoStoryEditorOperation()
@@ -2475,7 +1914,7 @@ namespace GalExcleTools
             _isStoryRowDirty = false;
             if (_currentStoryChapter is not null && state.ChoiceNotes is not null)
             {
-                WriteStoryChoiceNoteState(_currentStoryChapter, CloneStoryChoiceNoteState(state.ChoiceNotes));
+                _storyStateService.WriteChoiceNotes(_currentStoryChapter, StoryStateService.CloneChoiceNotes(state.ChoiceNotes));
                 RemoveUnusedStoryChoiceNotes(state.ChoiceNotes.Choices.Keys);
             }
 
@@ -2486,24 +1925,14 @@ namespace GalExcleTools
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
             LoadStoryRowIntoUi();
             UpdateStoryUndoState();
+            _storyEditorViewModel.RefreshCommandStates();
             ShowStoryStatus(InfoBarSeverity.Success, "已撤回", state.Description);
             AppendLog(LogKind.User, $"撤回编辑器操作：{state.Description}");
         }
 
         private static List<StoryRow> CloneStoryRows(IEnumerable<StoryRow> rows)
         {
-            return rows.Select(row => row.Clone()).ToList();
-        }
-
-        private static StoryChoiceNoteState CloneStoryChoiceNoteState(StoryChoiceNoteState state)
-        {
-            var clone = new StoryChoiceNoteState();
-            foreach (var pair in state.Choices)
-            {
-                clone.Choices[pair.Key] = pair.Value.ToList();
-            }
-
-            return clone;
+            return StoryEditorService.CloneRows(rows);
         }
 
         private void LoadStoryRowIntoUi()
@@ -2518,8 +1947,8 @@ namespace GalExcleTools
             try
             {
                 var row = _storyRows[_currentStoryRowIndex];
-                StorySpeakerTextBox.Text = row.Get("TalkChar");
-                StoryTextTextBox.Text = row.Get("Tesxt");
+                _storyEditorViewModel.SpeakerText = row.Get("TalkChar");
+                _storyEditorViewModel.StoryText = row.Get("Tesxt");
                 UpdateStoryRowIndexInput();
                 var section = GetCurrentStorySection();
                 EnsureStorySectionOptions(section);
@@ -2553,16 +1982,16 @@ namespace GalExcleTools
 
             var row = _storyRows[_currentStoryRowIndex];
             var changed = false;
-            var speakerName = NormalizeStoryCharacterNameForCsv(StorySpeakerTextBox.Text);
+            var speakerName = NormalizeStoryCharacterNameForCsv(_storyEditorViewModel.SpeakerText);
             if (!string.Equals(row.Get("TalkChar"), speakerName, StringComparison.Ordinal))
             {
                 row.Set("TalkChar", speakerName);
                 changed = true;
             }
 
-            if (!string.Equals(row.Get("Tesxt"), StoryTextTextBox.Text, StringComparison.Ordinal))
+            if (!string.Equals(row.Get("Tesxt"), _storyEditorViewModel.StoryText, StringComparison.Ordinal))
             {
-                row.Set("Tesxt", StoryTextTextBox.Text);
+                row.Set("Tesxt", _storyEditorViewModel.StoryText);
                 changed = true;
             }
 
@@ -2631,47 +2060,21 @@ namespace GalExcleTools
             {
                 if (_appSettings.ShowFullStoryChapterLength)
                 {
-                    StoryRowIndexTextBox.Text = (_currentStoryRowIndex + 1).ToString();
-                    StoryRowTotalText.Text = $"/ {_storyRows.Count} 句";
+                    _storyEditorViewModel.RowIndexText = (_currentStoryRowIndex + 1).ToString();
+                    _storyEditorViewModel.RowTotalText = $"/ {_storyRows.Count} 句";
                 }
                 else
                 {
-                    var sectionInfo = GetCurrentStorySectionPositionInfo();
-                    StoryRowIndexTextBox.Text = sectionInfo.LocalIndex.ToString();
-                    StoryRowTotalText.Text = $"/ {sectionInfo.Total} 句";
+                    var sectionInfo = _storyEditorViewModel.GetCurrentSectionPositionInfo();
+                    _storyEditorViewModel.RowIndexText = sectionInfo.LocalIndex.ToString();
+                    _storyEditorViewModel.RowTotalText = $"/ {sectionInfo.Total} 句";
                 }
+
             }
             finally
             {
                 _isUpdatingStoryRowIndexText = false;
             }
-        }
-
-        private (int LocalIndex, int Total) GetCurrentStorySectionPositionInfo()
-        {
-            if (_storyRows.Count == 0)
-            {
-                return (1, 1);
-            }
-
-            var currentSection = GetCurrentStorySection();
-            var total = 0;
-            var localIndex = 1;
-            for (var i = 0; i < _storyRows.Count; i++)
-            {
-                if (GetStorySectionAtRowIndex(i) != currentSection)
-                {
-                    continue;
-                }
-
-                total++;
-                if (i == _currentStoryRowIndex)
-                {
-                    localIndex = total;
-                }
-            }
-
-            return (Math.Max(1, localIndex), Math.Max(1, total));
         }
 
         private void SaveCurrentChapterProgress()
@@ -2681,14 +2084,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var metaPath = Path.Combine(_currentStoryChapter.Path, ChapterMetaFileName);
-            var meta = ReadJson<ChapterMeta>(metaPath) ?? new ChapterMeta();
-            meta.ChapterName = string.IsNullOrWhiteSpace(meta.ChapterName) ? _currentStoryChapter.Name : meta.ChapterName;
-            meta.ChapterCode = string.IsNullOrWhiteSpace(meta.ChapterCode) ? _currentStoryChapter.Code : meta.ChapterCode;
-            meta.ChapterType = string.IsNullOrWhiteSpace(meta.ChapterType) ? _currentStoryChapter.Type : meta.ChapterType;
-            meta.LastEditedAt = DateTime.Now;
-            meta.LastEditedRowIndex = Math.Max(0, _currentStoryRowIndex);
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
+            _projectWorkspaceService.SaveChapterProgress(_currentStoryChapter, _currentStoryRowIndex);
         }
 
         private void StoryRowIndexTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -2763,11 +2159,6 @@ namespace GalExcleTools
             LoadStoryRowIntoUi();
         }
 
-        private void PreviousStoryRowButton_Click(object sender, RoutedEventArgs e)
-        {
-            NavigatePreviousStoryRow();
-        }
-
         private void NavigatePreviousStoryRow()
         {
             if (_storyRows.Count == 0 || _currentStoryRowIndex <= 0)
@@ -2776,26 +2167,6 @@ namespace GalExcleTools
             }
 
             NavigateToStoryRow(_currentStoryRowIndex - 1, rebuildPersistentState: true);
-        }
-
-        private void NextStoryRowButton_Click(object sender, RoutedEventArgs e)
-        {
-            NavigateNextStoryRow();
-        }
-
-        private void InsertStoryRowHereButton_Click(object sender, RoutedEventArgs e)
-        {
-            InsertStoryRowHere();
-        }
-
-        private void PreviousStorySectionButton_Click(object sender, RoutedEventArgs e)
-        {
-            NavigateStorySection(-1);
-        }
-
-        private void NextStorySectionButton_Click(object sender, RoutedEventArgs e)
-        {
-            NavigateStorySection(1);
         }
 
         private void NavigateStorySection(int direction)
@@ -2852,9 +2223,6 @@ namespace GalExcleTools
             }
 
             SaveCurrentStoryRow();
-            var sections = GetStorySectionsInRowOrder();
-            var copiedSection = _currentStoryRowIndex < sections.Count ? sections[_currentStoryRowIndex] : 1;
-            var createdRow = false;
             if (_currentStoryRowIndex >= _storyRows.Count - 1)
             {
                 if (_isStoryDebugModeEnabled)
@@ -2864,20 +2232,14 @@ namespace GalExcleTools
                 }
 
                 CaptureStoryUndoState("新建下一句");
-                var nextRow = _storyRows[_currentStoryRowIndex].Clone();
-                nextRow.Set("Name", CreateStoryRowName(_storyRows.Count));
-                nextRow.Set("Tesxt", string.Empty);
-                nextRow.Set("Custom", string.Empty);
-                _storyRows.Add(nextRow);
-                sections.Add(copiedSection);
-                createdRow = true;
             }
 
-            _currentStoryRowIndex++;
+            var result = _storyEditorService.MoveNextOrCreate(_storyRows, _storyRowSections, _currentStoryRowIndex);
+            _currentStoryRowIndex = result.RowIndex;
             SaveCurrentChapterProgress();
-            if (createdRow)
+            _storyEditorViewModel.RefreshCommandStates();
+            if (result.Changed)
             {
-                ApplyStorySectionsInRowOrder(sections);
                 PersistCurrentStoryRowsToFiles();
             }
 
@@ -2899,23 +2261,12 @@ namespace GalExcleTools
 
             SaveCurrentStoryRow();
             CaptureStoryUndoState("原地新建一句");
-            var sections = GetStorySectionsInRowOrder();
-            var copiedSection = _currentStoryRowIndex < sections.Count ? sections[_currentStoryRowIndex] : GetCurrentStorySection();
-            var insertedRow = _storyRows[_currentStoryRowIndex].Clone();
-            insertedRow.Set("Tesxt", string.Empty);
-            insertedRow.Set("Custom", string.Empty);
-
-            _storyRows.Insert(_currentStoryRowIndex, insertedRow);
-            sections.Insert(_currentStoryRowIndex, copiedSection);
-            for (var i = 0; i < _storyRows.Count; i++)
-            {
-                _storyRows[i].Set("Name", CreateStoryRowName(i));
-            }
-
-            ApplyStorySectionsInRowOrder(sections);
+            var result = _storyEditorService.InsertAtCurrent(_storyRows, _storyRowSections, _currentStoryRowIndex);
+            _currentStoryRowIndex = result.RowIndex;
             PersistCurrentStoryRowsToFiles();
             SaveCurrentChapterProgress();
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
+            _storyEditorViewModel.RefreshCommandStates();
             LoadStoryRowIntoUi();
             ShowStoryStatus(InfoBarSeverity.Success, "已原地新建", "新句子已插入当前位置，后面的剧情已顺延。");
         }
@@ -2940,40 +2291,22 @@ namespace GalExcleTools
             }
         }
 
-        private void DeleteStoryRowButton_Click(object sender, RoutedEventArgs e)
+        private void DeleteCurrentStoryRow()
         {
             if (_storyRows.Count == 0 || _currentStoryCsvPath is null)
             {
                 return;
             }
 
-            var sections = GetStorySectionsInRowOrder();
             var removedChoices = GetCurrentStoryChoiceValues();
             CaptureStoryUndoState("删除当前句");
-            if (_storyRows.Count == 1)
-            {
-                _storyRows[0] = CreateDefaultStoryRow();
-                _currentStoryRowIndex = 0;
-                _storyRowSections.Clear();
-                sections = [1];
-            }
-            else
-            {
-                _storyRowSections.Remove(_storyRows[_currentStoryRowIndex].Get("Name"));
-                if (_currentStoryRowIndex < sections.Count)
-                {
-                    sections.RemoveAt(_currentStoryRowIndex);
-                }
-
-                _storyRows.RemoveAt(_currentStoryRowIndex);
-                _currentStoryRowIndex = Math.Min(_currentStoryRowIndex, _storyRows.Count - 1);
-            }
-
-            ApplyStorySectionsInRowOrder(sections);
+            var result = _storyEditorService.DeleteCurrent(_storyRows, _storyRowSections, _currentStoryRowIndex, removedChoices);
+            _currentStoryRowIndex = result.RowIndex;
             PersistCurrentStoryRowsToFiles();
-            RemoveUnusedStoryChoiceNotes(removedChoices);
+            RemoveUnusedStoryChoiceNotes(result.RemovedChoiceValues);
             SaveCurrentChapterProgress();
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
+            _storyEditorViewModel.RefreshCommandStates();
             LoadStoryRowIntoUi();
         }
 
@@ -3027,7 +2360,7 @@ namespace GalExcleTools
             }
         }
 
-        private void AddStorySectionButton_Click(object sender, RoutedEventArgs e)
+        private void AddStorySection()
         {
             if (_currentStoryCsvPath is null || _storyRows.Count == 0)
             {
@@ -3053,6 +2386,7 @@ namespace GalExcleTools
             UpdateStoryRowIndexInput();
             UpdateStoryEditorHeader();
             UpdateStoryToolbarCurrentInfo();
+            _storyEditorViewModel.RefreshCommandStates();
         }
 
         private void SelectStorySection(int section)
@@ -3078,34 +2412,12 @@ namespace GalExcleTools
 
         private int GetCurrentStorySection()
         {
-            if (_storyRows.Count == 0)
-            {
-                return 1;
-            }
-
-            return GetStorySectionAtRowIndex(_currentStoryRowIndex);
+            return _storyEditorViewModel.GetCurrentSection();
         }
 
         private int GetStorySectionAtRowIndex(int rowIndex)
         {
-            if (rowIndex < 0 || rowIndex >= _storyRows.Count)
-            {
-                return 1;
-            }
-
-            var rowName = _storyRows[rowIndex].Get("Name");
-            return _storyRowSections.TryGetValue(rowName, out var section) ? Math.Max(1, section) : 1;
-        }
-
-        private int GetPreviousStorySection(int rowIndex)
-        {
-            if (rowIndex <= 0 || rowIndex > _storyRows.Count - 1)
-            {
-                return 1;
-            }
-
-            var rowName = _storyRows[rowIndex - 1].Get("Name");
-            return _storyRowSections.TryGetValue(rowName, out var section) ? Math.Max(1, section) : 1;
+            return _storyEditorViewModel.GetSectionAtRowIndex(rowIndex);
         }
 
         private void SetCurrentStorySection(int section)
@@ -3115,7 +2427,7 @@ namespace GalExcleTools
                 return;
             }
 
-            _storyRowSections[_storyRows[_currentStoryRowIndex].Get("Name")] = Math.Max(1, section);
+            _storyEditorViewModel.SetCurrentSection(section);
             EnsureStorySectionOptions(section);
         }
 
@@ -3126,118 +2438,28 @@ namespace GalExcleTools
                 return false;
             }
 
-            section = Math.Max(1, section);
-            var rowName = _storyRows[_currentStoryRowIndex].Get("Name");
-            if (_storyRowSections.TryGetValue(rowName, out var currentSection) &&
-                Math.Max(1, currentSection) == section)
-            {
-                EnsureStorySectionOptions(section);
-                return false;
-            }
-
-            _storyRowSections[rowName] = section;
+            var changed = _storyEditorViewModel.SetCurrentSectionIfChanged(section);
             EnsureStorySectionOptions(section);
-            return true;
-        }
-
-        private void LoadStorySectionState(ChapterInfo chapter)
-        {
-            _storyRowSections.Clear();
-            var state = ReadJson<StorySectionState>(GetStorySectionsPath(chapter));
-            if (state?.Rows is null)
-            {
-                return;
-            }
-
-            foreach (var pair in state.Rows)
-            {
-                if (!string.IsNullOrWhiteSpace(pair.Key))
-                {
-                    _storyRowSections[pair.Key] = Math.Max(1, pair.Value);
-                }
-            }
+            return changed;
         }
 
         private void LoadStoryRowsFromSectionFiles(ChapterInfo chapter)
         {
             _storyRows.Clear();
             _storyRowSections.Clear();
-
-            var mainCsvPath = GetChapterStoryCsvPath(chapter);
-            Directory.CreateDirectory(chapter.Path);
-            var sectionFiles = GetLocalStorySectionCsvPaths(chapter)
-                .OrderBy(item => item.Section)
-                .ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (!sectionFiles.Any(item => item.Section == 1))
+            var result = _storySessionService.LoadRowsFromSectionFiles(chapter);
+            _storyRows.AddRange(result.Rows);
+            foreach (var pair in result.Sections)
             {
-                sectionFiles.Insert(0, new StorySectionCsvFile(mainCsvPath, 1));
+                _storyRowSections[pair.Key] = pair.Value;
             }
 
-            var legacySectionMap = ReadStorySectionMap(chapter);
-            if (!sectionFiles.Any(item => item.Section > 1) &&
-                legacySectionMap.Values.Any(section => section > 1) &&
-                File.Exists(mainCsvPath))
+            _storyEditorViewModel.RefreshCollectionState();
+            _storyEditorViewModel.RefreshCommandStates();
+
+            if (result.RemovedEmptySectionCount > 0)
             {
-                var legacyRows = ReadStoryRows(mainCsvPath);
-                var previousSection = 1;
-                foreach (var row in legacyRows)
-                {
-                    var originalName = row.Get("Name");
-                    if (legacySectionMap.TryGetValue(originalName, out var section))
-                    {
-                        previousSection = Math.Max(1, section);
-                    }
-
-                    var clone = row.Clone();
-                    clone.Set("Name", CreateStoryRowName(_storyRows.Count));
-                    _storyRows.Add(clone);
-                    _storyRowSections[clone.Get("Name")] = previousSection;
-                }
-
-                if (_storyRows.Count > 0)
-                {
-                    return;
-                }
-            }
-
-            var removedEmptyCount = 0;
-            foreach (var sectionFile in sectionFiles)
-            {
-                var rows = ReadStoryRows(sectionFile.Path);
-                var isMainSection = sectionFile.Section == 1 && PathsEqual(sectionFile.Path, mainCsvPath);
-                if (rows.Count == 0 || !rows.Any(StoryRowHasContent))
-                {
-                    if (!isMainSection && File.Exists(sectionFile.Path))
-                    {
-                        File.Delete(sectionFile.Path);
-                        removedEmptyCount++;
-                    }
-
-                    continue;
-                }
-
-                foreach (var row in rows)
-                {
-                    var clone = row.Clone();
-                    clone.Set("Name", CreateStoryRowName(_storyRows.Count));
-                    _storyRows.Add(clone);
-                    _storyRowSections[clone.Get("Name")] = Math.Max(1, sectionFile.Section);
-                }
-            }
-
-            if (_storyRows.Count == 0)
-            {
-                var row = CreateDefaultStoryRow();
-                _storyRows.Add(row);
-                _storyRowSections[row.Get("Name")] = 1;
-                WriteStoryRows(mainCsvPath, _storyRows);
-            }
-
-            if (removedEmptyCount > 0)
-            {
-                ShowStoryStatus(InfoBarSeverity.Informational, "已清理空小节", $"检测并删除 {removedEmptyCount} 个空小节 CSV。");
+                ShowStoryStatus(InfoBarSeverity.Informational, "已清理空小节", $"检测并删除 {result.RemovedEmptySectionCount} 个空小节 CSV。");
             }
         }
 
@@ -3248,11 +2470,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var looseCsvPaths = Directory
-                .EnumerateFiles(chapter.Path, "*.csv", SearchOption.TopDirectoryOnly)
-                .Where(path => IsLooseStorySectionCsvCandidate(chapter, path))
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var looseCsvPaths = _storySessionService.GetLooseSectionCsvPaths(chapter);
             if (looseCsvPaths.Count == 0)
             {
                 return;
@@ -3268,56 +2486,13 @@ namespace GalExcleTools
 
         private int ImportStorySectionCsvFiles(ChapterInfo chapter, IReadOnlyList<string> csvPaths, bool deleteSourceFiles)
         {
-            var mainCsvPath = GetChapterStoryCsvPath(chapter);
-            var changed = false;
-            var importedCount = 0;
-            var nextSection = GetLocalStorySectionCsvPaths(chapter)
-                .Select(item => item.Section)
-                .DefaultIfEmpty(1)
-                .Max() + 1;
-            foreach (var csvPath in csvPaths.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            var result = _storySessionService.ImportSectionCsvFiles(chapter, csvPaths, deleteSourceFiles);
+            foreach (var log in result.Logs)
             {
-                if (PathsEqual(csvPath, mainCsvPath) || !File.Exists(csvPath))
-                {
-                    continue;
-                }
-
-                var compatibility = InspectStoryCsvCompatibility(csvPath);
-                if (!compatibility.IsCompatible)
-                {
-                    AppendLog(LogKind.Warning, $"跳过结构不兼容的小节 CSV：{csvPath}");
-                    continue;
-                }
-
-                var sectionRows = ReadStoryRows(csvPath);
-                if (sectionRows.Count == 0 || !sectionRows.Any(StoryRowHasContent))
-                {
-                    if (deleteSourceFiles)
-                    {
-                        File.Delete(csvPath);
-                    }
-
-                    changed = true;
-                    AppendLog(LogKind.Info, $"已删除空小节 CSV：{csvPath}");
-                    continue;
-                }
-
-                var section = TryParseStorySectionFromFileName(chapter, csvPath) ?? nextSection++;
-                var targetCsvPath = GetStorySectionCsvPath(chapter, section);
-                var rowsToWrite = sectionRows.Select(row => row.Clone()).ToList();
-                WriteStoryRows(targetCsvPath, rowsToWrite);
-
-                if (deleteSourceFiles && !PathsEqual(csvPath, targetCsvPath))
-                {
-                    File.Delete(csvPath);
-                }
-
-                changed = true;
-                importedCount++;
-                AppendLog(LogKind.User, $"已导入小节 CSV 为第 {section} 小节：{Path.GetFileName(csvPath)}");
+                AppendLog(log.Kind, log.Message);
             }
 
-            if (changed)
+            if (result.Changed)
             {
                 if (_currentStoryChapter is not null && PathsEqual(_currentStoryChapter.Path, chapter.Path))
                 {
@@ -3327,75 +2502,7 @@ namespace GalExcleTools
                 }
             }
 
-            return importedCount;
-        }
-
-        private static bool IsLooseStorySectionCsvCandidate(ChapterInfo chapter, string csvPath)
-        {
-            var mainCsvPath = GetChapterStoryCsvPath(chapter);
-            if (PathsEqual(csvPath, mainCsvPath))
-            {
-                return false;
-            }
-
-            var fileName = Path.GetFileName(csvPath);
-            var baseName = BuildSectionCsvBaseName(chapter.Code);
-            var sectionBaseName = BuildSectionCsvChapterBaseName(chapter.Code);
-            if (fileName.StartsWith($"{baseName}_小节", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (Regex.IsMatch(
-                Path.GetFileNameWithoutExtension(csvPath),
-                $"^{Regex.Escape(sectionBaseName)}[-_](?<index>\\d+)$",
-                RegexOptions.IgnoreCase))
-            {
-                return true;
-            }
-
-            return !fileName.EndsWith(".story.csv", StringComparison.OrdinalIgnoreCase) &&
-                !fileName.StartsWith($"{sectionBaseName}_", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string GetStorySectionCsvPath(ChapterInfo chapter, int section)
-        {
-            return section <= 1
-                ? GetChapterStoryCsvPath(chapter)
-                : Path.Combine(chapter.Path, $"{BuildSectionCsvFileBaseName(chapter.Code, section)}.csv");
-        }
-
-        private static List<StorySectionCsvFile> GetLocalStorySectionCsvPaths(ChapterInfo chapter)
-        {
-            if (!Directory.Exists(chapter.Path))
-            {
-                return [];
-            }
-
-            var mainCsvPath = GetChapterStoryCsvPath(chapter);
-            var result = new List<StorySectionCsvFile>();
-            foreach (var csvPath in Directory.EnumerateFiles(chapter.Path, "*.csv", SearchOption.TopDirectoryOnly)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
-            {
-                if (Path.GetFileName(csvPath).EndsWith(".story.csv", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (PathsEqual(csvPath, mainCsvPath))
-                {
-                    result.Add(new StorySectionCsvFile(csvPath, 1));
-                    continue;
-                }
-
-                var section = TryParseStorySectionFromFileName(chapter, csvPath);
-                if (section is not null)
-                {
-                    result.Add(new StorySectionCsvFile(csvPath, Math.Max(1, section.Value)));
-                }
-            }
-
-            return result;
+            return result.ImportedCount;
         }
 
         private void PersistCurrentStoryRowsToFiles(bool showStatus = false)
@@ -3408,55 +2515,11 @@ namespace GalExcleTools
             _isPersistingStoryRows = true;
             try
             {
-                for (var i = 0; i < _storyRows.Count; i++)
-                {
-                    _storyRows[i].Set("Name", CreateStoryRowName(i));
-                }
-
-                SynchronizeStorySectionState();
-                var groupedRows = _storyRows
-                    .Select((row, index) => new
-                    {
-                        Row = row,
-                        Section = _storyRowSections.TryGetValue(row.Get("Name"), out var section) ? Math.Max(1, section) : 1,
-                        Index = index
-                    })
-                    .GroupBy(item => item.Section)
-                    .OrderBy(group => group.Key)
-                    .ToList();
-
-                var activeCsvPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var group in groupedRows)
-                {
-                    var rows = group.Select(item => item.Row.Clone()).ToList();
-                    var targetCsvPath = GetStorySectionCsvPath(_currentStoryChapter, group.Key);
-                    if (!rows.Any(StoryRowHasContent))
-                    {
-                        if (group.Key > 1 && File.Exists(targetCsvPath))
-                        {
-                            File.Delete(targetCsvPath);
-                        }
-
-                        continue;
-                    }
-
-                    WriteStoryRows(targetCsvPath, rows);
-                    activeCsvPaths.Add(targetCsvPath);
-                }
-
-                if (activeCsvPaths.Count == 0)
-                {
-                    var defaultRows = new List<StoryRow> { CreateDefaultStoryRow() };
-                    WriteStoryRows(_currentStoryCsvPath, defaultRows);
-                    activeCsvPaths.Add(_currentStoryCsvPath);
-                }
-
-                DeleteInactiveLocalStorySectionCsvFiles(_currentStoryChapter, activeCsvPaths);
-                WriteStorySectionState(_currentStoryChapter.Path, _storyRowSections);
+                var result = _storySessionService.PersistRowsToSectionFiles(_currentStoryChapter, _currentStoryCsvPath, _storyRows, _storyRowSections);
 
                 if (showStatus)
                 {
-                    ShowStoryStatus(InfoBarSeverity.Success, "小节 CSV 已更新", $"已按 {activeCsvPaths.Count} 个小节文件保存。");
+                    ShowStoryStatus(InfoBarSeverity.Success, "小节 CSV 已更新", $"已按 {result.ActiveCsvCount} 个小节文件保存。");
                 }
             }
             finally
@@ -3465,65 +2528,19 @@ namespace GalExcleTools
             }
         }
 
-        private static void DeleteInactiveLocalStorySectionCsvFiles(ChapterInfo chapter, IReadOnlySet<string> activeCsvPaths)
-        {
-            foreach (var sectionFile in GetLocalStorySectionCsvPaths(chapter))
-            {
-                if (!activeCsvPaths.Contains(sectionFile.Path) && File.Exists(sectionFile.Path))
-                {
-                    File.Delete(sectionFile.Path);
-                }
-            }
-        }
-
         private void SynchronizeStorySectionState()
         {
-            var synchronized = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var previousSection = 1;
-            foreach (var row in _storyRows)
-            {
-                var rowName = row.Get("Name");
-                if (_storyRowSections.TryGetValue(rowName, out var section))
-                {
-                    previousSection = Math.Max(1, section);
-                }
-
-                synchronized[rowName] = previousSection;
-            }
-
-            _storyRowSections.Clear();
-            foreach (var pair in synchronized)
-            {
-                _storyRowSections[pair.Key] = pair.Value;
-            }
+            _storyEditorService.SynchronizeSections(_storyRows, _storyRowSections);
         }
 
         private List<int> GetStorySectionsInRowOrder()
         {
-            var sections = new List<int>();
-            var previousSection = 1;
-            foreach (var row in _storyRows)
-            {
-                var rowName = row.Get("Name");
-                if (_storyRowSections.TryGetValue(rowName, out var section))
-                {
-                    previousSection = Math.Max(1, section);
-                }
-
-                sections.Add(previousSection);
-            }
-
-            return sections;
+            return _storyEditorService.GetSectionsInRowOrder(_storyRows, _storyRowSections);
         }
 
         private void ApplyStorySectionsInRowOrder(IReadOnlyList<int> sections)
         {
-            _storyRowSections.Clear();
-            for (var i = 0; i < _storyRows.Count; i++)
-            {
-                var section = i < sections.Count ? sections[i] : 1;
-                _storyRowSections[_storyRows[i].Get("Name")] = Math.Max(1, section);
-            }
+            _storyEditorService.ApplySectionsInRowOrder(_storyRows, _storyRowSections, sections);
         }
 
         private void WriteStorySectionState()
@@ -3538,22 +2555,7 @@ namespace GalExcleTools
 
         private void WriteStorySectionState(string chapterPath, IReadOnlyDictionary<string, int> sections)
         {
-            Directory.CreateDirectory(chapterPath);
-            var state = new StorySectionState();
-            foreach (var pair in sections.OrderBy(pair => ParseInt(pair.Key)))
-            {
-                state.Rows[pair.Key] = Math.Max(1, pair.Value);
-            }
-
-            File.WriteAllText(
-                Path.Combine(chapterPath, StorySectionsFileName),
-                JsonSerializer.Serialize(state, _jsonOptions),
-                Encoding.UTF8);
-        }
-
-        private static string GetStorySectionsPath(ChapterInfo chapter)
-        {
-            return Path.Combine(chapter.Path, StorySectionsFileName);
+            _storyStateService.WriteSectionState(chapterPath, sections);
         }
 
         private async void ExportStorySectionsButton_Click(object sender, RoutedEventArgs e)
@@ -3574,137 +2576,22 @@ namespace GalExcleTools
             }
 
             PersistCurrentStoryRowsToFiles(showStatus);
-            if (showStatus || !showStatus)
-            {
-                return Task.CompletedTask;
-            }
-
-            SynchronizeStorySectionState();
-            WriteStorySectionState();
-
-            CleanupVisibleStorySectionCsvFiles(_currentStoryChapter);
-            var exportPath = GetUnrealStorySectionCacheFolder(_currentProject, _currentStoryChapter);
-            Directory.CreateDirectory(exportPath);
-            var baseName = BuildSectionCsvBaseName(_currentStoryChapter.Code);
-            var sectionBaseName = BuildSectionCsvChapterBaseName(_currentStoryChapter.Code);
-            var activeCsvPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var groups = _storyRows
-                .Select(row => new
-                {
-                    Row = row,
-                    Section = _storyRowSections.TryGetValue(row.Get("Name"), out var section) ? Math.Max(1, section) : 1
-                })
-                .GroupBy(item => item.Section)
-                .OrderBy(group => group.Key)
-                .ToList();
-
-            if (groups.Select(group => group.Key).Distinct().Count() <= 1)
-            {
-                CleanupStorySectionExports(exportPath, baseName, sectionBaseName);
-                CleanupUnrealStorySectionCache(_currentProject, _currentStoryChapter);
-                CleanupLegacyStorySectionExports(_currentStoryChapter.Path, baseName);
-                return Task.CompletedTask;
-            }
-
-            foreach (var group in groups)
-            {
-                var rows = group.Select(item => item.Row.Clone()).ToList();
-                var csvPath = Path.Combine(exportPath, $"{BuildSectionCsvFileBaseName(_currentStoryChapter.Code, group.Key)}.csv");
-                if (!rows.Any(StoryRowHasContent))
-                {
-                    if (File.Exists(csvPath))
-                    {
-                        File.Delete(csvPath);
-                    }
-
-                    continue;
-                }
-
-                WriteStoryRows(csvPath, rows);
-                activeCsvPaths.Add(csvPath);
-            }
-
-            foreach (var staleCsvPath in Directory.EnumerateFiles(exportPath, $"{sectionBaseName}-*.csv")
-                .Concat(Directory.EnumerateFiles(exportPath, $"{sectionBaseName}_*.csv"))
-                .Concat(Directory.EnumerateFiles(exportPath, $"{baseName}_小节*.csv")))
-            {
-                if (!activeCsvPaths.Contains(staleCsvPath))
-                {
-                    File.Delete(staleCsvPath);
-                }
-            }
-
-            CleanupLegacyStorySectionExports(_currentStoryChapter.Path, baseName);
-
-            if (!showStatus)
-            {
-                return Task.CompletedTask;
-            }
-
-            ShowStoryStatus(InfoBarSeverity.Success, "小节 CSV 已生成", $"已生成 {groups.Count} 个小节 CSV：{exportPath}");
             return Task.CompletedTask;
-        }
-
-        private static void CleanupStorySectionExports(string chapterPath, string baseName, string sectionBaseName)
-        {
-            if (!Directory.Exists(chapterPath))
-            {
-                return;
-            }
-
-            foreach (var staleCsvPath in Directory.EnumerateFiles(chapterPath, $"{baseName}_小节*.csv")
-                .Concat(Directory.EnumerateFiles(chapterPath, $"{sectionBaseName}-*.csv"))
-                .Concat(Directory.EnumerateFiles(chapterPath, $"{sectionBaseName}_*.csv")))
-            {
-                File.Delete(staleCsvPath);
-            }
-        }
-
-        private static void CleanupLegacyStorySectionExports(string chapterPath, string baseName)
-        {
-            var legacyExportPath = Path.Combine(chapterPath, StorySectionExportsFolderName);
-            if (!Directory.Exists(legacyExportPath))
-            {
-                return;
-            }
-
-            foreach (var staleCsvPath in Directory.EnumerateFiles(legacyExportPath, $"{baseName}_小节*.csv"))
-            {
-                File.Delete(staleCsvPath);
-            }
-
-            if (!Directory.EnumerateFileSystemEntries(legacyExportPath).Any())
-            {
-                Directory.Delete(legacyExportPath);
-            }
         }
 
         private static string BuildSectionCsvBaseName(string chapterCode)
         {
-            var invalidChars = Path.GetInvalidFileNameChars().ToHashSet();
-            var builder = new StringBuilder();
-            foreach (var ch in chapterCode.Trim())
-            {
-                if (invalidChars.Contains(ch) || char.IsWhiteSpace(ch))
-                {
-                    continue;
-                }
-
-                builder.Append(char.IsLetterOrDigit(ch) || ch == '-' ? ch : '-');
-            }
-
-            return builder.Length == 0 ? "Story" : builder.ToString();
+            return StoryCsvService.BuildSectionCsvBaseName(chapterCode);
         }
 
         private static string BuildSectionCsvChapterBaseName(string chapterCode)
         {
-            var chapterBaseCode = RemoveChapterSectionSuffix(chapterCode);
-            return BuildSectionCsvBaseName(chapterBaseCode);
+            return StoryCsvService.BuildSectionCsvChapterBaseName(chapterCode);
         }
 
         private static string BuildSectionCsvFileBaseName(string chapterCode, int section)
         {
-            return $"{BuildSectionCsvChapterBaseName(chapterCode)}-{Math.Max(0, section - 1):00}";
+            return StoryCsvService.BuildSectionCsvFileBaseName(chapterCode, section);
         }
 
         private string BuildNextStoryChoiceFunctionIndicator()
@@ -3716,7 +2603,7 @@ namespace GalExcleTools
 
             var prefix = BuildCurrentStoryChapterSectionChoicePrefix();
             var maxChoiceIndex = _storyRows
-                .SelectMany(row => SplitStoryFunctionValues(row.Get("Custom")))
+                .SelectMany(row => StoryFunctionService.SplitFunctionValues(row.Get("Custom")))
                 .Select(function => TryParseChoiceFunctionIndex(function, prefix))
                 .Where(index => index > 0)
                 .DefaultIfEmpty(0)
@@ -3756,7 +2643,7 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            var functions = SplitStoryFunctionValues(row.Get("Custom")).ToList();
+            var functions = StoryFunctionService.SplitFunctionValues(row.Get("Custom")).ToList();
             if (functions.Count == 0)
             {
                 return;
@@ -3826,30 +2713,6 @@ namespace GalExcleTools
             return match.Success ? match.Groups["prefix"].Value : chapterCode.Trim();
         }
 
-        private static bool StoryRowHasContent(StoryRow row)
-        {
-            foreach (var column in StoryCsvColumns.Where(column => column != "Name"))
-            {
-                var value = row.Get(column).Trim();
-                if (StoryNumericColumns.Contains(column))
-                {
-                    if (ParseInt(value) != 0)
-                    {
-                        return true;
-                    }
-
-                    continue;
-                }
-
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private void UpdateStoryEditorHeader()
         {
             if (_currentStoryChapter is null)
@@ -3857,7 +2720,7 @@ namespace GalExcleTools
                 return;
             }
 
-            StoryEditorTitleText.Text = $"{_currentStoryChapter.Name} / {BuildCurrentStoryChapterSectionCode()}";
+            _storyEditorViewModel.Title = $"{_currentStoryChapter.Name} / {BuildCurrentStoryChapterSectionCode()}";
         }
 
         private void UpdateStoryToolbarCurrentInfo()
@@ -3868,19 +2731,16 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            StoryCurrentBackgroundText.Text = FormatStoryAssetStatus("当前背景图", ParseInt(row.Get("BGindex")), GetStoryBackgroundChoices());
-            StoryCurrentBgmText.Text = FormatStoryAssetStatus("当前BGM", ParseInt(row.Get("BGM")), GetStoryBgmChoices());
-            StoryCurrentSceneText.Text = FormatStoryAssetStatus("当前环境音", ParseInt(row.Get("Scene")), GetStorySceneChoices());
+            _storyEditorViewModel.CurrentBackgroundText = FormatStoryAssetStatus("当前背景图", ParseInt(row.Get("BGindex")), GetStoryBackgroundChoices());
+            _storyEditorViewModel.CurrentBgmText = FormatStoryAssetStatus("当前BGM", ParseInt(row.Get("BGM")), GetStoryBgmChoices());
+            _storyEditorViewModel.CurrentSceneText = FormatStoryAssetStatus("当前环境音", ParseInt(row.Get("Scene")), GetStorySceneChoices());
             var custom = row.Get("Custom").Trim();
             var hasFunction = !string.IsNullOrWhiteSpace(custom);
-            StoryCurrentFunctionText.Text = string.IsNullOrWhiteSpace(custom)
+            _storyEditorViewModel.CurrentFunctionText = string.IsNullOrWhiteSpace(custom)
                 ? "当前函数：无"
                 : $"当前函数：{custom}";
-            StoryRemoveFunctionButton.Visibility = hasFunction ? Visibility.Visible : Visibility.Collapsed;
-            StoryClearFunctionButton.Visibility = hasFunction ? Visibility.Visible : Visibility.Collapsed;
-            StoryViewChoicesButton.Visibility = GetCurrentStoryChoiceValues().Count > 0
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            _storyEditorViewModel.HasCurrentFunction = hasFunction;
+            _storyEditorViewModel.HasCurrentChoices = GetCurrentStoryChoiceValues().Count > 0;
         }
 
         private static string FormatStoryAssetStatus(string label, int rawIndex, IReadOnlyList<StoryAssetChoice> choices)
@@ -3891,37 +2751,7 @@ namespace GalExcleTools
                 : $"{label}：{choices[resolvedIndex.Value].Index}: {choices[resolvedIndex.Value].Name}";
         }
 
-        private async void ChangeStoryBackgroundButton_Click(object sender, RoutedEventArgs e)
-        {
-            await ChooseStoryAssetIndexAsync("更换背景图", "BGindex", GetStoryBackgroundChoices());
-        }
-
-        private async void ChangeStoryBgmButton_Click(object sender, RoutedEventArgs e)
-        {
-            await ChooseStoryAssetIndexAsync("更换BGM", "BGM", GetStoryBgmChoices());
-        }
-
-        private async void ChangeStorySceneButton_Click(object sender, RoutedEventArgs e)
-        {
-            await ChooseStoryAssetIndexAsync("更换环境音", "Scene", GetStorySceneChoices());
-        }
-
-        private async void ChooseStoryFunctionButton_Click(object sender, RoutedEventArgs e)
-        {
-            await ChooseStoryFunctionAsync();
-        }
-
-        private async void RemoveStoryFunctionButton_Click(object sender, RoutedEventArgs e)
-        {
-            await RemoveStoryFunctionAsync();
-        }
-
-        private async void ViewStoryChoicesButton_Click(object sender, RoutedEventArgs e)
-        {
-            await ShowCurrentStoryChoicesAsync();
-        }
-
-        private void ClearStoryFunctionButton_Click(object sender, RoutedEventArgs e)
+        private void ClearStoryFunction()
         {
             if (_currentStoryCsvPath is null || _storyRows.Count == 0)
             {
@@ -3942,7 +2772,7 @@ namespace GalExcleTools
             ShowStoryStatus(InfoBarSeverity.Success, "函数已清空", "当前句的 Custom 字段已清空。");
         }
 
-        private void ClearCurrentStoryRowButton_Click(object sender, RoutedEventArgs e)
+        private void ClearCurrentStoryRow()
         {
             if (_currentStoryCsvPath is null || _storyRows.Count == 0)
             {
@@ -3952,7 +2782,7 @@ namespace GalExcleTools
             var currentName = _storyRows[_currentStoryRowIndex].Get("Name");
             var removedChoices = GetCurrentStoryChoiceValues();
             CaptureStoryUndoState("清空当前行数据");
-            var row = CreateDefaultStoryRow();
+            var row = _storyCsvService.CreateDefaultRow();
             row.Set("Name", currentName);
             _storyRows[_currentStoryRowIndex] = row;
             PersistCurrentStoryRowsToFiles();
@@ -3978,7 +2808,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var selected = await ShowStoryChoiceDialogAsync(
+            var selected = await _storyDialogService.SelectSimpleChoiceAsync(
                 "填写函数",
                 functions
                     .Select(function => new StoryObjectChoice(
@@ -4015,14 +2845,14 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            var functions = SplitStoryFunctionValues(row.Get("Custom")).ToList();
+            var functions = StoryFunctionService.SplitFunctionValues(row.Get("Custom")).ToList();
             if (functions.Count == 0)
             {
                 ShowStoryStatus(InfoBarSeverity.Warning, "没有可移除函数", "当前句还没有填写函数。");
                 return;
             }
 
-            var selected = await ShowStoryChoiceDialogAsync(
+            var selected = await _storyDialogService.SelectSimpleChoiceAsync(
                 "移除函数",
                 functions.Select((function, index) => new StoryObjectChoice(index.ToString(), function, index)).ToList());
             if (selected is not int selectedIndex || selectedIndex < 0 || selectedIndex >= functions.Count)
@@ -4044,24 +2874,21 @@ namespace GalExcleTools
 
         private List<FunctionEntry> GetStoryFunctions()
         {
-            return _currentStoryAssetLibrary is null ? [] : ReadFunctions(_currentStoryAssetLibrary);
+            return _currentStoryAssetLibrary is null ? [] : StoryFunctionService.ReadFunctions(_currentStoryAssetLibrary, _jsonOptions);
         }
 
         private string FormatStoryFunctionChoiceDisplay(FunctionEntry function)
         {
-            var indicator = IsChoiceFunctionTemplate(function)
-                ? BuildNextStoryChoiceFunctionIndicator()
-                : function.Indicator;
-            return $"{function.Name} / {indicator} / {function.Category}";
+            return StoryFunctionService.BuildFunctionChoiceDisplay(function, BuildNextStoryChoiceFunctionIndicator());
         }
 
         private async Task<string?> BuildStoryFunctionValueAsync(FunctionEntry function)
         {
             var indicator = function.Indicator.Trim();
-            if (IsChoiceFunctionTemplate(function))
+            if (StoryFunctionService.IsChoiceFunctionTemplate(function))
             {
                 var choiceIndicator = BuildNextStoryChoiceFunctionIndicator();
-                var optionNotes = await ShowChoiceFunctionNoteDialogAsync(choiceIndicator);
+                var optionNotes = await _functionDialogService.EditChoiceNotesAsync(choiceIndicator);
                 if (optionNotes is null)
                 {
                     return null;
@@ -4071,17 +2898,17 @@ namespace GalExcleTools
                 return choiceIndicator;
             }
 
-            if (IsChapterJumpFunctionTemplate(function))
+            if (StoryFunctionService.IsChapterJumpFunctionTemplate(function))
             {
                 return await ChooseChapterJumpFunctionValueAsync();
             }
 
-            if (IsSegmentJumpFunctionTemplate(function))
+            if (StoryFunctionService.IsSegmentJumpFunctionTemplate(function))
             {
                 return await ChooseSegmentJumpFunctionValueAsync();
             }
 
-            if (IsBgmFunctionTemplate(function))
+            if (StoryFunctionService.IsBgmFunctionTemplate(function))
             {
                 return await ChooseBgmFunctionValueAsync();
             }
@@ -4100,14 +2927,9 @@ namespace GalExcleTools
 
             if (string.Equals(indicator, "BGLerpMode_", StringComparison.OrdinalIgnoreCase))
             {
-                var selected = await ShowStoryChoiceDialogAsync(
+                var selected = await _storyDialogService.SelectSimpleChoiceAsync(
                     "背景切换模式",
-                    new List<StoryObjectChoice>
-                    {
-                        new("0", "0：游戏入场黑屏", 0),
-                        new("1", "1：正常黑屏转场", 1),
-                        new("2", "2：背景图渐变过渡", 2)
-                    });
+                    StoryFunctionService.CreateBackgroundLerpModeChoices());
                 return selected is int mode ? $"BGLerpMode_{mode}" : null;
             }
 
@@ -4141,13 +2963,9 @@ namespace GalExcleTools
 
         private async Task<string?> ChooseBgmFunctionValueAsync()
         {
-            var selected = await ShowStoryChoiceDialogAsync(
+            var selected = await _storyDialogService.SelectSimpleChoiceAsync(
                 "BGM",
-                new List<StoryObjectChoice>
-                {
-                    new("BGM_Start", "Start / BGM_Start", "BGM_Start"),
-                    new("BGM_Stop", "Stop / BGM_Stop", "BGM_Stop")
-                });
+                StoryFunctionService.CreateBgmChoices());
             return selected as string;
         }
 
@@ -4159,36 +2977,17 @@ namespace GalExcleTools
                 return null;
             }
 
-            var chaptersFolderPath = GetChaptersFolderPath(_currentProject);
-            List<ChapterInfo> chapters = Directory.Exists(chaptersFolderPath)
-                ? Directory.EnumerateDirectories(chaptersFolderPath)
-                    .Select(ReadChapterInfo)
-                    .OrderBy(chapter => chapter.Code)
-                    .ToList()
-                : new List<ChapterInfo>();
+            List<ChapterInfo> chapters = _projectWorkspaceService.GetChapters(_currentProject)
+                .OrderBy(chapter => chapter.Code)
+                .ToList();
             if (chapters.Count == 0)
             {
                 ShowStoryStatus(InfoBarSeverity.Warning, "没有可跳转章节", "当前项目还没有章节。");
                 return null;
             }
 
-            var choices = chapters
-                .Select(chapter =>
-                {
-                    var functionValue = BuildChapterJumpFunctionValue(chapter);
-                    return new StoryObjectChoice(
-                        chapter.Code,
-                        $"{chapter.Name} / {functionValue}",
-                        functionValue);
-                })
-                .ToList();
-            return await ShowStoryChoiceDialogAsync("跳转章节", choices) as string;
-        }
-
-        private string BuildChapterJumpFunctionValue(ChapterInfo chapter)
-        {
-            var chapterCode = RemoveProjectCodePrefix(RemoveChapterSectionSuffix(chapter.Code), _currentProject?.Code);
-            return $"IntoChapter_{chapterCode}";
+            var choices = StoryFunctionService.CreateChapterJumpChoices(chapters, _currentProject.Code);
+            return await _storyDialogService.SelectSimpleChoiceAsync("跳转章节", choices) as string;
         }
 
         private async Task<string?> ChooseSegmentJumpFunctionValueAsync()
@@ -4200,17 +2999,8 @@ namespace GalExcleTools
             }
 
             var sectionCount = GetCurrentStorySectionCount();
-            var choices = Enumerable.Range(1, sectionCount)
-                .Select(section =>
-                {
-                    var functionValue = BuildSegmentJumpFunctionValue(section);
-                    return new StoryObjectChoice(
-                        section.ToString(CultureInfo.InvariantCulture),
-                        $"第 {section} 小节 / {functionValue}",
-                        functionValue);
-                })
-                .ToList();
-            return await ShowStoryChoiceDialogAsync("跳转小节", choices) as string;
+            var choices = StoryFunctionService.CreateSegmentJumpChoices(sectionCount);
+            return await _storyDialogService.SelectSimpleChoiceAsync("跳转小节", choices) as string;
         }
 
         private int GetCurrentStorySectionCount()
@@ -4233,168 +3023,13 @@ namespace GalExcleTools
             {
                 sectionCount = Math.Max(
                     sectionCount,
-                    GetLocalStorySectionCsvPaths(_currentStoryChapter)
+                    _storyCsvService.GetLocalSectionCsvPaths(_currentStoryChapter)
                         .Select(file => file.Section)
                         .DefaultIfEmpty(1)
                         .Max());
             }
 
             return Math.Max(1, sectionCount);
-        }
-
-        private static string BuildSegmentJumpFunctionValue(int section)
-        {
-            return $"IntoSegment_{Math.Max(0, section - 1):00}";
-        }
-
-        private async Task<List<string>?> ShowChoiceFunctionNoteDialogAsync(string choiceIndicator)
-        {
-            var notesPanel = new StackPanel
-            {
-                Spacing = 8
-            };
-
-            void RenumberRows()
-            {
-                for (var i = 0; i < notesPanel.Children.Count; i++)
-                {
-                    if (notesPanel.Children[i] is not Grid row)
-                    {
-                        continue;
-                    }
-
-                    foreach (var textBox in row.Children.OfType<TextBox>())
-                    {
-                        textBox.Header = $"选项备注 {i + 1}";
-                    }
-
-                    foreach (var textBlock in row.Children.OfType<TextBlock>())
-                    {
-                        textBlock.Text = $"选项 {i + 1}";
-                    }
-                }
-            }
-
-            void AddChoiceRow()
-            {
-                var row = new Grid
-                {
-                    ColumnSpacing = 8
-                };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(132) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-                var optionLabel = new TextBlock
-                {
-                    Text = $"选项 {notesPanel.Children.Count + 1}",
-                    VerticalAlignment = VerticalAlignment.Center,
-                    TextTrimming = TextTrimming.CharacterEllipsis
-                };
-                var noteBox = new TextBox
-                {
-                    PlaceholderText = "例如：接受邀请",
-                    TextWrapping = TextWrapping.Wrap,
-                    MinHeight = 42
-                };
-                var removeButton = new Button
-                {
-                    Content = "删除",
-                    Margin = new Thickness(0, 28, 0, 0)
-                };
-                removeButton.Click += (_, _) =>
-                {
-                    notesPanel.Children.Remove(row);
-                    if (notesPanel.Children.Count == 0)
-                    {
-                        AddChoiceRow();
-                        return;
-                    }
-
-                    RenumberRows();
-                };
-
-                Grid.SetColumn(noteBox, 1);
-                Grid.SetColumn(removeButton, 2);
-                row.Children.Add(optionLabel);
-                row.Children.Add(noteBox);
-                row.Children.Add(removeButton);
-                notesPanel.Children.Add(row);
-                RenumberRows();
-            }
-
-            AddChoiceRow();
-            var addButton = new Button
-            {
-                Width = 36,
-                Height = 32,
-                Padding = new Thickness(0),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Content = "+"
-            };
-            addButton.Click += (_, _) => AddChoiceRow();
-
-            var panel = new StackPanel
-            {
-                Spacing = 10,
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Text = choiceIndicator,
-                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-                    },
-                    new TextBlock
-                    {
-                        Text = "这一个 Choice 会在虚幻里弹出选择界面；下面每行只是这个界面里的一个选项备注。",
-                        TextWrapping = TextWrapping.Wrap,
-                        Style = TryGetTextBlockStyle("SubtleTextStyle")
-                    },
-                    notesPanel,
-                    addButton,
-                    new TextBlock
-                    {
-                        Text = $"表格只会写入 {choiceIndicator}。",
-                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-                    },
-                    new TextBlock
-                    {
-                        Text = "备注不会写入剧情表 Custom 字段。",
-                        TextWrapping = TextWrapping.Wrap,
-                        Style = TryGetTextBlockStyle("SubtleTextStyle")
-                    }
-                }
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = "添加触发选项",
-                Content = panel,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
-            {
-                return null;
-            }
-
-            var notes = new List<string>();
-            foreach (var row in notesPanel.Children.OfType<Grid>())
-            {
-                var note = NormalizeFunctionChoiceNote(row.Children.OfType<TextBox>().FirstOrDefault()?.Text);
-                notes.Add(note);
-            }
-
-            return notes;
         }
 
         private void SaveChoiceFunctionNotes(string choiceIndicator, IReadOnlyList<string> optionNotes)
@@ -4404,11 +3039,11 @@ namespace GalExcleTools
                 return;
             }
 
-            var state = ReadStoryChoiceNoteState(_currentStoryChapter);
+            var state = _storyStateService.ReadChoiceNotes(_currentStoryChapter);
             state.Choices[choiceIndicator] = optionNotes
                 .Select(NormalizeFunctionChoiceNote)
                 .ToList();
-            WriteStoryChoiceNoteState(_currentStoryChapter, state);
+            _storyStateService.WriteChoiceNotes(_currentStoryChapter, state);
         }
 
         private List<string> GetCurrentStoryChoiceValues()
@@ -4418,7 +3053,7 @@ namespace GalExcleTools
                 return [];
             }
 
-            return SplitStoryFunctionValues(_storyRows[_currentStoryRowIndex].Get("Custom"))
+            return StoryFunctionService.SplitFunctionValues(_storyRows[_currentStoryRowIndex].Get("Custom"))
                 .Where(IsCurrentStoryChoiceFunctionValue)
                 .ToList();
         }
@@ -4438,84 +3073,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var noteMap = GetChoiceFunctionNoteMap();
-            var choicesPanel = new StackPanel
-            {
-                Spacing = 16
-            };
-            foreach (var choice in choices)
-            {
-                noteMap.TryGetValue(choice, out var notes);
-                var choicePanel = new StackPanel
-                {
-                    Spacing = 8
-                };
-                choicePanel.Children.Add(new TextBlock
-                {
-                    Text = choice,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-                });
-
-                if (notes is { Count: > 0 })
-                {
-                    for (var i = 0; i < notes.Count; i++)
-                    {
-                        var row = new Grid
-                        {
-                            ColumnSpacing = 8
-                        };
-                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(132) });
-                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                        row.Children.Add(new TextBlock
-                        {
-                            Text = $"选项 {i + 1}",
-                            VerticalAlignment = VerticalAlignment.Center
-                        });
-                        var noteBox = new TextBox
-                        {
-                            Text = string.IsNullOrWhiteSpace(notes[i]) ? "无备注" : notes[i],
-                            IsReadOnly = true,
-                            TextWrapping = TextWrapping.Wrap
-                        };
-                        Grid.SetColumn(noteBox, 1);
-                        row.Children.Add(noteBox);
-                        choicePanel.Children.Add(row);
-                    }
-                }
-                else
-                {
-                    choicePanel.Children.Add(new TextBlock
-                    {
-                        Text = "无备注",
-                        TextWrapping = TextWrapping.Wrap,
-                        Style = TryGetTextBlockStyle("SubtleTextStyle")
-                    });
-                }
-
-                choicesPanel.Children.Add(choicePanel);
-            }
-
-            var dialog = new ContentDialog
-            {
-                Title = "查看选项",
-                Content = new ScrollViewer
-                {
-                    Width = 520,
-                    MaxHeight = 420,
-                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                    Content = choicesPanel
-                },
-                CloseButtonText = "关闭",
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            await dialog.ShowAsync();
+            await _storyDialogService.ShowCurrentChoicesAsync(choices, GetChoiceFunctionNoteMap());
         }
 
         private Dictionary<string, List<string>> GetChoiceFunctionNoteMap()
@@ -4526,7 +3084,7 @@ namespace GalExcleTools
                 return result;
             }
 
-            var state = ReadStoryChoiceNoteState(_currentStoryChapter);
+            var state = _storyStateService.ReadChoiceNotes(_currentStoryChapter);
             foreach (var pair in state.Choices)
             {
                 if (!string.IsNullOrWhiteSpace(pair.Key))
@@ -4540,26 +3098,6 @@ namespace GalExcleTools
             return result;
         }
 
-        private StoryChoiceNoteState ReadStoryChoiceNoteState(ChapterInfo chapter)
-        {
-            var state = ReadJson<StoryChoiceNoteState>(GetStoryChoiceNotesPath(chapter)) ?? new StoryChoiceNoteState();
-            state.Choices = new Dictionary<string, List<string>>(
-                state.Choices
-                    .Where(pair => !string.IsNullOrWhiteSpace(pair.Key))
-                    .Select(pair => new KeyValuePair<string, List<string>>(
-                        pair.Key.Trim(),
-                        (pair.Value ?? [])
-                            .Select(NormalizeFunctionChoiceNote)
-                            .ToList())),
-                StringComparer.OrdinalIgnoreCase);
-            return state;
-        }
-
-        private void WriteStoryChoiceNoteState(ChapterInfo chapter, StoryChoiceNoteState state)
-        {
-            File.WriteAllText(GetStoryChoiceNotesPath(chapter), JsonSerializer.Serialize(state, _jsonOptions));
-        }
-
         private void CopyStoryChoiceNotes(string oldChoice, string newChoice)
         {
             if (_currentStoryChapter is null ||
@@ -4568,23 +3106,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var state = ReadStoryChoiceNoteState(_currentStoryChapter);
-            if (!state.Choices.TryGetValue(oldChoice, out var oldNotes) || oldNotes.Count == 0)
-            {
-                return;
-            }
-
-            if (!state.Choices.TryGetValue(newChoice, out var newNotes) || newNotes.Count == 0)
-            {
-                state.Choices[newChoice] = oldNotes.ToList();
-            }
-
-            WriteStoryChoiceNoteState(_currentStoryChapter, state);
-        }
-
-        private static string GetStoryChoiceNotesPath(ChapterInfo chapter)
-        {
-            return Path.Combine(chapter.Path, StoryChoiceNotesFileName);
+            _storyStateService.CopyChoiceNotes(_currentStoryChapter, oldChoice, newChoice);
         }
 
         private void RemoveUnusedStoryChoiceNotes(IEnumerable<string> removedFunctions)
@@ -4603,27 +3125,14 @@ namespace GalExcleTools
                 return;
             }
 
-            var state = ReadStoryChoiceNoteState(_currentStoryChapter);
-            var changed = false;
-            foreach (var choice in removedChoices)
-            {
-                if (StoryChoiceExistsInRows(choice))
-                {
-                    continue;
-                }
-
-                changed |= state.Choices.Remove(choice);
-            }
-
-            if (changed)
-            {
-                WriteStoryChoiceNoteState(_currentStoryChapter, state);
-            }
+            _storyStateService.RemoveChoiceNotes(
+                _currentStoryChapter,
+                removedChoices.Where(choice => !StoryChoiceExistsInRows(choice)));
         }
 
         private bool StoryChoiceExistsInRows(string choice)
         {
-            return _storyRows.Any(row => SplitStoryFunctionValues(row.Get("Custom"))
+            return _storyRows.Any(row => StoryFunctionService.SplitFunctionValues(row.Get("Custom"))
                 .Any(function => string.Equals(function, choice, StringComparison.OrdinalIgnoreCase)));
         }
 
@@ -4634,7 +3143,7 @@ namespace GalExcleTools
                 return null;
             }
 
-            var choices = GetAudioFilePaths(GetSoundEffectFolderPath(_currentStoryAssetLibrary))
+            var choices = AudioAssetService.GetFilePaths(GetSoundEffectFolderPath(_currentStoryAssetLibrary))
                 .Select((path, index) => new StoryObjectChoice(index.ToString(), $"{index}: {Path.GetFileNameWithoutExtension(path)}", index))
                 .ToList();
             if (choices.Count == 0)
@@ -4643,7 +3152,7 @@ namespace GalExcleTools
                 return null;
             }
 
-            var selected = await ShowStoryChoiceDialogAsync("选择特殊音效", choices);
+            var selected = await _storyDialogService.SelectSimpleChoiceAsync("选择特殊音效", choices);
             return selected is int index ? index : null;
         }
 
@@ -4660,53 +3169,20 @@ namespace GalExcleTools
                 return;
             }
 
-            var listView = new ListView
-            {
-                Width = 420,
-                MaxHeight = 420,
-                SelectionMode = ListViewSelectionMode.Single
-            };
             var currentIndex = ParseInt(_storyRows[_currentStoryRowIndex].Get(fieldName));
-            foreach (var choice in choices)
-            {
-                var item = new ListViewItem
-                {
-                    Content = $"{choice.Index}: {choice.Name}",
-                    Tag = choice.Index
-                };
-                listView.Items.Add(item);
-                if (choice.Index == currentIndex)
-                {
-                    listView.SelectedItem = item;
-                }
-            }
-
-            listView.SelectedItem ??= listView.Items.FirstOrDefault();
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = listView,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary ||
-                listView.SelectedItem is not ListViewItem { Tag: int selectedIndex })
+            var selectedChoice = await _storyDialogService.SelectAssetChoiceAsync(title, choices, currentIndex);
+            if (selectedChoice is null)
             {
                 return;
             }
 
-            if (selectedIndex == currentIndex)
+            if (selectedChoice.Index == currentIndex)
             {
                 return;
             }
 
-            CaptureStoryUndoState($"更换{GetStoryAssetFieldDisplayName(fieldName)}");
-            _storyRows[_currentStoryRowIndex].Set(fieldName, selectedIndex.ToString());
+            CaptureStoryUndoState($"更换{StoryAssetFieldService.GetDisplayName(fieldName)}");
+            _storyRows[_currentStoryRowIndex].Set(fieldName, selectedChoice.Index.ToString());
             PersistCurrentStoryRowsToFiles();
             UpdateStoryToolbarCurrentInfo();
             await RefreshStoryPreviewAsync();
@@ -4882,22 +3358,22 @@ namespace GalExcleTools
             switch (e.Key)
             {
                 case Windows.System.VirtualKey.Q:
-                    await CycleStoryCharacterLayerAsync(slotIndex, "Adorn", "AD_Adorn", "装饰", -1);
+                    await CycleStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Adorn, -1);
                     break;
                 case Windows.System.VirtualKey.E:
-                    await CycleStoryCharacterLayerAsync(slotIndex, "Adorn", "AD_Adorn", "装饰", 1);
+                    await CycleStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Adorn, 1);
                     break;
                 case Windows.System.VirtualKey.A:
-                    await CycleStoryCharacterLayerAsync(slotIndex, "Face", "FC_Face", "表情", -1);
+                    await CycleStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Face, -1);
                     break;
                 case Windows.System.VirtualKey.D:
-                    await CycleStoryCharacterLayerAsync(slotIndex, "Face", "FC_Face", "表情", 1);
+                    await CycleStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Face, 1);
                     break;
                 case Windows.System.VirtualKey.Z:
-                    await CycleStoryCharacterLayerAsync(slotIndex, "Body", "DN_Cloth", "服装", -1);
+                    await CycleStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Cloth, -1);
                     break;
                 case Windows.System.VirtualKey.C:
-                    await CycleStoryCharacterLayerAsync(slotIndex, "Body", "DN_Cloth", "服装", 1);
+                    await CycleStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Cloth, 1);
                     break;
                 case Windows.System.VirtualKey.NumberPad4:
                 case Windows.System.VirtualKey.Left:
@@ -4909,11 +3385,11 @@ namespace GalExcleTools
                     break;
                 case Windows.System.VirtualKey.NumberPad8:
                 case Windows.System.VirtualKey.Up:
-                    await CycleStoryCharacterLayerAsync(slotIndex, "Vfx", "VFX", "滤镜", 1);
+                    await CycleStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Vfx, 1);
                     break;
                 case Windows.System.VirtualKey.NumberPad2:
                 case Windows.System.VirtualKey.Down:
-                    await CycleStoryCharacterLayerAsync(slotIndex, "Vfx", "VFX", "滤镜", -1);
+                    await CycleStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Vfx, -1);
                     break;
                 case Windows.System.VirtualKey.Tab:
                     ClearStoryCharacterSlot(slotIndex);
@@ -4940,13 +3416,8 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            _storyCharacterSlotClipboard = new StoryCharacterSlotClipboard(
-                row.Get(GetStoryCharacterColumn(slotIndex)),
-                row.Get(GetStoryLayerColumn(slotIndex, "Body")),
-                row.Get(GetStoryLayerColumn(slotIndex, "Face")),
-                row.Get(GetStoryLayerColumn(slotIndex, "Adorn")),
-                row.Get(GetStoryLayerColumn(slotIndex, "Vfx")));
-            ShowStoryStatus(InfoBarSeverity.Success, "已复制立绘数据", $"{GetStorySlotDisplayName(slotIndex)}：{FormatStoryCharacterSlotClipboard(_storyCharacterSlotClipboard)}");
+            _storyCharacterSlotClipboard = StoryCharacterSlotService.CreateClipboard(row, slotIndex);
+            ShowStoryStatus(InfoBarSeverity.Success, "已复制立绘数据", $"{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}：{StoryCharacterSlotService.FormatClipboard(_storyCharacterSlotClipboard)}");
         }
 
         private async Task PasteStoryCharacterSlotAsync(int slotIndex)
@@ -4963,32 +3434,18 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            if (string.Equals(row.Get(GetStoryCharacterColumn(slotIndex)), _storyCharacterSlotClipboard.Character, StringComparison.Ordinal) &&
-                string.Equals(row.Get(GetStoryLayerColumn(slotIndex, "Body")), _storyCharacterSlotClipboard.Body, StringComparison.Ordinal) &&
-                string.Equals(row.Get(GetStoryLayerColumn(slotIndex, "Face")), _storyCharacterSlotClipboard.Face, StringComparison.Ordinal) &&
-                string.Equals(row.Get(GetStoryLayerColumn(slotIndex, "Adorn")), _storyCharacterSlotClipboard.Adorn, StringComparison.Ordinal) &&
-                string.Equals(row.Get(GetStoryLayerColumn(slotIndex, "Vfx")), _storyCharacterSlotClipboard.Vfx, StringComparison.Ordinal))
+            if (StoryCharacterSlotService.MatchesClipboard(row, slotIndex, _storyCharacterSlotClipboard))
             {
                 return;
             }
 
-            CaptureStoryUndoState($"粘贴{GetStorySlotDisplayName(slotIndex)}立绘数据");
-            row.Set(GetStoryCharacterColumn(slotIndex), _storyCharacterSlotClipboard.Character);
-            row.Set(GetStoryLayerColumn(slotIndex, "Body"), _storyCharacterSlotClipboard.Body);
-            row.Set(GetStoryLayerColumn(slotIndex, "Face"), _storyCharacterSlotClipboard.Face);
-            row.Set(GetStoryLayerColumn(slotIndex, "Adorn"), _storyCharacterSlotClipboard.Adorn);
-            row.Set(GetStoryLayerColumn(slotIndex, "Vfx"), _storyCharacterSlotClipboard.Vfx);
+            CaptureStoryUndoState($"粘贴{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}立绘数据");
+            StoryCharacterSlotService.ApplyClipboard(row, slotIndex, _storyCharacterSlotClipboard);
             NormalizeStoryDetachedCharacterLayers(row);
-            SyncStorySpeakerTextBoxIfNeeded(slotIndex, row.Get(GetStoryCharacterColumn(slotIndex)));
+            SyncStorySpeakerTextIfNeeded(slotIndex, row.Get(StoryCharacterSlotService.GetCharacterColumn(slotIndex)));
             PersistCurrentStoryRowsToFiles();
-            ShowStoryStatus(InfoBarSeverity.Success, "已粘贴立绘数据", $"{GetStorySlotDisplayName(slotIndex)}：{FormatStoryCharacterSlotClipboard(_storyCharacterSlotClipboard)}");
+            ShowStoryStatus(InfoBarSeverity.Success, "已粘贴立绘数据", $"{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}：{StoryCharacterSlotService.FormatClipboard(_storyCharacterSlotClipboard)}");
             await RefreshStoryPreviewAsync();
-        }
-
-        private static string FormatStoryCharacterSlotClipboard(StoryCharacterSlotClipboard data)
-        {
-            var character = string.IsNullOrWhiteSpace(data.Character) ? "无角色" : data.Character;
-            return $"{character} / 服装 {data.Body} / 表情 {data.Face} / 装饰 {data.Adorn} / 滤镜 {data.Vfx}";
         }
 
         private void CopyStoryAssetField(string fieldName)
@@ -4999,9 +3456,8 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            var value = row.Get(fieldName);
-            _storyAssetClipboard = new StoryAssetClipboard(fieldName, value);
-            ShowStoryStatus(InfoBarSeverity.Success, "已复制基础素材", $"{GetStoryAssetFieldDisplayName(fieldName)}：{value}");
+            _storyAssetClipboard = StoryAssetFieldService.CreateClipboard(row, fieldName);
+            ShowStoryStatus(InfoBarSeverity.Success, "已复制基础素材", $"{StoryAssetFieldService.GetDisplayName(fieldName)}：{_storyAssetClipboard.Value}");
         }
 
         private async Task PasteStoryAssetFieldAsync(string fieldName)
@@ -5017,23 +3473,23 @@ namespace GalExcleTools
                 return;
             }
 
-            if (!string.Equals(_storyAssetClipboard.FieldName, fieldName, StringComparison.OrdinalIgnoreCase))
+            if (!StoryAssetFieldService.IsSameField(_storyAssetClipboard, fieldName))
             {
-                ShowStoryStatus(InfoBarSeverity.Warning, "素材类型不一致", $"复制的是{GetStoryAssetFieldDisplayName(_storyAssetClipboard.FieldName)}，当前悬停的是{GetStoryAssetFieldDisplayName(fieldName)}。");
+                ShowStoryStatus(InfoBarSeverity.Warning, "素材类型不一致", $"复制的是{StoryAssetFieldService.GetDisplayName(_storyAssetClipboard.FieldName)}，当前悬停的是{StoryAssetFieldService.GetDisplayName(fieldName)}。");
                 return;
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            if (string.Equals(row.Get(fieldName), _storyAssetClipboard.Value, StringComparison.Ordinal))
+            if (StoryAssetFieldService.MatchesValue(row, fieldName, _storyAssetClipboard))
             {
                 return;
             }
 
-            CaptureStoryUndoState($"粘贴{GetStoryAssetFieldDisplayName(fieldName)}");
-            row.Set(fieldName, _storyAssetClipboard.Value);
+            CaptureStoryUndoState($"粘贴{StoryAssetFieldService.GetDisplayName(fieldName)}");
+            StoryAssetFieldService.ApplyClipboard(row, fieldName, _storyAssetClipboard);
             PersistCurrentStoryRowsToFiles();
             UpdateStoryToolbarCurrentInfo();
-            ShowStoryStatus(InfoBarSeverity.Success, "已粘贴基础素材", $"{GetStoryAssetFieldDisplayName(fieldName)}：{_storyAssetClipboard.Value}");
+            ShowStoryStatus(InfoBarSeverity.Success, "已粘贴基础素材", $"{StoryAssetFieldService.GetDisplayName(fieldName)}：{_storyAssetClipboard.Value}");
             if (fieldName == "BGM")
             {
                 await ApplyCurrentStoryRowMediaAndFunctionAsync();
@@ -5046,79 +3502,36 @@ namespace GalExcleTools
             await RefreshStoryPreviewAsync();
         }
 
-        private static string GetStoryAssetFieldDisplayName(string fieldName)
-        {
-            return fieldName switch
-            {
-                "BGindex" => "背景图",
-                "BGM" => "BGM",
-                "Scene" => "环境音",
-                _ => "基础素材"
-            };
-        }
-
         private async Task ShowStoryShortcutHelpDialogAsync()
         {
-            var panel = new StackPanel
-            {
-                Spacing = 8,
-                Children =
-                {
-                    CreateShortcutHelpText("Q / E", "切换装饰"),
-                    CreateShortcutHelpText("A / D", "切换表情"),
-                    CreateShortcutHelpText("Z / C", "切换服装"),
-                    CreateShortcutHelpText("小键盘 4 / 6 或方向键 ← / →", "切换角色"),
-                    CreateShortcutHelpText("小键盘 8 / 2 或方向键 ↑ / ↓", "切换滤镜"),
-                    CreateShortcutHelpText("鼠标侧键", "上一句 / 下一句"),
-                    CreateShortcutHelpText("Tab", "清空悬停立绘位"),
-                    CreateShortcutHelpText("Ctrl+Z", "撤回上一步编辑"),
-                    CreateShortcutHelpText("Ctrl+C / Ctrl+V", "复制/粘贴悬停立绘位或基础素材")
-                }
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = "快捷键提示",
-                Content = panel,
-                CloseButtonText = "关闭",
-                XamlRoot = Content.XamlRoot
-            };
-            await dialog.ShowAsync();
+            await _shortcutService.ShowShortcutHelpAsync();
         }
 
-        private static TextBlock CreateShortcutHelpText(string keys, string description)
+        private async Task CycleStoryCharacterLayerAsync(int slotIndex, CharacterLayerKind layerKind, int delta)
         {
-            return new TextBlock
-            {
-                Text = $"{keys}：{description}",
-                TextWrapping = TextWrapping.Wrap
-            };
-        }
-
-        private async Task CycleStoryCharacterLayerAsync(int slotIndex, string fieldPrefix, string folderName, string title, int delta)
-        {
+            var layerSpec = GetStoryCharacterLayerSpec(layerKind);
             if (_currentStoryCsvPath is null || _storyRows.Count == 0)
             {
                 return;
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            var character = ResolveStoryCharacter(row.Get(GetStoryCharacterColumn(slotIndex)));
+            var character = ResolveStoryCharacter(row.Get(StoryCharacterSlotService.GetCharacterColumn(slotIndex)));
             if (character is null)
             {
                 return;
             }
 
-            if (fieldPrefix == "Vfx")
+            if (layerSpec.Kind == CharacterLayerKind.Vfx)
             {
                 var filters = GetStoryCharacterFilters();
                 if (filters.Count == 0)
                 {
-                    ShowStoryStatus(InfoBarSeverity.Warning, "没有滤镜", "当前素材库还没有角色滤镜。");
+                    ShowStoryStatus(InfoBarSeverity.Warning, $"没有{layerSpec.DisplayName}", "当前素材库还没有角色滤镜。");
                     return;
                 }
 
-                var filterColumn = GetStoryLayerColumn(slotIndex, fieldPrefix);
+                var filterColumn = StoryCharacterSlotService.GetLayerColumn(slotIndex, layerSpec.FieldPrefix);
                 var filterCurrentIndex = ParseInt(row.Get(filterColumn));
                 var nextIndex = ((filterCurrentIndex + delta) % filters.Count + filters.Count) % filters.Count;
                 if (nextIndex == filterCurrentIndex)
@@ -5126,22 +3539,21 @@ namespace GalExcleTools
                     return;
                 }
 
-                CaptureStoryUndoState($"快捷切换{GetStorySlotDisplayName(slotIndex)}{title}");
+                CaptureStoryUndoState($"快捷切换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}{layerSpec.DisplayName}");
                 row.Set(filterColumn, nextIndex.ToString());
                 PersistCurrentStoryRowsToFiles();
-                ShowStoryLayerChangedStatus(slotIndex, title, nextIndex, GetCharacterFilterDisplayName(filters[nextIndex], nextIndex));
+                ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, nextIndex, CharacterFilterService.GetDisplayName(filters[nextIndex], nextIndex));
                 await RefreshStoryPreviewAsync();
                 return;
             }
 
-            var folderPath = Path.Combine(character.Path, folderName);
-            var paths = GetStoryCharacterLayerChoicePaths(folderPath, fieldPrefix);
-            var layerColumn = GetStoryLayerColumn(slotIndex, fieldPrefix);
+            var paths = CharacterLayerAssetService.GetLayerPaths(character, layerSpec.Kind);
+            var layerColumn = StoryCharacterSlotService.GetLayerColumn(slotIndex, layerSpec.FieldPrefix);
             var layerCurrentIndex = ParseInt(row.Get(layerColumn));
-            var validIndexes = GetStoryCompatibleLayerIndexes(character, fieldPrefix, paths, row, slotIndex);
+            var validIndexes = GetStoryCompatibleLayerIndexes(character, layerSpec, paths, row, slotIndex);
             if (validIndexes.Count == 0)
             {
-                ShowStoryStatus(InfoBarSeverity.Warning, $"没有{title}", $"角色 {character.Name} 还没有可用的{title}素材。");
+                ShowStoryStatus(InfoBarSeverity.Warning, $"没有{layerSpec.DisplayName}", $"角色 {character.Name} 还没有可用的{layerSpec.DisplayName}素材。");
                 return;
             }
 
@@ -5154,15 +3566,15 @@ namespace GalExcleTools
                 return;
             }
 
-            CaptureStoryUndoState($"快捷切换{GetStorySlotDisplayName(slotIndex)}{title}");
+            CaptureStoryUndoState($"快捷切换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}{layerSpec.DisplayName}");
             row.Set(layerColumn, layerNextIndex.ToString());
-            if (fieldPrefix == "Body")
+            if (layerSpec.Kind == CharacterLayerKind.Cloth)
             {
                 NormalizeStoryRowLayerCompatibility(row, character, slotIndex);
             }
 
             PersistCurrentStoryRowsToFiles();
-            ShowStoryLayerChangedStatus(slotIndex, title, layerNextIndex, GetStoryLayerChoiceDisplayName(fieldPrefix, paths, layerNextIndex));
+            ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, layerNextIndex, StoryCharacterLayerChoiceFactory.GetDisplayName(layerSpec, paths, layerNextIndex));
             await RefreshStoryPreviewAsync();
         }
 
@@ -5180,7 +3592,7 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            var characterColumn = GetStoryCharacterColumn(slotIndex);
+            var characterColumn = StoryCharacterSlotService.GetCharacterColumn(slotIndex);
             var currentCharacter = ResolveStoryCharacter(row.Get(characterColumn));
             var currentIndex = currentCharacter is null
                 ? -1
@@ -5194,10 +3606,10 @@ namespace GalExcleTools
                 return;
             }
 
-            CaptureStoryUndoState($"快捷切换{GetStorySlotDisplayName(slotIndex)}角色");
+            CaptureStoryUndoState($"快捷切换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}角色");
             row.Set(characterColumn, characters[nextIndex].Code);
-            ResetStoryCharacterLayerColumns(row, slotIndex);
-            SyncStorySpeakerTextBoxIfNeeded(slotIndex, characters[nextIndex].Code);
+            StoryCharacterSlotService.ResetLayerColumns(row, slotIndex);
+            SyncStorySpeakerTextIfNeeded(slotIndex, characters[nextIndex].Code);
             PersistCurrentStoryRowsToFiles();
             await RefreshStoryPreviewAsync();
         }
@@ -5210,24 +3622,20 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            if (string.IsNullOrWhiteSpace(row.Get(GetStoryCharacterColumn(slotIndex))) &&
-                ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Body"))) == 0 &&
-                ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Face"))) == 0 &&
-                ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Adorn"))) == 0 &&
-                ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Vfx"))) == 0)
+            if (StoryCharacterSlotService.IsEmpty(row, slotIndex))
             {
                 return;
             }
 
-            CaptureStoryUndoState($"清空{GetStorySlotDisplayName(slotIndex)}立绘位");
-            row.Set(GetStoryCharacterColumn(slotIndex), string.Empty);
-            ResetStoryCharacterLayerColumns(row, slotIndex);
-            SyncStorySpeakerTextBoxIfNeeded(slotIndex, string.Empty);
+            CaptureStoryUndoState($"清空{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}立绘位");
+            row.Set(StoryCharacterSlotService.GetCharacterColumn(slotIndex), string.Empty);
+            StoryCharacterSlotService.ResetLayerColumns(row, slotIndex);
+            SyncStorySpeakerTextIfNeeded(slotIndex, string.Empty);
             PersistCurrentStoryRowsToFiles();
             _ = RefreshStoryPreviewAsync();
         }
 
-        private void SyncStorySpeakerTextBoxIfNeeded(int slotIndex, string value)
+        private void SyncStorySpeakerTextIfNeeded(int slotIndex, string value)
         {
             if (slotIndex != 0)
             {
@@ -5237,7 +3645,7 @@ namespace GalExcleTools
             _isLoadingStoryRow = true;
             try
             {
-                StorySpeakerTextBox.Text = value;
+                _storyEditorViewModel.SpeakerText = value;
             }
             finally
             {
@@ -5245,44 +3653,18 @@ namespace GalExcleTools
             }
         }
 
-        private static void ResetStoryCharacterLayerColumns(StoryRow row, int slotIndex)
-        {
-            ResetStoryCharacterLayerColumnsIfNeeded(row, slotIndex);
-        }
-
-        private static bool ResetStoryCharacterLayerColumnsIfNeeded(StoryRow row, int slotIndex)
-        {
-            var changed = false;
-            changed |= SetStoryCellIfChanged(row, GetStoryLayerColumn(slotIndex, "Body"), "0");
-            changed |= SetStoryCellIfChanged(row, GetStoryLayerColumn(slotIndex, "Face"), "0");
-            changed |= SetStoryCellIfChanged(row, GetStoryLayerColumn(slotIndex, "Adorn"), "0");
-            changed |= SetStoryCellIfChanged(row, GetStoryLayerColumn(slotIndex, "Vfx"), "0");
-            return changed;
-        }
-
-        private static bool SetStoryCellIfChanged(StoryRow row, string columnName, string value)
-        {
-            if (string.Equals(row.Get(columnName), value, StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            row.Set(columnName, value);
-            return true;
-        }
-
         private bool NormalizeStoryDetachedCharacterLayers(StoryRow row)
         {
             var changed = false;
             for (var slotIndex = 0; slotIndex <= 5; slotIndex++)
             {
-                var characterValue = row.Get(GetStoryCharacterColumn(slotIndex));
+                var characterValue = row.Get(StoryCharacterSlotService.GetCharacterColumn(slotIndex));
                 if (!ShouldClearDetachedStoryCharacterLayers(characterValue))
                 {
                     continue;
                 }
 
-                changed |= ResetStoryCharacterLayerColumnsIfNeeded(row, slotIndex);
+                changed |= StoryCharacterSlotService.ResetLayerColumnsIfNeeded(row, slotIndex);
             }
 
             return changed;
@@ -5291,7 +3673,7 @@ namespace GalExcleTools
         private bool ShouldClearDetachedStoryCharacterLayers(string characterValue)
         {
             var trimmed = characterValue.Trim();
-            if (string.IsNullOrWhiteSpace(trimmed) || ContainsCjk(trimmed))
+            if (string.IsNullOrWhiteSpace(trimmed) || StoryCharacterSlotService.ContainsCjk(trimmed))
             {
                 return true;
             }
@@ -5299,35 +3681,12 @@ namespace GalExcleTools
             return _currentStoryAssetLibrary is not null && ResolveStoryCharacter(trimmed) is null;
         }
 
-        private static bool ContainsCjk(string value)
-        {
-            return value.Any(ch =>
-                ch is >= '\u3400' and <= '\u4DBF' ||
-                ch is >= '\u4E00' and <= '\u9FFF' ||
-                ch is >= '\uF900' and <= '\uFAFF');
-        }
-
-        private static string GetStoryCharacterColumn(int slotIndex)
-        {
-            return slotIndex == 0 ? "TalkChar" : $"Chara{slotIndex}";
-        }
-
-        private static string GetStoryLayerColumn(int slotIndex, string fieldPrefix)
-        {
-            return slotIndex == 0 ? $"Talk{fieldPrefix}" : $"{fieldPrefix}{slotIndex}";
-        }
-
         private void ShowStoryLayerChangedStatus(int slotIndex, string title, int index, string displayName)
         {
             ShowStoryStatus(
                 InfoBarSeverity.Success,
                 $"已更换{title}",
-                $"{GetStorySlotDisplayName(slotIndex)}：{displayName}（索引 {index}）");
-        }
-
-        private static string GetStorySlotDisplayName(int slotIndex)
-        {
-            return slotIndex == 0 ? "当前说话人" : $"{slotIndex}号位";
+                $"{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}：{displayName}（索引 {index}）");
         }
 
         private void UpdateStoryCharacterSlotLayout()
@@ -5426,15 +3785,15 @@ namespace GalExcleTools
             }
 
             var functionValue = _storyRows[_currentStoryRowIndex].Get("Custom").Trim();
-            foreach (var function in SplitStoryFunctionValues(functionValue))
+            foreach (var function in StoryFunctionService.SplitFunctionValues(functionValue))
             {
-                if (TryParseStoryBackgroundTransitionMode(function, out var transitionMode))
+                if (StoryFunctionService.TryParseBackgroundTransitionMode(function, out var transitionMode))
                 {
                     _storyBackgroundTransitionMode = transitionMode;
                 }
             }
 
-            if (StoryFunctionContains(functionValue, "BGMSTOP"))
+            if (StoryFunctionService.ContainsFunction(functionValue, "BGMSTOP"))
             {
                 _storyBgmPlaybackSuppressed = true;
                 PauseStoryBgm();
@@ -5454,56 +3813,23 @@ namespace GalExcleTools
         private async Task PreviewStoryFunctionAsync(string functionValue)
         {
             ShowStoryFunctionTriggeredStatus(functionValue);
-            if (StoryFunctionContains(functionValue, "BGMSTART"))
+            if (StoryFunctionService.ContainsFunction(functionValue, "BGMSTART"))
             {
                 _storyBgmPlaybackSuppressed = false;
                 await PlayCurrentStoryBgmFromUiAsync();
             }
         }
 
-        private static string NormalizeStoryFunctionKey(string functionValue)
-        {
-            return functionValue.Trim().Replace("_", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
-        }
-
         private bool IsCurrentStoryFunction(string normalizedFunctionKey)
         {
             return _storyRows.Count > 0 &&
-                StoryFunctionContains(_storyRows[_currentStoryRowIndex].Get("Custom"), normalizedFunctionKey);
-        }
-
-        private static bool StoryFunctionContains(string functionValue, string normalizedFunctionKey)
-        {
-            if (string.IsNullOrWhiteSpace(functionValue))
-            {
-                return false;
-            }
-
-            return EnumerateStoryFunctionKeys(functionValue)
-                .Any(key => string.Equals(key, normalizedFunctionKey, StringComparison.Ordinal));
-        }
-
-        private static IEnumerable<string> EnumerateStoryFunctionKeys(string functionValue)
-        {
-            var parts = functionValue.Split(
-                ['/', '\\', '|', ';', '；', ',', '，', '\r', '\n', '\t', ' '],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (parts.Length == 0)
-            {
-                yield return NormalizeStoryFunctionKey(functionValue);
-                yield break;
-            }
-
-            foreach (var part in parts)
-            {
-                yield return NormalizeStoryFunctionKey(part);
-            }
+                StoryFunctionService.ContainsFunction(_storyRows[_currentStoryRowIndex].Get("Custom"), normalizedFunctionKey);
         }
 
         private void ShowStoryFunctionTriggeredStatus(string functionValue)
         {
             ClearStoryFunctionTips();
-            foreach (var functionName in EnumerateStoryFunctionDisplayNames(functionValue))
+            foreach (var functionName in StoryFunctionService.EnumerateFunctionDisplayNames(functionValue))
             {
                 AddStoryTipWithEntrance(
                     StoryFunctionTipsPanel,
@@ -5567,36 +3893,6 @@ namespace GalExcleTools
             timer.Start();
         }
 
-        private static IEnumerable<string> EnumerateStoryFunctionDisplayNames(string functionValue)
-        {
-            var parts = SplitStoryFunctionValues(functionValue).ToArray();
-            if (parts.Length == 0 && !string.IsNullOrWhiteSpace(functionValue))
-            {
-                yield return functionValue.Trim();
-                yield break;
-            }
-
-            foreach (var part in parts)
-            {
-                if (TryParseStoryBackgroundTransitionMode(part, out var transitionMode))
-                {
-                    yield return GetStoryBackgroundTransitionModeRemark(transitionMode);
-                    continue;
-                }
-
-                yield return part;
-            }
-        }
-
-        private static IEnumerable<string> SplitStoryFunctionValues(string functionValue)
-        {
-            return string.IsNullOrWhiteSpace(functionValue)
-                ? []
-                : functionValue.Split(
-                    ['/'],
-                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        }
-
         private void RebuildStoryPersistentFunctionState(int rowIndex)
         {
             _storyBgmPlaybackSuppressed = HasPreviousBgmStopWithoutStart(rowIndex);
@@ -5613,11 +3909,11 @@ namespace GalExcleTools
             for (var i = 0; i <= rowIndex && i < _storyRows.Count; i++)
             {
                 var functionValue = _storyRows[i].Get("Custom");
-                if (StoryFunctionContains(functionValue, "BGMSTOP"))
+                if (StoryFunctionService.ContainsFunction(functionValue, "BGMSTOP"))
                 {
                     suppressed = true;
                 }
-                else if (StoryFunctionContains(functionValue, "BGMSTART"))
+                else if (StoryFunctionService.ContainsFunction(functionValue, "BGMSTART"))
                 {
                     suppressed = false;
                 }
@@ -5631,9 +3927,9 @@ namespace GalExcleTools
             var mode = 0;
             for (var i = 0; i <= rowIndex && i < _storyRows.Count; i++)
             {
-                foreach (var functionValue in SplitStoryFunctionValues(_storyRows[i].Get("Custom")))
+                foreach (var functionValue in StoryFunctionService.SplitFunctionValues(_storyRows[i].Get("Custom")))
                 {
-                    if (TryParseStoryBackgroundTransitionMode(functionValue, out var parsedMode))
+                    if (StoryFunctionService.TryParseBackgroundTransitionMode(functionValue, out var parsedMode))
                     {
                         mode = parsedMode;
                     }
@@ -5641,39 +3937,6 @@ namespace GalExcleTools
             }
 
             return mode;
-        }
-
-        private static bool TryParseStoryBackgroundTransitionMode(string functionValue, out int mode)
-        {
-            var match = Regex.Match(functionValue.Trim(), @"^BGLerpMode_(?<mode>\d+)$", RegexOptions.IgnoreCase);
-            if (match.Success && int.TryParse(match.Groups["mode"].Value, out mode))
-            {
-                mode = Math.Clamp(mode, 0, 2);
-                return true;
-            }
-
-            mode = 0;
-            return false;
-        }
-
-        private static string GetStoryBackgroundTransitionModeDisplay(int mode)
-        {
-            return mode switch
-            {
-                1 => "1：正常黑屏转场",
-                2 => "2：背景图渐变过渡",
-                _ => "0：游戏入场黑屏"
-            };
-        }
-
-        private static string GetStoryBackgroundTransitionModeRemark(int mode)
-        {
-            return mode switch
-            {
-                1 => "正常黑屏转场",
-                2 => "背景图渐变过渡",
-                _ => "游戏入场黑屏"
-            };
         }
 
         private async Task PlayCurrentStoryBgmAsync(int requestId)
@@ -5691,7 +3954,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var bgmPaths = GetMusicFilePaths(GetMusicFolderPath(_currentStoryAssetLibrary));
+            var bgmPaths = AudioAssetService.GetFilePaths(GetMusicFolderPath(_currentStoryAssetLibrary));
             var rawIndex = ParseInt(_storyRows[_currentStoryRowIndex].Get("BGM"));
             var index = ResolveStoryAssetIndex(rawIndex, bgmPaths.Count);
             if (index is null)
@@ -5762,7 +4025,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var scenePaths = GetAudioFilePaths(GetAmbientSoundFolderPath(_currentStoryAssetLibrary));
+            var scenePaths = AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(_currentStoryAssetLibrary));
             var rawIndex = ParseInt(_storyRows[_currentStoryRowIndex].Get("Scene"));
             var index = ResolveStoryAssetIndex(rawIndex, scenePaths.Count);
             if (index is null)
@@ -5823,7 +4086,7 @@ namespace GalExcleTools
             normalizedLayers |= NormalizeStoryDetachedCharacterLayers(row);
             for (var slotIndex = 0; slotIndex <= 5; slotIndex++)
             {
-                var character = ResolveStoryCharacter(row.Get(GetStoryCharacterColumn(slotIndex)));
+                var character = ResolveStoryCharacter(row.Get(StoryCharacterSlotService.GetCharacterColumn(slotIndex)));
                 if (character is not null)
                 {
                     normalizedLayers |= NormalizeStoryRowLayerCompatibility(row, character, slotIndex);
@@ -5844,7 +4107,7 @@ namespace GalExcleTools
             await SetStorySpeakerPreviewAsync(row.Get("TalkChar"), ParseInt(row.Get("TalkBody")), ParseInt(row.Get("TalkFace")), ParseInt(row.Get("TalkAdorn")), ParseInt(row.Get("TalkVfx")));
             UpdateStoryCharacterSlotLayout();
             UpdateStoryToolbarCurrentInfo();
-            StoryAssetStatusText.Text = _currentStoryAssetLibrary is null
+            _storyEditorViewModel.AssetStatusText = _currentStoryAssetLibrary is null
                 ? "当前项目未关联素材库。"
                 : $"素材库：{_currentStoryAssetLibrary.Name} | 立绘：{(ShowFullCharacterArtCheckBox?.IsChecked == true ? "完整" : "上半身")}";
         }
@@ -5862,7 +4125,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var backgrounds = GetBackgroundImagePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary));
+            var backgrounds = BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary));
             var resolvedIndex = ResolveStoryAssetIndex(index, backgrounds.Count);
             if (resolvedIndex is null)
             {
@@ -5891,7 +4154,7 @@ namespace GalExcleTools
                 ShowStoryStatus(
                     InfoBarSeverity.Informational,
                     "背景切换模式",
-                    GetStoryBackgroundTransitionModeRemark(_storyBackgroundTransitionMode));
+                    StoryFunctionService.GetBackgroundTransitionModeRemark(_storyBackgroundTransitionMode));
             }
         }
 
@@ -5905,7 +4168,7 @@ namespace GalExcleTools
             try
             {
                 var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var backgrounds = GetBackgroundImagePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary));
+                var backgrounds = BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary));
                 foreach (var row in _storyRows)
                 {
                     var backgroundIndex = ResolveStoryAssetIndex(ParseInt(row.Get("BGindex")), backgrounds.Count);
@@ -5916,15 +4179,15 @@ namespace GalExcleTools
 
                     for (var slotIndex = 0; slotIndex <= 5; slotIndex++)
                     {
-                        var character = ResolveStoryCharacter(row.Get(GetStoryCharacterColumn(slotIndex)));
+                        var character = ResolveStoryCharacter(row.Get(StoryCharacterSlotService.GetCharacterColumn(slotIndex)));
                         if (character is null)
                         {
                             continue;
                         }
 
-                        var bodyPath = GetCharacterLayerPath(character, "DN_Cloth", ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Body"))));
-                        var facePath = GetCharacterLayerPath(character, "FC_Face", ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Face"))));
-                        var adornPath = GetCharacterLayerPath(character, "AD_Adorn", ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Adorn"))));
+                        var bodyPath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Cloth, row, slotIndex);
+                        var facePath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Face, row, slotIndex);
+                        var adornPath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Adorn, row, slotIndex);
                         foreach (var path in new[] { bodyPath, facePath, adornPath }.Where(IsPreviewableImagePath))
                         {
                             paths.Add(path!);
@@ -5996,10 +4259,10 @@ namespace GalExcleTools
 
             var imagePaths = new[]
             {
-                GetCharacterLayerPath(character, "DN_Cloth", bodyIndex),
-                GetCharacterLayerPath(character, "FC_Face", faceIndex),
-                GetCharacterLayerPath(character, "AD_Adorn", adornIndex),
-                GetCharacterLayerPath(character, "VFX", vfxIndex)
+                CharacterLayerAssetService.GetStoryLayerPath(character, CharacterLayerKind.Cloth, bodyIndex),
+                CharacterLayerAssetService.GetStoryLayerPath(character, CharacterLayerKind.Face, faceIndex),
+                CharacterLayerAssetService.GetStoryLayerPath(character, CharacterLayerKind.Adorn, adornIndex),
+                CharacterLayerAssetService.GetStoryLayerPath(character, CharacterLayerKind.Vfx, vfxIndex)
             };
 
             foreach (var imagePath in imagePaths.Where(path => !string.IsNullOrWhiteSpace(path)))
@@ -6012,7 +4275,7 @@ namespace GalExcleTools
                 };
                 image.Height = ShowFullCharacterArtCheckBox?.IsChecked == true ? double.NaN : 760;
                 grid.Children.Add(image);
-                await LoadThumbnailFromFileAsync(image, imagePath!);
+                await ThumbnailFactory.LoadThumbnailFromFileAsync(image, imagePath!);
             }
 
             grid.Children.Add(label);
@@ -6084,14 +4347,14 @@ namespace GalExcleTools
                 return;
             }
 
-            var bodyPath = GetCharacterLayerPath(character, "DN_Cloth", bodyIndex);
-            var facePath = GetCharacterLayerPath(character, "FC_Face", faceIndex);
-            var adornPath = GetCharacterLayerPath(character, "AD_Adorn", adornIndex);
+            var bodyPath = CharacterLayerAssetService.GetStoryLayerPath(character, CharacterLayerKind.Cloth, bodyIndex);
+            var facePath = CharacterLayerAssetService.GetStoryLayerPath(character, CharacterLayerKind.Face, faceIndex);
+            var adornPath = CharacterLayerAssetService.GetStoryLayerPath(character, CharacterLayerKind.Adorn, adornIndex);
             var imagePaths = new[]
             {
                 bodyPath,
-                IsCharacterLayerCompatibleWithCloth(character, bodyPath, facePath) ? facePath : null,
-                IsCharacterLayerCompatibleWithCloth(character, bodyPath, adornPath) ? adornPath : null
+                _characterLayerAssetService.IsCompatibleWithCloth(character, bodyPath, facePath, ComputeFileHash) ? facePath : null,
+                _characterLayerAssetService.IsCompatibleWithCloth(character, bodyPath, adornPath, ComputeFileHash) ? adornPath : null
             };
 
             foreach (var imagePath in imagePaths.Where(IsPreviewableImagePath))
@@ -6182,7 +4445,7 @@ namespace GalExcleTools
         {
             return !string.IsNullOrWhiteSpace(imagePath) &&
                 File.Exists(imagePath) &&
-                ImageExtensions.Contains(Path.GetExtension(imagePath), StringComparer.OrdinalIgnoreCase);
+                BackgroundImageService.Extensions.Contains(Path.GetExtension(imagePath), StringComparer.OrdinalIgnoreCase);
         }
 
         private static void ClipPreviewBorderToBounds(Border border)
@@ -6215,52 +4478,21 @@ namespace GalExcleTools
 
         private MenuFlyout CreateStoryCharacterSlotMenu(int slotIndex)
         {
-            var flyout = new MenuFlyout();
-
-            var characterItem = new MenuFlyoutItem { Text = "角色" };
-            characterItem.Click += async (_, _) => await ChooseStoryCharacterAsync(slotIndex);
-            flyout.Items.Add(characterItem);
-
-            var bodyItem = new MenuFlyoutItem { Text = "服装" };
-            bodyItem.Click += async (_, _) => await ChooseStoryCharacterLayerAsync(slotIndex, "Body", "DN_Cloth", "服装");
-            flyout.Items.Add(bodyItem);
-
-            var faceItem = new MenuFlyoutItem { Text = "表情" };
-            faceItem.Click += async (_, _) => await ChooseStoryCharacterLayerAsync(slotIndex, "Face", "FC_Face", "表情");
-            flyout.Items.Add(faceItem);
-
-            var adornItem = new MenuFlyoutItem { Text = "装饰" };
-            adornItem.Click += async (_, _) => await ChooseStoryCharacterLayerAsync(slotIndex, "Adorn", "AD_Adorn", "装饰");
-            flyout.Items.Add(adornItem);
-
-            var vfxItem = new MenuFlyoutItem { Text = "滤镜" };
-            vfxItem.Click += async (_, _) => await ChooseStoryCharacterLayerAsync(slotIndex, "Vfx", "VFX", "滤镜");
-            flyout.Items.Add(vfxItem);
-
-            return flyout;
+            return GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("角色", async (_, _) => await ChooseStoryCharacterAsync(slotIndex)),
+                GridViewItemFactory.CreateMenuItem("服装", async (_, _) => await ChooseStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Cloth)),
+                GridViewItemFactory.CreateMenuItem("表情", async (_, _) => await ChooseStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Face)),
+                GridViewItemFactory.CreateMenuItem("装饰", async (_, _) => await ChooseStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Adorn)),
+                GridViewItemFactory.CreateMenuItem("滤镜", async (_, _) => await ChooseStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Vfx)));
         }
 
         private MenuFlyout CreateStorySpeakerSlotMenu()
         {
-            var flyout = new MenuFlyout();
-
-            var bodyItem = new MenuFlyoutItem { Text = "服装" };
-            bodyItem.Click += async (_, _) => await ChooseStoryCharacterLayerAsync(0, "Body", "DN_Cloth", "服装");
-            flyout.Items.Add(bodyItem);
-
-            var faceItem = new MenuFlyoutItem { Text = "表情" };
-            faceItem.Click += async (_, _) => await ChooseStoryCharacterLayerAsync(0, "Face", "FC_Face", "表情");
-            flyout.Items.Add(faceItem);
-
-            var adornItem = new MenuFlyoutItem { Text = "装饰" };
-            adornItem.Click += async (_, _) => await ChooseStoryCharacterLayerAsync(0, "Adorn", "AD_Adorn", "装饰");
-            flyout.Items.Add(adornItem);
-
-            var vfxItem = new MenuFlyoutItem { Text = "滤镜" };
-            vfxItem.Click += async (_, _) => await ChooseStoryCharacterLayerAsync(0, "Vfx", "VFX", "滤镜");
-            flyout.Items.Add(vfxItem);
-
-            return flyout;
+            return GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("服装", async (_, _) => await ChooseStoryCharacterLayerAsync(0, CharacterLayerKind.Cloth)),
+                GridViewItemFactory.CreateMenuItem("表情", async (_, _) => await ChooseStoryCharacterLayerAsync(0, CharacterLayerKind.Face)),
+                GridViewItemFactory.CreateMenuItem("装饰", async (_, _) => await ChooseStoryCharacterLayerAsync(0, CharacterLayerKind.Adorn)),
+                GridViewItemFactory.CreateMenuItem("滤镜", async (_, _) => await ChooseStoryCharacterLayerAsync(0, CharacterLayerKind.Vfx)));
         }
 
         private async Task ChooseStoryCharacterAsync(int slotIndex)
@@ -6277,7 +4509,7 @@ namespace GalExcleTools
                 ShowStoryStatus(InfoBarSeverity.Warning, "没有角色", "绑定素材库里还没有角色卡。");
             }
 
-            var selected = await ShowStoryChoiceDialogAsync(
+            var selected = await _storyDialogService.SelectPreviewChoiceAsync(
                 "选择角色",
                 new[] { new StoryObjectChoice(NoStoryCharacterChoice, "无角色", NoStoryCharacterChoice) }
                     .Concat(characters.Select(character => new StoryObjectChoice(character.Code, $"{character.Name} / {character.Code}", character)))
@@ -6294,7 +4526,7 @@ namespace GalExcleTools
                     return;
                 }
 
-                CaptureStoryUndoState($"清空{GetStorySlotDisplayName(slotIndex)}角色");
+                CaptureStoryUndoState($"清空{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}角色");
                 emptyRow.Set($"Chara{slotIndex}", string.Empty);
                 emptyRow.Set($"Body{slotIndex}", "0");
                 emptyRow.Set($"Face{slotIndex}", "0");
@@ -6320,7 +4552,7 @@ namespace GalExcleTools
                 return;
             }
 
-            CaptureStoryUndoState($"更换{GetStorySlotDisplayName(slotIndex)}角色");
+            CaptureStoryUndoState($"更换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}角色");
             row.Set($"Chara{slotIndex}", character.Code);
             row.Set($"Body{slotIndex}", "0");
             row.Set($"Face{slotIndex}", "0");
@@ -6330,278 +4562,128 @@ namespace GalExcleTools
             await RefreshStoryPreviewAsync();
         }
 
-        private async Task ChooseStoryCharacterLayerAsync(int slotIndex, string fieldPrefix, string folderName, string title)
+        private async Task ChooseStoryCharacterLayerAsync(int slotIndex, CharacterLayerKind layerKind)
         {
+            var layerSpec = GetStoryCharacterLayerSpec(layerKind);
             if (_currentStoryCsvPath is null || _storyRows.Count == 0)
             {
                 return;
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            var characterName = row.Get(GetStoryCharacterColumn(slotIndex));
+            var characterName = row.Get(StoryCharacterSlotService.GetCharacterColumn(slotIndex));
             var character = ResolveStoryCharacter(characterName);
             if (character is null)
             {
-                ShowStoryStatus(InfoBarSeverity.Warning, $"无法选择{title}", slotIndex == 0 ? "请先填写当前说话人。" : "请先为这个位置选择角色。");
+                ShowStoryStatus(InfoBarSeverity.Warning, $"无法选择{layerSpec.DisplayName}", slotIndex == 0 ? "请先填写当前说话人。" : "请先为这个位置选择角色。");
                 return;
             }
 
-            if (fieldPrefix == "Vfx")
+            if (layerSpec.Kind == CharacterLayerKind.Vfx)
             {
                 var filters = GetStoryCharacterFilters();
                 if (filters.Count == 0)
                 {
-                    ShowStoryStatus(InfoBarSeverity.Warning, "没有滤镜", "当前素材库还没有角色滤镜。");
+                    ShowStoryStatus(InfoBarSeverity.Warning, $"没有{layerSpec.DisplayName}", "当前素材库还没有角色滤镜。");
                     return;
                 }
 
-                var selectedFilter = await ShowStoryChoiceDialogAsync(
-                    $"选择{title}",
+                var selectedFilter = await _storyDialogService.SelectPreviewChoiceAsync(
+                    $"选择{layerSpec.DisplayName}",
                     filters.Select((filter, index) => new StoryObjectChoice(index.ToString(), $"{index}: {filter.Remark}", index)).ToList());
                 if (selectedFilter is not int selectedFilterIndex)
                 {
                     return;
                 }
 
-                var filterColumn = GetStoryLayerColumn(slotIndex, fieldPrefix);
+                var filterColumn = StoryCharacterSlotService.GetLayerColumn(slotIndex, layerSpec.FieldPrefix);
                 if (ParseInt(row.Get(filterColumn)) == selectedFilterIndex)
                 {
                     return;
                 }
 
-                CaptureStoryUndoState($"更换{GetStorySlotDisplayName(slotIndex)}{title}");
+                CaptureStoryUndoState($"更换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}{layerSpec.DisplayName}");
                 row.Set(filterColumn, selectedFilterIndex.ToString());
                 PersistCurrentStoryRowsToFiles();
-                ShowStoryLayerChangedStatus(slotIndex, title, selectedFilterIndex, GetCharacterFilterDisplayName(filters[selectedFilterIndex], selectedFilterIndex));
+                ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, selectedFilterIndex, CharacterFilterService.GetDisplayName(filters[selectedFilterIndex], selectedFilterIndex));
                 await RefreshStoryPreviewAsync();
                 return;
             }
 
-            var folderPath = Path.Combine(character.Path, folderName);
-            var paths = GetStoryCharacterLayerChoicePaths(folderPath, fieldPrefix);
-            var choices = CreateStoryLayerChoices(fieldPrefix, paths, character, row, slotIndex);
+            var paths = CharacterLayerAssetService.GetLayerPaths(character, layerSpec.Kind);
+            var choices = CreateStoryLayerChoices(layerSpec, paths, character, row, slotIndex);
             if (choices.Count == 0)
             {
-                ShowStoryStatus(InfoBarSeverity.Warning, $"没有{title}", $"角色 {character.Name} 还没有可用的{title}素材。");
+                ShowStoryStatus(InfoBarSeverity.Warning, $"没有{layerSpec.DisplayName}", $"角色 {character.Name} 还没有可用的{layerSpec.DisplayName}素材。");
                 return;
             }
 
-            var selected = await ShowStoryChoiceDialogAsync(
-                $"选择{title}",
+            var selected = await _storyDialogService.SelectPreviewChoiceAsync(
+                $"选择{layerSpec.DisplayName}",
                 choices);
             if (selected is not int selectedIndex)
             {
                 return;
             }
 
-            if (ParseInt(row.Get(GetStoryLayerColumn(slotIndex, fieldPrefix))) == selectedIndex)
+            if (ParseInt(row.Get(StoryCharacterSlotService.GetLayerColumn(slotIndex, layerSpec.FieldPrefix))) == selectedIndex)
             {
                 return;
             }
 
-            CaptureStoryUndoState($"更换{GetStorySlotDisplayName(slotIndex)}{title}");
-            row.Set(GetStoryLayerColumn(slotIndex, fieldPrefix), selectedIndex.ToString());
-            if (fieldPrefix == "Body")
+            CaptureStoryUndoState($"更换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}{layerSpec.DisplayName}");
+            row.Set(StoryCharacterSlotService.GetLayerColumn(slotIndex, layerSpec.FieldPrefix), selectedIndex.ToString());
+            if (layerSpec.Kind == CharacterLayerKind.Cloth)
             {
                 NormalizeStoryRowLayerCompatibility(row, character, slotIndex);
             }
 
             PersistCurrentStoryRowsToFiles();
-            ShowStoryLayerChangedStatus(slotIndex, title, selectedIndex, GetStoryLayerChoiceDisplayName(fieldPrefix, paths, selectedIndex));
+            ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, selectedIndex, StoryCharacterLayerChoiceFactory.GetDisplayName(layerSpec, paths, selectedIndex));
             await RefreshStoryPreviewAsync();
         }
 
-        private async Task<object?> ShowStoryChoiceDialogAsync(string title, List<StoryObjectChoice> choices)
-        {
-            var listView = new ListView
-            {
-                Width = 420,
-                MaxHeight = 420,
-                SelectionMode = ListViewSelectionMode.Single
-            };
-
-            foreach (var choice in choices)
-            {
-                var choiceItem = new ListViewItem
-                {
-                    Content = choice.DisplayName,
-                    Tag = choice.Value
-                };
-
-                if (choice.PreviewPaths is { Count: > 0 })
-                {
-                    ToolTipService.SetToolTip(choiceItem, await CreateStoryChoicePreviewToolTipAsync(choice.PreviewPaths));
-                }
-
-                listView.Items.Add(choiceItem);
-            }
-
-            listView.SelectedItem = listView.Items.FirstOrDefault();
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = listView,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
-            return result == ContentDialogResult.Primary &&
-                listView.SelectedItem is ListViewItem item
-                    ? item.Tag
-                    : null;
-        }
-
-        private static List<string> GetStoryCharacterLayerChoicePaths(string folderPath, string fieldPrefix)
-        {
-            return GetCharacterLayerImagePaths(folderPath);
-        }
-
-        private static async Task<ToolTip> CreateStoryChoicePreviewToolTipAsync(IReadOnlyList<string> previewPaths)
-        {
-            var grid = new Grid
-            {
-                Width = 220,
-                Height = 320,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(224, 36, 36, 36))
-            };
-
-            foreach (var previewPath in previewPaths.Where(IsPreviewableImagePath))
-            {
-                var image = new Image
-                {
-                    Stretch = Stretch.Uniform,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                grid.Children.Add(image);
-                await LoadThumbnailFromFileAsync(image, previewPath);
-            }
-
-            return new ToolTip
-            {
-                Content = new Border
-                {
-                    Padding = new Thickness(8),
-                    Background = new SolidColorBrush(Windows.UI.Color.FromArgb(238, 30, 30, 30)),
-                    CornerRadius = new CornerRadius(6),
-                    Child = grid
-                }
-            };
-        }
-
-        private static int GetStoryLayerChoiceCount(string fieldPrefix, int assetCount)
-        {
-            return fieldPrefix == "Adorn" ? assetCount + 1 : assetCount;
-        }
-
         private List<StoryObjectChoice> CreateStoryLayerChoices(
-            string fieldPrefix,
+            StoryCharacterLayerSpec layerSpec,
             IReadOnlyList<string> paths,
             CharacterInfo character,
             StoryRow row,
             int slotIndex)
         {
-            var choices = new List<StoryObjectChoice>();
-            var currentBodyPath = GetCharacterLayerPath(character, "DN_Cloth", ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Body"))));
-            var currentFacePath = GetCharacterLayerPath(character, "FC_Face", ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Face"))));
-            var currentAdornPath = GetCharacterLayerPath(character, "AD_Adorn", ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Adorn"))));
-
-            if (fieldPrefix == "Adorn")
-            {
-                choices.Add(new StoryObjectChoice(
-                    "0",
-                    "0: 无装饰",
-                    0,
-                    BuildStoryChoicePreviewPaths(currentBodyPath, currentFacePath)));
-                choices.AddRange(paths
-                    .Select((path, index) => new { path, index })
-                    .Where(item => IsCharacterLayerCompatibleWithCloth(character, currentBodyPath, item.path))
-                    .Select(item =>
-                        new StoryObjectChoice(
-                            (item.index + 1).ToString(),
-                            $"{item.index + 1}: {Path.GetFileNameWithoutExtension(item.path)}",
-                            item.index + 1,
-                            BuildStoryChoicePreviewPaths(currentBodyPath, currentFacePath, item.path))));
-                return choices;
-            }
-
-            if (fieldPrefix == "Body")
-            {
-                choices.AddRange(paths.Select((path, index) =>
-                    new StoryObjectChoice(
-                        index.ToString(),
-                        $"{index}: {Path.GetFileNameWithoutExtension(path)}",
-                        index,
-                        BuildStoryChoicePreviewPaths(
-                            path,
-                            IsCharacterLayerCompatibleWithCloth(character, path, currentFacePath) ? currentFacePath : null,
-                            IsCharacterLayerCompatibleWithCloth(character, path, currentAdornPath) ? currentAdornPath : null))));
-                return choices;
-            }
-
-            if (fieldPrefix == "Face")
-            {
-                choices.AddRange(paths
-                    .Select((path, index) => new { path, index })
-                    .Where(item => IsCharacterLayerCompatibleWithCloth(character, currentBodyPath, item.path))
-                    .Select(item =>
-                        new StoryObjectChoice(
-                            item.index.ToString(),
-                            $"{item.index}: {Path.GetFileNameWithoutExtension(item.path)}",
-                            item.index,
-                            BuildStoryChoicePreviewPaths(currentBodyPath, item.path, currentAdornPath))));
-                return choices;
-            }
-
-            choices.AddRange(paths.Select((path, index) =>
-                new StoryObjectChoice(
-                    index.ToString(),
-                    $"{index}: {Path.GetFileNameWithoutExtension(path)}",
-                    index,
-                    BuildStoryChoicePreviewPaths(path))));
-            return choices;
+            var currentBodyPath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Cloth, row, slotIndex);
+            var currentFacePath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Face, row, slotIndex);
+            var currentAdornPath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Adorn, row, slotIndex);
+            return StoryCharacterLayerChoiceFactory.CreateChoices(
+                layerSpec,
+                paths,
+                currentBodyPath,
+                currentFacePath,
+                currentAdornPath,
+                (clothPath, layerPath) => _characterLayerAssetService.IsCompatibleWithCloth(character, clothPath, layerPath, ComputeFileHash),
+                paths => BuildStoryChoicePreviewPaths(paths.ToArray()));
         }
 
         private List<int> GetStoryCompatibleLayerIndexes(
             CharacterInfo character,
-            string fieldPrefix,
+            StoryCharacterLayerSpec layerSpec,
             IReadOnlyList<string> paths,
             StoryRow row,
             int slotIndex)
         {
-            if (fieldPrefix == "Adorn")
-            {
-                var bodyPath = GetCharacterLayerPath(character, "DN_Cloth", ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Body"))));
-                var indexes = new List<int> { 0 };
-                indexes.AddRange(paths
-                    .Select((path, index) => new { path, index })
-                    .Where(item => IsCharacterLayerCompatibleWithCloth(character, bodyPath, item.path))
-                    .Select(item => item.index + 1));
-                return indexes;
-            }
-
-            if (fieldPrefix == "Face")
-            {
-                var bodyPath = GetCharacterLayerPath(character, "DN_Cloth", ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Body"))));
-                return paths
-                    .Select((path, index) => new { path, index })
-                    .Where(item => IsCharacterLayerCompatibleWithCloth(character, bodyPath, item.path))
-                    .Select(item => item.index)
-                    .ToList();
-            }
-
-            return Enumerable.Range(0, paths.Count).ToList();
+            var bodyPath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Cloth, row, slotIndex);
+            return StoryCharacterLayerChoiceFactory.GetCompatibleIndexes(
+                layerSpec,
+                paths,
+                bodyPath,
+                (clothPath, layerPath) => _characterLayerAssetService.IsCompatibleWithCloth(character, clothPath, layerPath, ComputeFileHash));
         }
 
         private bool NormalizeStoryRowLayerCompatibility(StoryRow row, CharacterInfo character, int slotIndex)
         {
             var changed = false;
-            var bodyPath = GetCharacterLayerPath(character, "DN_Cloth", ParseInt(row.Get(GetStoryLayerColumn(slotIndex, "Body"))));
-            changed |= NormalizeStoryLayerCompatibility(row, character, slotIndex, "Face", "FC_Face", bodyPath, false);
-            changed |= NormalizeStoryLayerCompatibility(row, character, slotIndex, "Adorn", "AD_Adorn", bodyPath, true);
+            var bodyPath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Cloth, row, slotIndex);
+            changed |= NormalizeStoryLayerCompatibility(row, character, slotIndex, GetStoryCharacterLayerSpec(CharacterLayerKind.Face), bodyPath, false);
+            changed |= NormalizeStoryLayerCompatibility(row, character, slotIndex, GetStoryCharacterLayerSpec(CharacterLayerKind.Adorn), bodyPath, true);
             return changed;
         }
 
@@ -6609,29 +4691,27 @@ namespace GalExcleTools
             StoryRow row,
             CharacterInfo character,
             int slotIndex,
-            string fieldPrefix,
-            string folderName,
+            StoryCharacterLayerSpec layerSpec,
             string? bodyPath,
             bool allowNone)
         {
-            var columnName = GetStoryLayerColumn(slotIndex, fieldPrefix);
+            var columnName = StoryCharacterSlotService.GetLayerColumn(slotIndex, layerSpec.FieldPrefix);
             var currentIndex = ParseInt(row.Get(columnName));
             if (allowNone && currentIndex <= 0)
             {
                 return false;
             }
 
-            var currentPath = GetCharacterLayerPath(character, folderName, currentIndex);
-            if (IsCharacterLayerCompatibleWithCloth(character, bodyPath, currentPath))
+            var currentPath = CharacterLayerAssetService.GetStoryLayerPath(character, layerSpec.Kind, currentIndex);
+            if (_characterLayerAssetService.IsCompatibleWithCloth(character, bodyPath, currentPath, ComputeFileHash))
             {
                 return false;
             }
 
-            var folderPath = Path.Combine(character.Path, folderName);
-            var paths = GetCharacterLayerImagePaths(folderPath);
+            var paths = CharacterLayerAssetService.GetLayerPaths(character, layerSpec.Kind);
             var compatible = paths
                 .Select((path, index) => new { path, index })
-                .FirstOrDefault(item => IsCharacterLayerCompatibleWithCloth(character, bodyPath, item.path));
+                .FirstOrDefault(item => _characterLayerAssetService.IsCompatibleWithCloth(character, bodyPath, item.path, ComputeFileHash));
             var nextIndex = compatible is null
                 ? 0
                 : allowNone ? compatible.index + 1 : compatible.index;
@@ -6647,16 +4727,15 @@ namespace GalExcleTools
                 .ToList();
         }
 
-        private static string GetStoryLayerChoiceDisplayName(string fieldPrefix, IReadOnlyList<string> paths, int selectedIndex)
+        private static string? GetStoryCharacterLayerPath(
+            CharacterInfo character,
+            CharacterLayerKind layerKind,
+            StoryRow row,
+            int slotIndex)
         {
-            if (fieldPrefix == "Adorn")
-            {
-                return selectedIndex == 0
-                    ? "无装饰"
-                    : Path.GetFileNameWithoutExtension(paths[Math.Clamp(selectedIndex - 1, 0, paths.Count - 1)]);
-            }
-
-            return Path.GetFileNameWithoutExtension(paths[Math.Clamp(selectedIndex, 0, paths.Count - 1)]);
+            var spec = GetStoryCharacterLayerSpec(layerKind);
+            var index = ParseInt(row.Get(StoryCharacterSlotService.GetLayerColumn(slotIndex, spec.FieldPrefix)));
+            return CharacterLayerAssetService.GetStoryLayerPath(character, layerKind, index);
         }
 
         private string NormalizeStoryCharacterNameForCsv(string characterName)
@@ -6714,15 +4793,8 @@ namespace GalExcleTools
                 return null;
             }
 
-            var characterFolderPath = GetCharacterFolderPath(_currentStoryAssetLibrary);
-            if (!Directory.Exists(characterFolderPath))
-            {
-                return null;
-            }
-
-            return Directory
-                .EnumerateDirectories(characterFolderPath)
-                .Select(ReadCharacterInfo)
+            return _characterWorkspaceService
+                .GetCharactersByFolderOrder(_currentStoryAssetLibrary)
                 .FirstOrDefault(character =>
                     string.Equals(character.Name, normalizedCharacterName, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(character.Code, normalizedCharacterName, StringComparison.OrdinalIgnoreCase));
@@ -6735,17 +4807,7 @@ namespace GalExcleTools
                 return [];
             }
 
-            var characterFolderPath = GetCharacterFolderPath(_currentStoryAssetLibrary);
-            if (!Directory.Exists(characterFolderPath))
-            {
-                return [];
-            }
-
-            return Directory
-                .EnumerateDirectories(characterFolderPath)
-                .Select(ReadCharacterInfo)
-                .OrderBy(character => character.Name)
-                .ToList();
+            return _characterWorkspaceService.GetCharactersByName(_currentStoryAssetLibrary);
         }
 
         private List<CharacterInfo> GetStoryCharactersByFolderOrder()
@@ -6755,37 +4817,7 @@ namespace GalExcleTools
                 return [];
             }
 
-            var characterFolderPath = GetCharacterFolderPath(_currentStoryAssetLibrary);
-            if (!Directory.Exists(characterFolderPath))
-            {
-                return [];
-            }
-
-            return Directory
-                .EnumerateDirectories(characterFolderPath)
-                .OrderBy(Path.GetFileName)
-                .Select(ReadCharacterInfo)
-                .ToList();
-        }
-
-        private static string? GetCharacterLayerPath(CharacterInfo character, string folderName, int index)
-        {
-            if (folderName == "AD_Adorn" && index <= 0)
-            {
-                return null;
-            }
-
-            var folderPath = Path.Combine(character.Path, folderName);
-            if (!Directory.Exists(folderPath))
-            {
-                return null;
-            }
-
-            var paths = folderName == "VFX"
-                ? Directory.EnumerateFiles(folderPath).OrderBy(Path.GetFileName).ToList()
-                : GetCharacterLayerImagePaths(folderPath);
-            var resolvedIndex = ResolveStoryAssetIndex(folderName == "AD_Adorn" ? index - 1 : index, paths.Count);
-            return resolvedIndex is null ? null : paths[resolvedIndex.Value];
+            return _characterWorkspaceService.GetCharactersByFolderName(_currentStoryAssetLibrary);
         }
 
         private List<StoryAssetChoice> GetStoryBackgroundChoices()
@@ -6795,7 +4827,7 @@ namespace GalExcleTools
                 return [];
             }
 
-            return GetBackgroundImagePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary))
+            return BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary))
                 .Select((path, index) => new StoryAssetChoice(index, Path.GetFileNameWithoutExtension(path)))
                 .ToList();
         }
@@ -6807,7 +4839,7 @@ namespace GalExcleTools
                 return [];
             }
 
-            return GetMusicFilePaths(GetMusicFolderPath(_currentStoryAssetLibrary))
+            return AudioAssetService.GetFilePaths(GetMusicFolderPath(_currentStoryAssetLibrary))
                 .Select((path, index) => new StoryAssetChoice(index, Path.GetFileNameWithoutExtension(path)))
                 .ToList();
         }
@@ -6819,17 +4851,14 @@ namespace GalExcleTools
                 return [];
             }
 
-            return GetAudioFilePaths(GetAmbientSoundFolderPath(_currentStoryAssetLibrary))
+            return AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(_currentStoryAssetLibrary))
                 .Select((path, index) => new StoryAssetChoice(index, Path.GetFileNameWithoutExtension(path)))
                 .ToList();
         }
 
         private AssetLibraryInfo? ResolveProjectAssetLibrary(ProjectInfo project)
         {
-            return GetAssetLibraries()
-                .FirstOrDefault(library =>
-                    string.Equals(library.FolderName, project.AssetLibraryFolderName, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(library.Name, project.AssetLibraryName, StringComparison.OrdinalIgnoreCase));
+            return _projectWorkspaceService.ResolveProjectAssetLibrary(_projectRootPath, project);
         }
 
         private async Task<AssetIndexSyncResult> SyncStoryGlobalAssetIndexesWithProgressAsync(
@@ -6843,7 +4872,7 @@ namespace GalExcleTools
         {
             var result = await ShowAssetIndexSyncProgressDialogAsync(
                 $"{assetLabel}索引同步",
-                progress => Task.Run(() => SyncStoryGlobalAssetIndexes(assetLibrary, assetLabel, columnName, indexRemap, oldLabels, newLabels, assetCount, progress)));
+                progress => Task.Run(() => _storyAssetIndexSyncService.SyncGlobalAssetIndexes(assetLibrary, assetLabel, columnName, indexRemap, oldLabels, newLabels, assetCount, progress)));
             RefreshOpenStoryRowsAfterIndexSync(result.ChangedCsvPaths);
             await ShowAssetIndexSyncResultDialogAsync(result);
             return result;
@@ -6861,7 +4890,7 @@ namespace GalExcleTools
             var assetLabel = $"{character.Name} {GetCharacterLayerDisplayName(layerKind)}";
             var result = await ShowAssetIndexSyncProgressDialogAsync(
                 $"{assetLabel}索引同步",
-                progress => Task.Run(() => SyncStoryCharacterLayerIndexes(assetLibrary, character, layerKind, indexRemap, oldLabels, newLabels, assetCount, progress)));
+                progress => Task.Run(() => _storyAssetIndexSyncService.SyncCharacterLayerIndexes(assetLibrary, character, layerKind, GetCharacterLayerDisplayName(layerKind), indexRemap, oldLabels, newLabels, assetCount, progress)));
             RefreshOpenStoryRowsAfterIndexSync(result.ChangedCsvPaths);
             await ShowAssetIndexSyncResultDialogAsync(result);
             return result;
@@ -6876,286 +4905,10 @@ namespace GalExcleTools
         {
             var result = await ShowAssetIndexSyncProgressDialogAsync(
                 "角色滤镜索引同步",
-                progress => Task.Run(() => SyncStoryCharacterFilterIndexes(assetLibrary, indexRemap, oldLabels, newLabels, assetCount, progress)));
+                progress => Task.Run(() => _storyAssetIndexSyncService.SyncCharacterFilterIndexes(assetLibrary, indexRemap, oldLabels, newLabels, assetCount, progress)));
             RefreshOpenStoryRowsAfterIndexSync(result.ChangedCsvPaths);
             await ShowAssetIndexSyncResultDialogAsync(result);
             return result;
-        }
-
-        private AssetIndexSyncResult SyncStoryGlobalAssetIndexes(
-            AssetLibraryInfo assetLibrary,
-            string assetLabel,
-            string columnName,
-            IReadOnlyDictionary<int, int> indexRemap,
-            IReadOnlyDictionary<int, string> oldLabels,
-            IReadOnlyDictionary<int, string> newLabels,
-            int assetCount,
-            IProgress<AssetIndexSyncProgress>? progress)
-        {
-            return SyncStoryRowsForAssetLibrary(
-                assetLibrary,
-                $"{assetLabel}索引同步",
-                progress,
-                rowContext =>
-                {
-                    var oldIndex = ParseInt(rowContext.Row.Get(columnName));
-                    var changed = TryRecordStoryIndexRemap(rowContext, assetLabel, columnName, oldIndex, oldIndex, indexRemap, oldLabels, newLabels, assetCount, out var warning);
-                    if (warning is not null)
-                    {
-                        rowContext.Warnings.Add(warning);
-                    }
-
-                    return changed;
-                });
-        }
-
-        private AssetIndexSyncResult SyncStoryCharacterFilterIndexes(
-            AssetLibraryInfo assetLibrary,
-            IReadOnlyDictionary<int, int> indexRemap,
-            IReadOnlyDictionary<int, string> oldLabels,
-            IReadOnlyDictionary<int, string> newLabels,
-            int assetCount,
-            IProgress<AssetIndexSyncProgress>? progress)
-        {
-            return SyncStoryRowsForAssetLibrary(
-                assetLibrary,
-                "角色滤镜索引同步",
-                progress,
-                rowContext =>
-                {
-                    var changed = false;
-                    foreach (var columnName in Enumerable.Range(0, 6).Select(index => index == 0 ? "TalkVfx" : $"Vfx{index}"))
-                    {
-                        var oldIndex = ParseInt(rowContext.Row.Get(columnName));
-                        changed |= TryRecordStoryIndexRemap(rowContext, "角色滤镜", columnName, oldIndex, oldIndex, indexRemap, oldLabels, newLabels, assetCount, out var warning);
-                        if (warning is not null)
-                        {
-                            rowContext.Warnings.Add(warning);
-                        }
-                    }
-
-                    return changed;
-                });
-        }
-
-        private AssetIndexSyncResult SyncStoryCharacterLayerIndexes(
-            AssetLibraryInfo assetLibrary,
-            CharacterInfo character,
-            CharacterLayerKind layerKind,
-            IReadOnlyDictionary<int, int> indexRemap,
-            IReadOnlyDictionary<int, string> oldLabels,
-            IReadOnlyDictionary<int, string> newLabels,
-            int assetCount,
-            IProgress<AssetIndexSyncProgress>? progress)
-        {
-            var assetLabel = $"{character.Name} {GetCharacterLayerDisplayName(layerKind)}";
-            var fieldPrefix = GetStoryLayerFieldPrefix(layerKind);
-            return SyncStoryRowsForAssetLibrary(
-                assetLibrary,
-                $"{assetLabel}索引同步",
-                progress,
-                rowContext =>
-                {
-                    var changed = false;
-                    if (StoryCharacterMatches(rowContext.Row.Get("TalkChar"), character))
-                    {
-                        changed |= TryRecordStoryLayerRemap(rowContext, assetLabel, GetStoryLayerColumn(0, fieldPrefix), layerKind, indexRemap, oldLabels, newLabels, assetCount);
-                    }
-
-                    for (var slotIndex = 1; slotIndex <= 5; slotIndex++)
-                    {
-                        if (StoryCharacterMatches(rowContext.Row.Get(GetStoryCharacterColumn(slotIndex)), character))
-                        {
-                            changed |= TryRecordStoryLayerRemap(rowContext, assetLabel, GetStoryLayerColumn(slotIndex, fieldPrefix), layerKind, indexRemap, oldLabels, newLabels, assetCount);
-                        }
-                    }
-
-                    return changed;
-                });
-        }
-
-        private AssetIndexSyncResult SyncStoryRowsForAssetLibrary(
-            AssetLibraryInfo assetLibrary,
-            string title,
-            IProgress<AssetIndexSyncProgress>? progress,
-            Func<StoryIndexRowContext, bool> updateRow)
-        {
-            var csvFiles = GetRelatedStoryCsvFiles(assetLibrary);
-            var changes = new List<AssetIndexChange>();
-            var warnings = new List<AssetIndexWarning>();
-            var changedCsvPaths = new List<string>();
-            progress?.Report(new AssetIndexSyncProgress("正在收集关联项目章节 CSV...", 0, 0, csvFiles.Count, 0, 0, null));
-
-            for (var fileIndex = 0; fileIndex < csvFiles.Count; fileIndex++)
-            {
-                var csvFile = csvFiles[fileIndex];
-                progress?.Report(new AssetIndexSyncProgress(
-                    $"正在扫描 {csvFile.ProjectName} / {csvFile.ChapterName}",
-                    csvFiles.Count == 0 ? 100 : fileIndex * 80d / csvFiles.Count,
-                    fileIndex,
-                    csvFiles.Count,
-                    changes.Count,
-                    warnings.Count,
-                    Path.GetFileName(csvFile.CsvPath)));
-
-                var rows = ReadStoryRows(csvFile.CsvPath);
-                var changed = false;
-                for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
-                {
-                    var context = new StoryIndexRowContext(csvFile, rows[rowIndex], rowIndex, changes, warnings);
-                    changed |= updateRow(context);
-                }
-
-                if (changed)
-                {
-                    WriteStoryRows(csvFile.CsvPath, rows);
-                    changedCsvPaths.Add(csvFile.CsvPath);
-                }
-            }
-
-            progress?.Report(new AssetIndexSyncProgress("索引同步检查完成。", 100, csvFiles.Count, csvFiles.Count, changes.Count, warnings.Count, null));
-            return new AssetIndexSyncResult(title, csvFiles.Count, changedCsvPaths.Count, changes.Count, warnings.Count, changedCsvPaths, changes, warnings);
-        }
-
-        private List<RelatedStoryCsvFile> GetRelatedStoryCsvFiles(AssetLibraryInfo assetLibrary)
-        {
-            var result = new List<RelatedStoryCsvFile>();
-            foreach (var project in GetProjects())
-            {
-                var projectAssetLibrary = ResolveProjectAssetLibrary(project);
-                if (projectAssetLibrary is null || !PathsEqual(projectAssetLibrary.Path, assetLibrary.Path))
-                {
-                    continue;
-                }
-
-                var chaptersFolderPath = GetChaptersFolderPath(project);
-                if (!Directory.Exists(chaptersFolderPath))
-                {
-                    continue;
-                }
-
-                foreach (var chapter in Directory.EnumerateDirectories(chaptersFolderPath).Select(ReadChapterInfo))
-                {
-                    foreach (var sectionFile in GetLocalStorySectionCsvPaths(chapter).Where(file => File.Exists(file.Path)))
-                    {
-                        result.Add(new RelatedStoryCsvFile(project.Name, chapter.Name, chapter.Code, sectionFile.Path));
-                    }
-                }
-            }
-
-            return result.OrderBy(file => file.ProjectName).ThenBy(file => file.ChapterCode).ThenBy(file => file.CsvPath).ToList();
-        }
-
-        private static bool TryRecordStoryLayerRemap(
-            StoryIndexRowContext rowContext,
-            string assetLabel,
-            string columnName,
-            CharacterLayerKind layerKind,
-            IReadOnlyDictionary<int, int> indexRemap,
-            IReadOnlyDictionary<int, string> oldLabels,
-            IReadOnlyDictionary<int, string> newLabels,
-            int assetCount)
-        {
-            var storyIndex = ParseInt(rowContext.Row.Get(columnName));
-            if (layerKind == CharacterLayerKind.Adorn)
-            {
-                if (storyIndex <= 0)
-                {
-                    return false;
-                }
-
-                var oldAssetIndex = storyIndex - 1;
-                return TryRecordStoryIndexRemap(
-                    rowContext,
-                    assetLabel,
-                    columnName,
-                    oldAssetIndex,
-                    storyIndex,
-                    indexRemap,
-                    oldLabels,
-                    newLabels,
-                    assetCount,
-                    out var warning,
-                    newStoryIndexOffset: 1,
-                    validStoryIndexOffset: 1) || AddWarning(rowContext, warning);
-            }
-
-            return TryRecordStoryIndexRemap(rowContext, assetLabel, columnName, storyIndex, storyIndex, indexRemap, oldLabels, newLabels, assetCount, out var directWarning) ||
-                AddWarning(rowContext, directWarning);
-        }
-
-        private static bool TryRecordStoryIndexRemap(
-            StoryIndexRowContext rowContext,
-            string assetLabel,
-            string columnName,
-            int oldAssetIndex,
-            int oldStoryValue,
-            IReadOnlyDictionary<int, int> indexRemap,
-            IReadOnlyDictionary<int, string> oldLabels,
-            IReadOnlyDictionary<int, string> newLabels,
-            int assetCount,
-            out AssetIndexWarning? warning,
-            int newStoryIndexOffset = 0,
-            int validStoryIndexOffset = 0)
-        {
-            warning = null;
-            if (oldAssetIndex < 0 || oldAssetIndex >= assetCount)
-            {
-                warning = rowContext.CreateWarning(columnName, $"{assetLabel} 索引 {oldStoryValue} 超出当前素材数量 {assetCount}，未自动改动。可在章节卡右键使用“修复”检查。");
-                return false;
-            }
-
-            if (!indexRemap.TryGetValue(oldAssetIndex, out var newAssetIndex) || oldAssetIndex == newAssetIndex)
-            {
-                return false;
-            }
-
-            var newStoryValue = newAssetIndex + newStoryIndexOffset;
-            rowContext.Row.Set(columnName, newStoryValue.ToString());
-            rowContext.Changes.Add(rowContext.CreateChange(
-                columnName,
-                oldStoryValue.ToString(),
-                newStoryValue.ToString(),
-                FormatAssetIndexLabel(oldStoryValue, oldLabels.TryGetValue(oldAssetIndex, out var oldLabel) ? oldLabel : string.Empty),
-                FormatAssetIndexLabel(newStoryValue, newLabels.TryGetValue(newAssetIndex, out var newLabel) ? newLabel : string.Empty)));
-
-            if (newAssetIndex < 0 || newAssetIndex >= assetCount + validStoryIndexOffset)
-            {
-                warning = rowContext.CreateWarning(columnName, $"{assetLabel} remap 后索引 {newStoryValue} 仍然超出当前素材数量 {assetCount}。");
-            }
-
-            return true;
-        }
-
-        private static bool AddWarning(StoryIndexRowContext rowContext, AssetIndexWarning? warning)
-        {
-            if (warning is null)
-            {
-                return false;
-            }
-
-            rowContext.Warnings.Add(warning);
-            return false;
-        }
-
-        private static string FormatAssetIndexLabel(int index, string label)
-        {
-            return string.IsNullOrWhiteSpace(label) ? index.ToString() : $"{index} / {label}";
-        }
-
-        private static (Dictionary<int, string> OldLabels, Dictionary<int, string> NewLabels) BuildAssetIndexLabelMaps(
-            IReadOnlyList<string> orderedPaths,
-            Func<string, int?> getOldIndex)
-        {
-            var oldLabels = orderedPaths
-                .Select(path => new { OldIndex = getOldIndex(path), Label = Path.GetFileNameWithoutExtension(path) })
-                .Where(item => item.OldIndex is not null)
-                .GroupBy(item => item.OldIndex!.Value)
-                .ToDictionary(group => group.Key, group => group.First().Label);
-            var newLabels = orderedPaths
-                .Select((path, newIndex) => new { NewIndex = newIndex, Label = Path.GetFileNameWithoutExtension(path) })
-                .ToDictionary(item => item.NewIndex, item => item.Label);
-            return (oldLabels, newLabels);
         }
 
         private void RefreshOpenStoryRowsAfterIndexSync(IReadOnlyList<string> changedCsvPaths)
@@ -7174,154 +4927,12 @@ namespace GalExcleTools
             SynchronizeStorySectionState();
             ClearStoryUndoStack();
             _currentStoryRowIndex = Math.Clamp(_currentStoryRowIndex, 0, Math.Max(0, _storyRows.Count - 1));
+            _storyEditorViewModel.RefreshCommandStates();
             if (StoryEditorPage.Visibility == Visibility.Visible)
             {
                 RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
                 LoadStoryRowIntoUi();
             }
-        }
-
-        private int UpdateStoryRowsForAssetLibrary(AssetLibraryInfo assetLibrary, Func<StoryRow, bool> updateRow)
-        {
-            var changedFileCount = 0;
-            foreach (var project in GetProjects())
-            {
-                var projectAssetLibrary = ResolveProjectAssetLibrary(project);
-                if (projectAssetLibrary is null || !PathsEqual(projectAssetLibrary.Path, assetLibrary.Path))
-                {
-                    continue;
-                }
-
-                foreach (var csvPath in GetProjectStoryCsvPaths(project))
-                {
-                    var rows = ReadStoryRows(csvPath);
-                    var changed = false;
-                    foreach (var row in rows)
-                    {
-                        changed |= updateRow(row);
-                    }
-
-                    if (!changed)
-                    {
-                        continue;
-                    }
-
-                    WriteStoryRows(csvPath, rows);
-                    changedFileCount++;
-                    if (_currentStoryCsvPath is not null && PathsEqual(_currentStoryCsvPath, csvPath))
-                    {
-                        _storyRows.Clear();
-                        _storyRows.AddRange(rows);
-                        _currentStoryRowIndex = Math.Clamp(_currentStoryRowIndex, 0, Math.Max(0, _storyRows.Count - 1));
-                        if (StoryEditorPage.Visibility == Visibility.Visible)
-                        {
-                            RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
-                            LoadStoryRowIntoUi();
-                        }
-                    }
-                }
-            }
-
-            return changedFileCount;
-        }
-
-        private int UpdateStoryGlobalAssetIndexes(AssetLibraryInfo assetLibrary, string columnName, IReadOnlyDictionary<int, int> indexRemap)
-        {
-            if (indexRemap.Count == 0)
-            {
-                return 0;
-            }
-
-            return UpdateStoryRowsForAssetLibrary(assetLibrary, row => RemapStoryIndex(row, columnName, indexRemap));
-        }
-
-        private int UpdateStoryCharacterLayerIndexes(
-            AssetLibraryInfo assetLibrary,
-            CharacterInfo character,
-            CharacterLayerKind layerKind,
-            IReadOnlyDictionary<int, int> indexRemap)
-        {
-            if (indexRemap.Count == 0)
-            {
-                return 0;
-            }
-
-            return UpdateStoryRowsForAssetLibrary(assetLibrary, row =>
-            {
-                var changed = false;
-                if (StoryCharacterMatches(row.Get("TalkChar"), character))
-                {
-                    changed |= RemapStoryLayerIndex(row, GetStoryLayerColumn(0, GetStoryLayerFieldPrefix(layerKind)), layerKind, indexRemap);
-                }
-
-                for (var slotIndex = 1; slotIndex <= 5; slotIndex++)
-                {
-                    if (StoryCharacterMatches(row.Get(GetStoryCharacterColumn(slotIndex)), character))
-                    {
-                        changed |= RemapStoryLayerIndex(row, GetStoryLayerColumn(slotIndex, GetStoryLayerFieldPrefix(layerKind)), layerKind, indexRemap);
-                    }
-                }
-
-                return changed;
-            });
-        }
-
-        private int UpdateStoryCharacterFilterIndexes(AssetLibraryInfo assetLibrary, IReadOnlyDictionary<int, int> indexRemap)
-        {
-            if (indexRemap.Count == 0)
-            {
-                return 0;
-            }
-
-            return UpdateStoryRowsForAssetLibrary(assetLibrary, row =>
-            {
-                var changed = RemapStoryIndex(row, "TalkVfx", indexRemap);
-                for (var slotIndex = 1; slotIndex <= 5; slotIndex++)
-                {
-                    changed |= RemapStoryIndex(row, $"Vfx{slotIndex}", indexRemap);
-                }
-
-                return changed;
-            });
-        }
-
-        private static bool RemapStoryIndex(StoryRow row, string columnName, IReadOnlyDictionary<int, int> indexRemap)
-        {
-            var oldIndex = ParseInt(row.Get(columnName));
-            if (!indexRemap.TryGetValue(oldIndex, out var newIndex) || oldIndex == newIndex)
-            {
-                return false;
-            }
-
-            row.Set(columnName, newIndex.ToString());
-            return true;
-        }
-
-        private static bool RemapStoryLayerIndex(
-            StoryRow row,
-            string columnName,
-            CharacterLayerKind layerKind,
-            IReadOnlyDictionary<int, int> indexRemap)
-        {
-            if (layerKind != CharacterLayerKind.Adorn)
-            {
-                return RemapStoryIndex(row, columnName, indexRemap);
-            }
-
-            var storyIndex = ParseInt(row.Get(columnName));
-            if (storyIndex <= 0)
-            {
-                return false;
-            }
-
-            var oldAssetIndex = storyIndex - 1;
-            if (!indexRemap.TryGetValue(oldAssetIndex, out var newAssetIndex) || oldAssetIndex == newAssetIndex)
-            {
-                return false;
-            }
-
-            row.Set(columnName, (newAssetIndex + 1).ToString());
-            return true;
         }
 
         private static bool StoryCharacterMatches(string value, CharacterInfo character)
@@ -7332,13 +4943,30 @@ namespace GalExcleTools
 
         private static string GetStoryLayerFieldPrefix(CharacterLayerKind layerKind)
         {
+            return GetStoryCharacterLayerSpec(layerKind).FieldPrefix;
+        }
+
+        private static StoryCharacterLayerSpec GetStoryCharacterLayerSpec(CharacterLayerKind layerKind)
+        {
             return layerKind switch
             {
-                CharacterLayerKind.Cloth => "Body",
-                CharacterLayerKind.Face => "Face",
-                CharacterLayerKind.Adorn => "Adorn",
-                CharacterLayerKind.Vfx => "Vfx",
-                _ => "Body"
+                CharacterLayerKind.Cloth => new StoryCharacterLayerSpec(layerKind, "Body", "服装"),
+                CharacterLayerKind.Face => new StoryCharacterLayerSpec(layerKind, "Face", "表情"),
+                CharacterLayerKind.Adorn => new StoryCharacterLayerSpec(layerKind, "Adorn", "装饰"),
+                CharacterLayerKind.Vfx => new StoryCharacterLayerSpec(layerKind, "Vfx", "滤镜"),
+                _ => new StoryCharacterLayerSpec(CharacterLayerKind.Cloth, "Body", "服装")
+            };
+        }
+
+        private static StoryCharacterLayerSpec GetStoryCharacterLayerSpec(string fieldPrefix)
+        {
+            return fieldPrefix switch
+            {
+                "Body" => GetStoryCharacterLayerSpec(CharacterLayerKind.Cloth),
+                "Face" => GetStoryCharacterLayerSpec(CharacterLayerKind.Face),
+                "Adorn" => GetStoryCharacterLayerSpec(CharacterLayerKind.Adorn),
+                "Vfx" => GetStoryCharacterLayerSpec(CharacterLayerKind.Vfx),
+                _ => GetStoryCharacterLayerSpec(CharacterLayerKind.Cloth)
             };
         }
 
@@ -7346,58 +4974,57 @@ namespace GalExcleTools
             IReadOnlyList<string> orderedPaths,
             Func<string, int?> getOldIndex)
         {
-            return orderedPaths
-                .Select((path, newIndex) => new { OldIndex = getOldIndex(path), NewIndex = newIndex })
-                .Where(item => item.OldIndex is not null && item.OldIndex.Value != item.NewIndex)
-                .ToDictionary(item => item.OldIndex!.Value, item => item.NewIndex);
-        }
-
-        private static Dictionary<int, int> BuildCharacterFilterIndexRemap(
-            IReadOnlyList<CharacterFilterEntry> oldFilters,
-            IReadOnlyList<CharacterFilterEntry> newFilters)
-        {
-            var newIndexes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            for (var i = 0; i < newFilters.Count; i++)
-            {
-                if (!newIndexes.ContainsKey(newFilters[i].Id))
-                {
-                    newIndexes[newFilters[i].Id] = i;
-                }
-            }
-
             var result = new Dictionary<int, int>();
-            for (var oldIndex = 0; oldIndex < oldFilters.Count; oldIndex++)
+            foreach (var item in orderedPaths.Select((path, newIndex) => new { OldIndex = getOldIndex(path), NewIndex = newIndex }))
             {
-                var filter = oldFilters[oldIndex];
-                if (newIndexes.TryGetValue(filter.Id, out var newIndex))
+                if (item.OldIndex is null || item.OldIndex.Value == item.NewIndex)
                 {
-                    if (oldIndex != newIndex)
-                    {
-                        result[oldIndex] = newIndex;
-                    }
+                    continue;
                 }
-                else if (oldIndex != 0)
-                {
-                    result[oldIndex] = 0;
-                }
+
+                result.TryAdd(item.OldIndex.Value, item.NewIndex);
             }
 
             return result;
         }
 
-        private static int? GetBackgroundImageIndex(string imagePath)
+        private static List<string> GetOrderedExistingTaggedPaths(GridView gridView)
         {
-            var match = Regex.Match(Path.GetFileNameWithoutExtension(imagePath), @"^BG(?<index>\d+)", RegexOptions.IgnoreCase);
-            return match.Success ? int.Parse(match.Groups["index"].Value) : null;
+            return gridView.Items
+                .OfType<GridViewItem>()
+                .Select(item => item.Tag as string)
+                .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                .Cast<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
-        private static int? GetAudioAssetIndex(AudioAssetKind kind, string audioPath)
+        private static GridViewItem? ResolveDraggedGridViewItem(GridView gridView, DragItemsStartingEventArgs e)
         {
-            var match = Regex.Match(
-                Path.GetFileNameWithoutExtension(audioPath),
-                $"^{Regex.Escape(GetAudioPrefix(kind))}(?<index>\\d+)",
-                RegexOptions.IgnoreCase);
-            return match.Success ? int.Parse(match.Groups["index"].Value) : null;
+            var draggedObject = e.Items.FirstOrDefault();
+            return draggedObject as GridViewItem ??
+                   (draggedObject is null ? null : gridView.ContainerFromItem(draggedObject) as GridViewItem) ??
+                   gridView.Items
+                       .OfType<GridViewItem>()
+                       .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject));
+        }
+
+        private static void MoveGridViewItemToEnd(GridView gridView, GridViewItem? item)
+        {
+            if (item is null)
+            {
+                return;
+            }
+
+            var currentIndex = gridView.Items.IndexOf(item);
+            var lastIndex = gridView.Items.Count - 1;
+            if (currentIndex < 0 || currentIndex == lastIndex)
+            {
+                return;
+            }
+
+            gridView.Items.Remove(item);
+            gridView.Items.Add(item);
         }
 
         private void ShowStoryStatus(InfoBarSeverity severity, string title, string message)
@@ -7482,33 +5109,6 @@ namespace GalExcleTools
             }
         }
 
-        private static string GetAudioDisplayName(AudioAssetKind kind)
-        {
-            return kind switch
-            {
-                AudioAssetKind.Music => "音乐",
-                AudioAssetKind.Ambient => "环境音",
-                AudioAssetKind.SoundEffect => "特殊音效",
-                _ => "音频"
-            };
-        }
-
-        private static string GetAudioPrefix(AudioAssetKind kind)
-        {
-            return kind switch
-            {
-                AudioAssetKind.Music => "BGM",
-                AudioAssetKind.Ambient => "Sc",
-                AudioAssetKind.SoundEffect => "SE",
-                _ => "Audio"
-            };
-        }
-
-        private static int ParseInt(string value)
-        {
-            return int.TryParse(value, out var result) ? result : 0;
-        }
-
         private static int? ResolveStoryAssetIndex(int rawIndex, int assetCount)
         {
             if (assetCount <= 0 || rawIndex < 0)
@@ -7519,168 +5119,249 @@ namespace GalExcleTools
             return rawIndex < assetCount ? rawIndex : null;
         }
 
-        private static string GetChapterStoryCsvPath(ChapterInfo chapter)
-        {
-            var expectedCsv = Path.Combine(chapter.Path, $"{chapter.Code}.csv");
-            if (File.Exists(expectedCsv))
-            {
-                return expectedCsv;
-            }
-
-            var legacyStoryCsv = Directory
-                .EnumerateFiles(chapter.Path, "*.story.csv")
-                .OrderBy(Path.GetFileName)
-                .FirstOrDefault();
-            if (legacyStoryCsv is not null)
-            {
-                if (!File.Exists(expectedCsv))
-                {
-                    File.Move(legacyStoryCsv, expectedCsv);
-                }
-
-                return expectedCsv;
-            }
-
-            return expectedCsv;
-        }
-
-        private static StoryRow CreateDefaultStoryRow()
-        {
-            var row = new StoryRow();
-            foreach (var column in StoryCsvColumns)
-            {
-                row.Set(column, StoryNumericColumns.Contains(column) ? "0" : string.Empty);
-            }
-
-            row.Set("Name", CreateStoryRowName(0));
-            return row;
-        }
-
-        private static string CreateStoryRowName(int index)
-        {
-            return (index + 1).ToString();
-        }
-
-        private static List<StoryRow> ReadStoryRows(string csvPath)
-        {
-            if (!File.Exists(csvPath))
-            {
-                return [];
-            }
-
-            var lines = File.ReadAllLines(csvPath, Encoding.UTF8).Where(line => !string.IsNullOrWhiteSpace(line)).ToList();
-            if (lines.Count == 0)
-            {
-                return [];
-            }
-
-            var headers = NormalizeStoryCsvHeaders(ParseCsvLine(lines[0]));
-            var rows = new List<StoryRow>();
-            foreach (var line in lines.Skip(1))
-            {
-                var cells = ParseCsvLine(line);
-                var row = CreateDefaultStoryRow();
-                for (var i = 0; i < headers.Count && i < cells.Count; i++)
-                {
-                    row.Set(headers[i], cells[i]);
-                }
-
-                if (string.IsNullOrWhiteSpace(row.Get("Name")))
-                {
-                    row.Set("Name", CreateStoryRowName(rows.Count));
-                }
-
-                rows.Add(row);
-            }
-
-            return rows;
-        }
-
-        private static void WriteStoryRows(string csvPath, IReadOnlyList<StoryRow> rows)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(csvPath)!);
-            var builder = new StringBuilder();
-            builder.AppendLine(string.Join(",", StoryCsvColumns.Select(column => EscapeCsvField(GetStoryCsvHeaderName(column)))));
-            for (var i = 0; i < rows.Count; i++)
-            {
-                rows[i].Set("Name", CreateStoryRowName(i));
-                builder.AppendLine(string.Join(",", StoryCsvColumns.Select(column => EscapeCsvField(rows[i].Get(column)))));
-            }
-
-            File.WriteAllText(csvPath, builder.ToString(), Encoding.UTF8);
-        }
-
-        private static List<string> ParseCsvLine(string line)
-        {
-            var cells = new List<string>();
-            var builder = new StringBuilder();
-            var inQuotes = false;
-            for (var i = 0; i < line.Length; i++)
-            {
-                var ch = line[i];
-                if (ch == '"')
-                {
-                    if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
-                    {
-                        builder.Append('"');
-                        i++;
-                    }
-                    else
-                    {
-                        inQuotes = !inQuotes;
-                    }
-                }
-                else if (ch == ',' && !inQuotes)
-                {
-                    cells.Add(builder.ToString());
-                    builder.Clear();
-                }
-                else
-                {
-                    builder.Append(ch);
-                }
-            }
-
-            cells.Add(builder.ToString());
-            return cells;
-        }
-
-        private static List<string> NormalizeStoryCsvHeaders(IReadOnlyList<string> headers)
-        {
-            return headers
-                .Select((header, index) => IsStoryRowNameHeader(header, index) ? "Name" : header)
-                .ToList();
-        }
-
-        private static bool IsStoryRowNameHeader(string header, int index)
-        {
-            return index == 0 &&
-                (string.IsNullOrWhiteSpace(header) ||
-                    string.Equals(header.Trim(), "---", StringComparison.Ordinal) ||
-                    string.Equals(header.Trim(), "Name", StringComparison.Ordinal));
-        }
-
-        private static string GetStoryCsvHeaderName(string column)
-        {
-            return string.Equals(column, "Name", StringComparison.Ordinal) ? "---" : column;
-        }
-
-        private static string EscapeCsvField(string value)
-        {
-            if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
-            {
-                return $"\"{value.Replace("\"", "\"\"")}\"";
-            }
-
-            return value;
-        }
-
         private void ShowChapterStatus(InfoBarSeverity severity, string title, string message)
         {
             ChapterInfoBar.Severity = severity;
             ChapterInfoBar.Title = title;
             ChapterInfoBar.Message = message;
             ChapterInfoBar.IsOpen = true;
+        }
+
+        private void ShowGlobalProgress(string title, string detail)
+        {
+            _globalProgressCancellation?.Dispose();
+            _globalProgressCancellation = new CancellationTokenSource();
+            _globalProgressOperationTitle = title;
+            _globalProgressStopwatch.Restart();
+            _globalProgressElapsedTimer.Start();
+            _isGlobalProgressVisible = true;
+
+            GlobalProgressHost.Visibility = Visibility.Visible;
+            GlobalProgressTitleText.Text = detail;
+            GlobalProgressDetailText.Text = title;
+            GlobalProgressElapsedText.Text = FormatElapsedTime(TimeSpan.Zero);
+            GlobalProgressPercentText.Text = "0%";
+            GlobalProgressBar.IsIndeterminate = true;
+            GlobalProgressBar.Value = 0;
+            _globalProgressLastPercent = 0;
+            UpdateGlobalProgressRing(0);
+            AnimateGlobalProgressHost(show: true);
+        }
+
+        private void UpdateGlobalProgress(string message, double percent, string? detail = null, bool isIndeterminate = false)
+        {
+            if (!_isGlobalProgressVisible)
+            {
+                ShowGlobalProgress(_globalProgressOperationTitle.Length == 0 ? "正在处理" : _globalProgressOperationTitle, message);
+            }
+
+            var clampedPercent = Math.Clamp(percent, 0, 100);
+            GlobalProgressTitleText.Text = message;
+            GlobalProgressDetailText.Text = string.IsNullOrWhiteSpace(detail)
+                ? _globalProgressOperationTitle
+                : detail.Replace('\n', ' ');
+            GlobalProgressBar.IsIndeterminate = isIndeterminate;
+            if (!isIndeterminate)
+            {
+                GlobalProgressBar.Value = clampedPercent;
+            }
+
+            GlobalProgressPercentText.Text = $"{clampedPercent:0}%";
+            _globalProgressLastPercent = clampedPercent;
+            UpdateGlobalProgressRing(clampedPercent);
+            UpdateGlobalProgressElapsedText();
+        }
+
+        private void CompleteGlobalProgress(string message, string? detail = null)
+        {
+            _globalProgressStopwatch.Stop();
+            _globalProgressElapsedTimer.Stop();
+            GlobalProgressBar.IsIndeterminate = false;
+            GlobalProgressBar.Value = 100;
+            GlobalProgressPercentText.Text = "100%";
+            _globalProgressLastPercent = 100;
+            UpdateGlobalProgressRing(100);
+            GlobalProgressTitleText.Text = message;
+            GlobalProgressDetailText.Text = string.IsNullOrWhiteSpace(detail) ? _globalProgressOperationTitle : detail;
+            UpdateGlobalProgressElapsedText();
+        }
+
+        private async Task HideGlobalProgressAfterDelayAsync(int delayMilliseconds = 1400)
+        {
+            await Task.Delay(delayMilliseconds);
+            HideGlobalProgress();
+        }
+
+        private void HideGlobalProgress()
+        {
+            _globalProgressStopwatch.Reset();
+            _globalProgressElapsedTimer.Stop();
+            _isGlobalProgressVisible = false;
+            _globalProgressCancellation?.Dispose();
+            _globalProgressCancellation = null;
+            AnimateGlobalProgressHost(show: false);
+        }
+
+        private CancellationToken GetGlobalProgressCancellationToken()
+        {
+            return _globalProgressCancellation?.Token ?? CancellationToken.None;
+        }
+
+        private async void GlobalProgressRing_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+            if (!_isGlobalProgressVisible || _globalProgressCancellation is null || _globalProgressCancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                "取消当前操作？",
+                $"正在进行：{_globalProgressOperationTitle}\n取消后，已经写入的文件可能会保留，未完成的部分会停止。",
+                "取消操作",
+                "继续等待",
+                PrimaryButtonStyle: CreateDestructivePrimaryButtonStyle()));
+            if (confirmed)
+            {
+                _globalProgressCancellation.Cancel();
+                UpdateGlobalProgress("正在取消...", _globalProgressLastPercent, "等待当前步骤安全停止。");
+            }
+        }
+
+        private void GlobalProgressElapsedTimer_Tick(DispatcherQueueTimer sender, object args)
+        {
+            UpdateGlobalProgressElapsedText();
+        }
+
+        private void UpdateGlobalProgressElapsedText()
+        {
+            GlobalProgressElapsedText.Text = FormatElapsedTime(_globalProgressStopwatch.Elapsed);
+        }
+
+        private void UpdateGlobalProgressRing(double percent)
+        {
+            var clampedPercent = Math.Clamp(percent, 0, 100);
+            const double size = 86;
+            const double stroke = 7;
+            var radius = (size - stroke) / 2;
+            var center = size / 2;
+
+            if (clampedPercent <= 0)
+            {
+                GlobalProgressRingPath.Data = null;
+                return;
+            }
+
+            if (clampedPercent >= 99.9)
+            {
+                var geometryGroup = new GeometryGroup();
+                geometryGroup.Children.Add(CreateProgressRingArc(center, radius, 359.9));
+                GlobalProgressRingPath.Data = geometryGroup;
+                return;
+            }
+
+            GlobalProgressRingPath.Data = CreateProgressRingArc(center, radius, clampedPercent / 100d * 360d);
+        }
+
+        private static Geometry CreateProgressRingArc(double center, double radius, double angleDegrees)
+        {
+            var startPoint = new Windows.Foundation.Point(center, center - radius);
+            var radians = (angleDegrees - 90) * Math.PI / 180d;
+            var endPoint = new Windows.Foundation.Point(
+                center + radius * Math.Cos(radians),
+                center + radius * Math.Sin(radians));
+            var figure = new PathFigure
+            {
+                StartPoint = startPoint,
+                IsClosed = false
+            };
+            figure.Segments.Add(new ArcSegment
+            {
+                Point = endPoint,
+                Size = new Windows.Foundation.Size(radius, radius),
+                SweepDirection = SweepDirection.Clockwise,
+                IsLargeArc = angleDegrees > 180
+            });
+
+            return new PathGeometry
+            {
+                Figures = { figure }
+            };
+        }
+
+        private string FormatProgressSpeed(long completedBytes)
+        {
+            var elapsedSeconds = Math.Max(0.1, _globalProgressStopwatch.Elapsed.TotalSeconds);
+            if (completedBytes <= 0 || elapsedSeconds <= 0)
+            {
+                return string.Empty;
+            }
+
+            return $"{FormatFileSize((long)(completedBytes / elapsedSeconds))}/s";
+        }
+
+        private string FormatRemainingTime(long completedBytes, long totalBytes)
+        {
+            if (completedBytes <= 0 || totalBytes <= 0 || completedBytes >= totalBytes)
+            {
+                return "--:--";
+            }
+
+            var elapsedSeconds = Math.Max(0.1, _globalProgressStopwatch.Elapsed.TotalSeconds);
+            var bytesPerSecond = completedBytes / elapsedSeconds;
+            if (bytesPerSecond <= 0)
+            {
+                return "--:--";
+            }
+
+            return FormatElapsedTime(TimeSpan.FromSeconds((totalBytes - completedBytes) / bytesPerSecond));
+        }
+
+        private void AnimateGlobalProgressHost(bool show)
+        {
+            var transform = GlobalProgressHostTransform;
+            var fromY = show ? 130 : 0;
+            var toY = show ? 0 : 130;
+            var fromOpacity = show ? 0 : 1;
+            var toOpacity = show ? 1 : 0;
+            GlobalProgressHost.Visibility = Visibility.Visible;
+            transform.Y = fromY;
+            GlobalProgressHost.Opacity = fromOpacity;
+
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var slideAnimation = new DoubleAnimation
+            {
+                From = fromY,
+                To = toY,
+                Duration = TimeSpan.FromMilliseconds(show ? 240 : 180),
+                EasingFunction = easing
+            };
+            Storyboard.SetTarget(slideAnimation, transform);
+            Storyboard.SetTargetProperty(slideAnimation, nameof(TranslateTransform.Y));
+
+            var fadeAnimation = new DoubleAnimation
+            {
+                From = fromOpacity,
+                To = toOpacity,
+                Duration = TimeSpan.FromMilliseconds(show ? 220 : 160),
+                EasingFunction = easing
+            };
+            Storyboard.SetTarget(fadeAnimation, GlobalProgressHost);
+            Storyboard.SetTargetProperty(fadeAnimation, nameof(UIElement.Opacity));
+
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(slideAnimation);
+            storyboard.Children.Add(fadeAnimation);
+            storyboard.Completed += (_, _) =>
+            {
+                transform.Y = toY;
+                GlobalProgressHost.Opacity = toOpacity;
+                if (!show)
+                {
+                    GlobalProgressHost.Visibility = Visibility.Collapsed;
+                }
+            };
+            storyboard.Begin();
         }
 
         private Style? TryGetTextBlockStyle(string key)
@@ -7700,42 +5381,16 @@ namespace GalExcleTools
 
         private async Task<string?> ShowBackupNoteDialogAsync(string title, string targetName)
         {
-            var textBox = new TextBox
-            {
-                Width = 420,
-                Header = "备注（可留空）",
-                PlaceholderText = "例如：改对白前、导入小节后",
-                MaxLength = 80
-            };
-
-            var panel = new StackPanel
-            {
-                Spacing = 12
-            };
-            panel.Children.Add(new TextBlock
-            {
-                Text = targetName,
-                TextWrapping = TextWrapping.Wrap
-            });
-            panel.Children.Add(textBox);
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = panel,
-                PrimaryButtonText = "备份",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            return result == ContentDialogResult.Primary ? NormalizeBackupNote(textBox.Text) : null;
+            var note = await _dialogService.PromptTextAsync(new TextInputDialogRequest(
+                title,
+                "备注（可留空）",
+                PlaceholderText: "例如：改对白前、导入小节后",
+                PrimaryButtonText: "备份",
+                CloseButtonText: "取消",
+                Message: targetName,
+                Width: 420,
+                MaxLength: 80));
+            return note is null ? null : NormalizeBackupNote(note);
         }
 
         private async Task<FolderBackupEntry> ShowFolderBackupProgressDialogAsync(
@@ -7743,71 +5398,45 @@ namespace GalExcleTools
             string targetName,
             Func<IProgress<FolderBackupProgress>, Task<FolderBackupEntry>> backupAction)
         {
-            var progressBar = new ProgressBar
-            {
-                Minimum = 0,
-                Maximum = 100,
-                IsIndeterminate = true
-            };
-            var stageText = new TextBlock
-            {
-                Text = "准备开始备份...",
-                TextWrapping = TextWrapping.Wrap
-            };
-            var detailText = new TextBlock
-            {
-                Style = TryGetTextBlockStyle("SubtleTextStyle"),
-                TextWrapping = TextWrapping.Wrap
-            };
-
-            var panel = new StackPanel
-            {
-                Spacing = 10,
-                Width = 520
-            };
-            panel.Children.Add(new TextBlock
-            {
-                Text = targetName,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                TextWrapping = TextWrapping.Wrap
-            });
-            panel.Children.Add(progressBar);
-            panel.Children.Add(stageText);
-            panel.Children.Add(detailText);
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = panel,
-                XamlRoot = Content.XamlRoot
-            };
-
+            ShowGlobalProgress(title, targetName);
             var progress = new Progress<FolderBackupProgress>(update =>
             {
-                progressBar.IsIndeterminate = update.Percent <= 0;
-                progressBar.Value = Math.Clamp(update.Percent, 0, 100);
-                stageText.Text = update.Message;
                 var byteText = update.TotalBytes > 0
                     ? $"{FormatFileSize(update.CompletedBytes)} / {FormatFileSize(update.TotalBytes)}"
-                    : "正在统计大小";
+                    : "统计大小中";
                 var fileText = update.TotalFiles > 0
                     ? $"{Math.Min(update.CompletedFiles + 1, update.TotalFiles)} / {update.TotalFiles} 个文件"
-                    : "正在扫描文件";
-                detailText.Text = update.CurrentRelativePath is null
-                    ? $"{fileText}，{byteText}"
-                    : $"{fileText}，{byteText}\n{update.CurrentRelativePath}";
+                    : "扫描文件中";
+                var speedText = FormatProgressSpeed(update.CompletedBytes);
+                var remainingText = FormatRemainingTime(update.CompletedBytes, update.TotalBytes);
+                var transferText = string.IsNullOrWhiteSpace(speedText)
+                    ? byteText
+                    : $"{byteText}，{speedText}，剩余 {remainingText}";
+                var detail = update.CurrentRelativePath is null
+                    ? $"{fileText}，{transferText}"
+                    : $"{fileText}，{transferText}\n{update.CurrentRelativePath}";
+                UpdateGlobalProgress(update.Message, update.Percent, detail, update.Percent <= 0);
             });
 
-            var dialogOperation = dialog.ShowAsync();
-            await Task.Delay(120);
             try
             {
-                return await backupAction(progress);
+                var result = await backupAction(progress);
+                CompleteGlobalProgress("完成", result.DisplayName);
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                CompleteGlobalProgress("已取消", "当前操作已停止。");
+                throw;
+            }
+            catch
+            {
+                CompleteGlobalProgress("失败", "操作没有完成，请查看日志或错误提示。");
+                throw;
             }
             finally
             {
-                dialog.Hide();
-                _ = dialogOperation;
+                await HideGlobalProgressAfterDelayAsync();
             }
         }
 
@@ -7815,62 +5444,37 @@ namespace GalExcleTools
             string title,
             Func<IProgress<AssetIndexSyncProgress>, Task<AssetIndexSyncResult>> syncAction)
         {
-            var progressBar = new ProgressBar
-            {
-                Minimum = 0,
-                Maximum = 100,
-                IsIndeterminate = true
-            };
-            var stageText = new TextBlock
-            {
-                Text = "准备扫描关联项目...",
-                TextWrapping = TextWrapping.Wrap
-            };
-            var detailText = new TextBlock
-            {
-                Style = TryGetTextBlockStyle("SubtleTextStyle"),
-                TextWrapping = TextWrapping.Wrap
-            };
-
-            var panel = new StackPanel
-            {
-                Spacing = 10,
-                Width = 560
-            };
-            panel.Children.Add(progressBar);
-            panel.Children.Add(stageText);
-            panel.Children.Add(detailText);
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = panel,
-                XamlRoot = Content.XamlRoot
-            };
-
+            ShowGlobalProgress(title, "正在扫描关联项目...");
             var progress = new Progress<AssetIndexSyncProgress>(update =>
             {
-                progressBar.IsIndeterminate = update.Percent <= 0;
-                progressBar.Value = Math.Clamp(update.Percent, 0, 100);
-                stageText.Text = update.Message;
                 var csvText = update.TotalCsvFiles > 0
                     ? $"{Math.Min(update.CompletedCsvFiles + 1, update.TotalCsvFiles)} / {update.TotalCsvFiles} 个 CSV"
-                    : "正在收集 CSV";
-                detailText.Text = update.CurrentCsvName is null
+                    : "收集 CSV 中";
+                var detail = update.CurrentCsvName is null
                     ? $"{csvText}，已变更 {update.ChangeCount} 处，异常 {update.WarningCount} 处"
                     : $"{csvText}，已变更 {update.ChangeCount} 处，异常 {update.WarningCount} 处\n{update.CurrentCsvName}";
+                UpdateGlobalProgress(update.Message, update.Percent, detail, update.Percent <= 0);
             });
 
-            var dialogOperation = dialog.ShowAsync();
-            await Task.Delay(120);
             try
             {
-                return await syncAction(progress);
+                var result = await syncAction(progress);
+                CompleteGlobalProgress("索引同步检查完成", $"扫描 {result.ScannedCsvCount} 个 CSV，变更 {result.ChangeCount} 处，异常 {result.WarningCount} 处");
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                CompleteGlobalProgress("已取消", "当前操作已停止。");
+                throw;
+            }
+            catch
+            {
+                CompleteGlobalProgress("失败", "素材索引同步没有完成。");
+                throw;
             }
             finally
             {
-                dialog.Hide();
-                _ = dialogOperation;
+                await HideGlobalProgressAfterDelayAsync();
             }
         }
 
@@ -7882,54 +5486,13 @@ namespace GalExcleTools
                 return;
             }
 
-            var panel = new StackPanel
-            {
-                Spacing = 10,
-                Width = 720
-            };
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"已扫描 {result.ScannedCsvCount} 个 CSV，更新 {result.ChangedCsvCount} 个 CSV，变更 {result.ChangeCount} 处，异常 {result.WarningCount} 处。",
-                TextWrapping = TextWrapping.Wrap
-            });
-
-            if (result.Changes.Count > 0)
-            {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = "变更前后对比",
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-                });
-                panel.Children.Add(CreateScrollableTextBlock(string.Join("\n", result.Changes.Take(80).Select(change =>
-                    $"{change.ProjectName}/{change.ChapterName}/{change.CsvName} 行{change.RowName} {change.ColumnName}: {change.OldValueLabel} -> {change.NewValueLabel}"))));
-            }
-
-            if (result.Warnings.Count > 0)
-            {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = "需要注意的数据",
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-                });
-                panel.Children.Add(CreateScrollableTextBlock(string.Join("\n", result.Warnings.Take(80).Select(warning =>
-                    $"{warning.ProjectName}/{warning.ChapterName}/{warning.CsvName} 行{warning.RowName} {warning.ColumnName}: {warning.Message}"))));
-                panel.Children.Add(new TextBlock
-                {
-                    Text = "这些数据没有被强行改动。可以在章节卡右键点击“修复”做单章体检和保守修复。",
-                    TextWrapping = TextWrapping.Wrap,
-                    Style = TryGetTextBlockStyle("SubtleTextStyle")
-                });
-            }
-
-            var dialog = new ContentDialog
-            {
-                Title = result.WarningCount > 0 ? $"{result.Title}：有异常数据" : $"{result.Title}完成",
-                Content = panel,
-                PrimaryButtonText = "知道了",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            await dialog.ShowAsync();
+            await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                result.WarningCount > 0 ? $"{result.Title}：有异常数据" : $"{result.Title}完成",
+                DialogContentFactory.CreateAssetIndexSyncResultContent(result),
+                "知道了",
+                string.Empty,
+                DefaultButton: ContentDialogButton.Primary,
+                CloseSound: DialogSoundIntent.None));
         }
 
         private async Task<ChapterRepairResult> ShowChapterRepairProgressDialogAsync(
@@ -7937,172 +5500,60 @@ namespace GalExcleTools
             ChapterInfo chapter,
             Func<IProgress<ChapterRepairProgress>, Task<ChapterRepairResult>> repairAction)
         {
-            var progressBar = new ProgressBar
-            {
-                Minimum = 0,
-                Maximum = 100,
-                IsIndeterminate = true
-            };
-            var stageText = new TextBlock
-            {
-                Text = "准备检查章节索引...",
-                TextWrapping = TextWrapping.Wrap
-            };
-            var detailText = new TextBlock
-            {
-                Style = TryGetTextBlockStyle("SubtleTextStyle"),
-                TextWrapping = TextWrapping.Wrap
-            };
-
-            var panel = new StackPanel
-            {
-                Spacing = 10,
-                Width = 560
-            };
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"{chapter.Name}（{chapter.Code}）",
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                TextWrapping = TextWrapping.Wrap
-            });
-            panel.Children.Add(progressBar);
-            panel.Children.Add(stageText);
-            panel.Children.Add(detailText);
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = panel,
-                XamlRoot = Content.XamlRoot
-            };
-
+            ShowGlobalProgress(title, $"{chapter.Name}（{chapter.Code}）");
             var progress = new Progress<ChapterRepairProgress>(update =>
             {
-                progressBar.IsIndeterminate = update.Percent <= 0;
-                progressBar.Value = Math.Clamp(update.Percent, 0, 100);
-                stageText.Text = update.Message;
                 var csvText = update.TotalCsvFiles > 0
                     ? $"{Math.Min(update.CompletedCsvFiles + 1, update.TotalCsvFiles)} / {update.TotalCsvFiles} 个 CSV"
-                    : "正在收集 CSV";
-                detailText.Text = update.CurrentCsvName is null
+                    : "收集 CSV 中";
+                var detail = update.CurrentCsvName is null
                     ? $"{csvText}，发现 {update.IssueCount} 处异常，已修复 {update.FixedCount} 处"
                     : $"{csvText}，发现 {update.IssueCount} 处异常，已修复 {update.FixedCount} 处\n{update.CurrentCsvName}";
+                UpdateGlobalProgress(update.Message, update.Percent, detail, update.Percent <= 0);
             });
 
-            var dialogOperation = dialog.ShowAsync();
-            await Task.Delay(120);
             try
             {
-                return await repairAction(progress);
+                var result = await repairAction(progress);
+                CompleteGlobalProgress("章节索引检查完成", $"扫描 {result.ScannedCsvCount} 个 CSV，发现 {result.IssueCount} 处，已修复 {result.FixedCount} 处");
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                CompleteGlobalProgress("已取消", "当前操作已停止。");
+                throw;
+            }
+            catch
+            {
+                CompleteGlobalProgress("失败", "章节索引检查没有完成。");
+                throw;
             }
             finally
             {
-                dialog.Hide();
-                _ = dialogOperation;
+                await HideGlobalProgressAfterDelayAsync();
             }
         }
 
         private async Task<bool> ShowChapterRepairResultDialogAsync(ChapterRepairResult result)
         {
-            var panel = new StackPanel
-            {
-                Spacing = 10,
-                Width = 720
-            };
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"已扫描 {result.ScannedCsvCount} 个 CSV，发现 {result.IssueCount} 处异常。其中 {result.AutoFixableCount} 处可以自动归零修复。",
-                TextWrapping = TextWrapping.Wrap
-            });
-            panel.Children.Add(CreateScrollableTextBlock(string.Join("\n", result.Issues.Take(100).Select(issue =>
-                $"{issue.ProjectName}/{issue.ChapterName}/{issue.CsvName} 行{issue.RowName} {issue.ColumnName}: {issue.Message}{(issue.CanAutoFix ? " [可自动修复]" : " [需手动确认]")}"))));
-
-            var dialog = new ContentDialog
-            {
-                Title = "章节索引检查结果",
-                Content = panel,
-                PrimaryButtonText = result.AutoFixableCount > 0 ? "自动修复" : string.Empty,
-                SecondaryButtonText = "只查看",
-                CloseButtonText = "取消",
-                DefaultButton = result.AutoFixableCount > 0 ? ContentDialogButton.Primary : ContentDialogButton.Secondary,
-                XamlRoot = Content.XamlRoot
-            };
-
-            var dialogResult = await dialog.ShowAsync();
-            return result.AutoFixableCount > 0 && dialogResult == ContentDialogResult.Primary;
-        }
-
-        private UIElement CreateScrollableTextBlock(string text)
-        {
-            return new ScrollViewer
-            {
-                MaxHeight = 260,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Content = new TextBlock
-                {
-                    Text = text,
-                    TextWrapping = TextWrapping.Wrap,
-                    FontFamily = new FontFamily("Consolas"),
-                    Style = TryGetTextBlockStyle("SubtleTextStyle")
-                }
-            };
+            var dialogResult = await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                "章节索引检查结果",
+                DialogContentFactory.CreateChapterRepairResultContent(result),
+                result.AutoFixableCount > 0 ? "自动修复" : string.Empty,
+                "取消",
+                "只查看",
+                result.AutoFixableCount > 0 ? ContentDialogButton.Primary : ContentDialogButton.Secondary));
+            return result.AutoFixableCount > 0 && dialogResult == DialogResultKind.Primary;
         }
 
         private async Task<FolderBackupEntry?> ShowFolderRestoreDialogAsync(string title, string targetName, IReadOnlyList<FolderBackupEntry> backups)
         {
-            var listView = new ListView
-            {
-                SelectionMode = ListViewSelectionMode.Single,
-                MaxHeight = 320,
-                Width = 420
-            };
-
-            foreach (var backup in backups)
-            {
-                listView.Items.Add(new ListViewItem
-                {
-                    Content = backup.DisplayName,
-                    Tag = backup
-                });
-            }
-
-            if (listView.Items.Count > 0)
-            {
-                listView.SelectedIndex = 0;
-            }
-
-            var panel = new StackPanel
-            {
-                Spacing = 12
-            };
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"选择要还原的备份：{targetName}",
-                TextWrapping = TextWrapping.Wrap
-            });
-            panel.Children.Add(listView);
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = panel,
-                PrimaryButtonText = "还原",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            return result == ContentDialogResult.Primary &&
-                listView.SelectedItem is ListViewItem { Tag: FolderBackupEntry selectedBackup }
-                    ? selectedBackup
-                    : null;
+            return await _dialogService.SelectAsync(new SelectionDialogRequest<FolderBackupEntry>(
+                title,
+                $"选择要还原的备份：{targetName}",
+                backups.Select(backup => new SelectionDialogItem<FolderBackupEntry>(backup.DisplayName, backup)).ToList(),
+                PrimaryButtonText: "还原",
+                CloseButtonText: "取消"));
         }
 
         private async Task<ChapterEditorInput?> ShowChapterEditorDialogAsync(string title, ChapterInfo? chapter, UIElement? introContent = null)
@@ -8112,138 +5563,37 @@ namespace GalExcleTools
                 return null;
             }
 
-            var nameBox = new TextBox
-            {
-                Header = "中文显示名称",
-                Text = chapter?.Name ?? string.Empty,
-                PlaceholderText = "例如：第一章 雨夜"
-            };
+            var editorContent = EditorDialogContentFactory.CreateChapterEditorContent(
+                _currentProject,
+                chapter,
+                introContent,
+                BuildChapterCodeSegment,
+                ProjectWorkspaceService.GetChapterCodeSegment);
 
-            var typeBox = new ComboBox
-            {
-                Header = "章节类型",
-                Width = 360
-            };
-            ComboBoxItem? selectedTypeItem = null;
-            foreach (var chapterType in ChapterTypeOptions)
-            {
-                var item = new ComboBoxItem
-                {
-                    Content = chapterType.DisplayName,
-                    Tag = chapterType
-                };
-                typeBox.Items.Add(item);
-                if (string.Equals(chapter?.Type, chapterType.Kind, StringComparison.OrdinalIgnoreCase))
-                {
-                    selectedTypeItem = item;
-                }
-            }
-
-            typeBox.SelectedItem = selectedTypeItem ?? typeBox.Items.FirstOrDefault();
-
-            var customCodeBox = new TextBox
-            {
-                Header = "自定义代号 / 编号",
-                Text = chapter is null ? string.Empty : GetChapterCodeSegment(chapter.Code, _currentProject.Code),
-                PlaceholderText = "主线/间章可留空；养成如 Kirito-3，活动如 AF，世界对话如 World1"
-            };
-
-            var previewText = new TextBlock
-            {
-                Style = TryGetTextBlockStyle("SubtleTextStyle")
-            };
-
-            void UpdatePreview()
-            {
-                var option = (typeBox.SelectedItem as ComboBoxItem)?.Tag as ChapterTypeOption ?? ChapterTypeOptions[0];
-                var segment = BuildChapterCodeSegment(option.Kind, customCodeBox.Text.Trim());
-                previewText.Text = $"生成代码：{_currentProject.Code}-{segment}";
-            }
-
-            typeBox.SelectionChanged += (_, _) => UpdatePreview();
-            customCodeBox.TextChanged += (_, _) => UpdatePreview();
-            UpdatePreview();
-
-            var panel = new StackPanel
-            {
-                Spacing = 12
-            };
-            if (introContent is not null)
-            {
-                panel.Children.Add(introContent);
-            }
-
-            panel.Children.Add(nameBox);
-            panel.Children.Add(typeBox);
-            panel.Children.Add(customCodeBox);
-            panel.Children.Add(previewText);
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = panel,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var result = await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                title,
+                editorContent.Content,
+                "确定",
+                "取消"));
+            if (result != DialogResultKind.Primary)
             {
                 return null;
             }
 
-            var name = nameBox.Text.Trim();
-            var selectedOption = (typeBox.SelectedItem as ComboBoxItem)?.Tag as ChapterTypeOption ?? ChapterTypeOptions[0];
-            var segmentCode = BuildChapterCodeSegment(selectedOption.Kind, customCodeBox.Text.Trim());
-            var code = $"{_currentProject.Code}-{segmentCode}";
-            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(segmentCode))
+            var input = editorContent.ReadInput();
+            var segmentCode = editorContent.ReadSegmentCode();
+            if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(segmentCode))
             {
                 AppendLog(LogKind.Warning, "章节名称和章节代号不能为空。");
                 return null;
             }
 
-            if (!ValidateCardName(code, "章节英文代号"))
+            if (!ValidateCardName(input.Code, "章节英文代号"))
             {
                 return null;
             }
 
-            return new ChapterEditorInput(name, code, selectedOption.Kind);
-        }
-
-        private static ChapterInfo ReadChapterInfo(string chapterPath)
-        {
-            var metaPath = Path.Combine(chapterPath, ChapterMetaFileName);
-            var meta = ReadJson<ChapterMeta>(metaPath) ?? new ChapterMeta();
-            var fallbackCode = Path.GetFileName(chapterPath);
-            return new ChapterInfo(
-                string.IsNullOrWhiteSpace(meta.ChapterName) ? fallbackCode : meta.ChapterName!,
-                string.IsNullOrWhiteSpace(meta.ChapterCode) ? fallbackCode : meta.ChapterCode!,
-                string.IsNullOrWhiteSpace(meta.ChapterType) ? ChapterKind.MainThread : meta.ChapterType!,
-                chapterPath,
-                meta.LastEditedAt == default ? Directory.GetLastWriteTime(chapterPath) : meta.LastEditedAt,
-                Math.Max(0, meta.LastEditedRowIndex));
-        }
-
-        private void WriteChapterMeta(string chapterPath, ChapterEditorInput input)
-        {
-            var metaPath = Path.Combine(chapterPath, ChapterMetaFileName);
-            var existingMeta = ReadJson<ChapterMeta>(metaPath);
-            var meta = new ChapterMeta
-            {
-                ChapterName = input.Name,
-                ChapterCode = input.Code,
-                ChapterType = input.Type,
-                LastEditedAt = DateTime.Now,
-                LastEditedRowIndex = Math.Max(0, existingMeta?.LastEditedRowIndex ?? 0)
-            };
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
-        }
-
-        private static string GetChaptersFolderPath(ProjectInfo project)
-        {
-            return Path.Combine(project.Path, ChaptersFolderName);
+            return input;
         }
 
         private string BuildChapterCodeSegment(string chapterKind, string customCode)
@@ -8310,97 +5660,18 @@ namespace GalExcleTools
                 return [];
             }
 
-            return Directory
-                .EnumerateDirectories(GetChaptersFolderPath(_currentProject))
-                .Select(ReadChapterInfo)
+            return _projectWorkspaceService.GetChapters(_currentProject)
                 .Select(chapter => chapter.Code)
                 .ToList();
         }
 
         private void UpdateChapterProjectCodePrefix(string projectPath, string oldProjectCode, string newProjectCode)
         {
-            var chaptersFolderPath = Path.Combine(projectPath, ChaptersFolderName);
-            if (!Directory.Exists(chaptersFolderPath))
+            var renamedCount = _projectWorkspaceService.UpdateChapterProjectCodePrefix(projectPath, oldProjectCode, newProjectCode);
+            if (renamedCount > 0)
             {
-                return;
+                AppendLog(LogKind.User, $"同步章节项目代号前缀：{oldProjectCode} -> {newProjectCode}，共 {renamedCount} 个章节。");
             }
-
-            var renamePlans = Directory
-                .EnumerateDirectories(chaptersFolderPath)
-                .Select(ReadChapterInfo)
-                .Select(chapter =>
-                {
-                    var newCode = ReplaceChapterProjectCode(chapter.Code, oldProjectCode, newProjectCode);
-                    var newPath = Path.Combine(chaptersFolderPath, SanitizeCharacterFolderName(newCode));
-                    return new
-                    {
-                        Chapter = chapter,
-                        NewCode = newCode,
-                        NewPath = newPath
-                    };
-                })
-                .Where(plan => !string.Equals(plan.Chapter.Code, plan.NewCode, StringComparison.Ordinal) ||
-                    !PathsEqual(plan.Chapter.Path, plan.NewPath))
-                .ToList();
-
-            var duplicateTarget = renamePlans
-                .GroupBy(plan => plan.NewPath, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault(group => group.Count() > 1);
-            if (duplicateTarget is not null)
-            {
-                throw new InvalidOperationException($"章节代号同步后出现重复目录：{Path.GetFileName(duplicateTarget.Key)}");
-            }
-
-            foreach (var plan in renamePlans)
-            {
-                if (!PathsEqual(plan.Chapter.Path, plan.NewPath) && Directory.Exists(plan.NewPath))
-                {
-                    throw new InvalidOperationException($"章节代号同步目标已存在：{Path.GetFileName(plan.NewPath)}");
-                }
-            }
-
-            foreach (var plan in renamePlans)
-            {
-                if (!PathsEqual(plan.Chapter.Path, plan.NewPath))
-                {
-                    Directory.Move(plan.Chapter.Path, plan.NewPath);
-                }
-
-                WriteChapterMeta(
-                    plan.NewPath,
-                    new ChapterEditorInput(plan.Chapter.Name, plan.NewCode, plan.Chapter.Type));
-            }
-
-            if (renamePlans.Count > 0)
-            {
-                AppendLog(LogKind.User, $"同步章节项目代号前缀：{oldProjectCode} -> {newProjectCode}，共 {renamePlans.Count} 个章节。");
-            }
-        }
-
-        private static string ReplaceChapterProjectCode(string chapterCode, string oldProjectCode, string newProjectCode)
-        {
-            var oldPrefix = $"{oldProjectCode}-";
-            if (chapterCode.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return $"{newProjectCode}-{chapterCode[oldPrefix.Length..]}";
-            }
-
-            var separatorIndex = chapterCode.IndexOf('-');
-            return separatorIndex >= 0
-                ? $"{newProjectCode}{chapterCode[separatorIndex..]}"
-                : $"{newProjectCode}-{chapterCode}";
-        }
-
-        private static string GetChapterCodeSegment(string chapterCode, string projectCode)
-        {
-            var prefix = $"{projectCode}-";
-            if (chapterCode.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return chapterCode[prefix.Length..];
-            }
-
-            var separatorIndex = chapterCode.IndexOf('-');
-            return separatorIndex >= 0 ? chapterCode[(separatorIndex + 1)..] : chapterCode;
         }
 
         private static string SanitizeChapterCodeSegment(string code)
@@ -8411,27 +5682,12 @@ namespace GalExcleTools
 
         private void TouchProjectLastEditedAt(ProjectInfo project)
         {
-            var toolsPath = Path.Combine(project.Path, ToolsFolderName);
-            Directory.CreateDirectory(toolsPath);
-
-            var metaPath = Path.Combine(toolsPath, ProjectMetaFileName);
-            var meta = ReadJson<ProjectMeta>(metaPath) ?? new ProjectMeta();
-            meta.ProjectName = project.Name;
-            meta.ProjectCode = project.Code;
-            meta.LastEditedAt = DateTime.Now;
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
+            _projectWorkspaceService.TouchProjectLastEditedAt(project);
         }
 
         private void TouchAssetLibraryLastEditedAt(AssetLibraryInfo assetLibrary)
         {
-            var toolsPath = Path.Combine(assetLibrary.Path, ToolsFolderName);
-            Directory.CreateDirectory(toolsPath);
-
-            var metaPath = Path.Combine(toolsPath, AssetLibraryMetaFileName);
-            var meta = ReadJson<AssetLibraryMeta>(metaPath) ?? new AssetLibraryMeta();
-            meta.AssetLibraryName = assetLibrary.Name;
-            meta.LastEditedAt = DateTime.Now;
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
+            _projectWorkspaceService.TouchAssetLibraryLastEditedAt(assetLibrary);
         }
 
         private async Task RenameProjectAsync(ProjectInfo project)
@@ -8447,26 +5703,16 @@ namespace GalExcleTools
                 return;
             }
 
-            var newPath = Path.Combine(_projectRootPath, newName);
-            if (!PathsEqual(project.Path, newPath))
+            try
             {
-                if (Directory.Exists(newPath))
-                {
-                    AppendLog(LogKind.Warning, $"无法重命名项目，同名文件夹已存在：{newName}");
-                    return;
-                }
-
-                Directory.Move(project.Path, newPath);
+                _projectWorkspaceService.RenameProject(_projectRootPath, project, newName);
+            }
+            catch (IOException ex)
+            {
+                AppendLog(LogKind.Warning, $"无法重命名项目：{ex.Message}");
+                return;
             }
 
-            var toolsPath = Path.Combine(newPath, ToolsFolderName);
-            Directory.CreateDirectory(toolsPath);
-            var metaPath = Path.Combine(toolsPath, ProjectMetaFileName);
-            var meta = ReadJson<ProjectMeta>(metaPath) ?? new ProjectMeta();
-            meta.ProjectName = newName;
-            meta.ProjectCode = project.Code;
-            meta.LastEditedAt = DateTime.Now;
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
             LoadProjects();
             RequestDelayedRefresh();
             AppendLog(LogKind.User, $"重命名项目：{project.Name} → {newName}");
@@ -8480,7 +5726,7 @@ namespace GalExcleTools
                 return;
             }
 
-            Directory.Delete(project.Path, recursive: true);
+            _projectWorkspaceService.DeleteProject(project);
             LoadProjects();
             RequestDelayedRefresh();
             AppendLog(LogKind.User, $"删除项目：{project.Name}");
@@ -8495,58 +5741,23 @@ namespace GalExcleTools
                 return;
             }
 
-            var comboBox = new ComboBox
-            {
-                Width = 360,
-                Header = "目标素材库"
-            };
-            foreach (var assetLibrary in assetLibraries)
-            {
-                var item = new ComboBoxItem
-                {
-                    Content = assetLibrary.Name,
-                    Tag = assetLibrary.FolderName
-                };
-                comboBox.Items.Add(item);
-                if (string.Equals(assetLibrary.FolderName, project.AssetLibraryFolderName, StringComparison.OrdinalIgnoreCase))
-                {
-                    comboBox.SelectedItem = item;
-                }
-            }
-
-            comboBox.SelectedItem ??= comboBox.Items.FirstOrDefault();
-
-            var dialog = new ContentDialog
-            {
-                Title = "更改目标素材库",
-                Content = comboBox,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary ||
-                comboBox.SelectedItem is not ComboBoxItem { Tag: string selectedFolderName })
-            {
-                return;
-            }
-
-            var selectedLibrary = assetLibraries.FirstOrDefault(library => library.FolderName == selectedFolderName);
+            var selectedLibrary = await _dialogService.SelectAsync(new SelectionDialogRequest<AssetLibraryInfo>(
+                "更改目标素材库",
+                "选择这个项目后续读取索引时使用的素材库。",
+                assetLibraries
+                    .Select(assetLibrary => new SelectionDialogItem<AssetLibraryInfo>(assetLibrary.Name, assetLibrary))
+                    .ToList(),
+                "确定",
+                "取消",
+                420,
+                360,
+                assetLibrary => string.Equals(assetLibrary.FolderName, project.AssetLibraryFolderName, StringComparison.OrdinalIgnoreCase)));
             if (selectedLibrary is null)
             {
-                AppendLog(LogKind.Warning, "无法更改目标素材库：选择的素材库不存在。");
                 return;
             }
 
-            var metaPath = Path.Combine(project.Path, ToolsFolderName, ProjectMetaFileName);
-            var meta = ReadJson<ProjectMeta>(metaPath) ?? new ProjectMeta();
-            meta.ProjectName = project.Name;
-            meta.AssetLibraryName = selectedLibrary.Name;
-            meta.AssetLibraryFolderName = selectedLibrary.FolderName;
-            meta.LastEditedAt = DateTime.Now;
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
+            _projectWorkspaceService.SetProjectAssetLibrary(project, selectedLibrary);
             LoadProjects();
             RequestDelayedRefresh();
             AppendLog(LogKind.User, $"项目 {project.Name} 的目标素材库改为：{selectedLibrary.Name}");
@@ -8560,34 +5771,24 @@ namespace GalExcleTools
             }
 
             var oldCode = project.Code;
-            var newPath = Path.Combine(_projectRootPath, name);
-            if (!PathsEqual(project.Path, newPath))
-            {
-                if (Directory.Exists(newPath))
-                {
-                    AppendLog(LogKind.Warning, $"无法保存项目设置，同名文件夹已存在：{name}");
-                    return;
-                }
+            var chapterPrefixChanged = !string.Equals(oldCode, code, StringComparison.Ordinal);
 
-                Directory.Move(project.Path, newPath);
+            ProjectInfo updatedProject;
+            try
+            {
+                updatedProject = _projectWorkspaceService.UpdateProjectInfo(_projectRootPath, project, name, code);
+            }
+            catch (IOException ex)
+            {
+                AppendLog(LogKind.Warning, $"无法保存项目设置：{ex.Message}");
+                return;
             }
 
-            var chapterPrefixChanged = !string.Equals(oldCode, code, StringComparison.Ordinal);
             if (chapterPrefixChanged)
             {
-                UpdateChapterProjectCodePrefix(newPath, oldCode, code);
+                UpdateChapterProjectCodePrefix(updatedProject.Path, oldCode, code);
             }
 
-            var toolsPath = Path.Combine(newPath, ToolsFolderName);
-            Directory.CreateDirectory(toolsPath);
-            var metaPath = Path.Combine(toolsPath, ProjectMetaFileName);
-            var meta = ReadJson<ProjectMeta>(metaPath) ?? new ProjectMeta();
-            meta.ProjectName = name;
-            meta.ProjectCode = code;
-            meta.LastEditedAt = DateTime.Now;
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
-
-            var updatedProject = ReadProjectInfo(newPath);
             _currentProject = updatedProject;
             ProjectDetailNameTextBox.Text = updatedProject.Name;
             ProjectDetailCodeTextBox.Text = updatedProject.Code;
@@ -8620,27 +5821,23 @@ namespace GalExcleTools
 
             var oldName = assetLibrary.Name;
             var oldFolderName = assetLibrary.FolderName;
-            var newPath = Path.Combine(_projectRootPath, newName);
-            if (!PathsEqual(assetLibrary.Path, newPath))
+            AssetLibraryInfo updatedAssetLibrary;
+            try
             {
-                if (Directory.Exists(newPath))
-                {
-                    AppendLog(LogKind.Warning, $"无法重命名素材库，同名文件夹已存在：{newName}");
-                    return;
-                }
-
-                Directory.Move(assetLibrary.Path, newPath);
+                updatedAssetLibrary = _projectWorkspaceService.RenameAssetLibrary(_projectRootPath, assetLibrary, newName);
+            }
+            catch (IOException ex)
+            {
+                AppendLog(LogKind.Warning, $"无法重命名素材库：{ex.Message}");
+                return;
             }
 
-            var toolsPath = Path.Combine(newPath, ToolsFolderName);
-            Directory.CreateDirectory(toolsPath);
-            var metaPath = Path.Combine(toolsPath, AssetLibraryMetaFileName);
-            var meta = ReadJson<AssetLibraryMeta>(metaPath) ?? new AssetLibraryMeta();
-            meta.AssetLibraryName = newName;
-            meta.LastEditedAt = DateTime.Now;
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
-
-            UpdateProjectAssetLibraryReferences(oldFolderName, oldName, newName, Path.GetFileName(newPath));
+            _projectWorkspaceService.UpdateProjectAssetLibraryReferences(
+                _projectRootPath,
+                oldFolderName,
+                oldName,
+                newName,
+                updatedAssetLibrary.FolderName);
             LoadAssetLibraries();
             LoadProjects();
             LoadAssetLibraryOptions();
@@ -8656,8 +5853,7 @@ namespace GalExcleTools
                 return;
             }
 
-            ClearProjectAssetLibraryReferences(assetLibrary.FolderName, assetLibrary.Name);
-            Directory.Delete(assetLibrary.Path, recursive: true);
+            _projectWorkspaceService.DeleteAssetLibrary(_projectRootPath, assetLibrary);
             if (_currentAssetLibrary is not null && PathsEqual(_currentAssetLibrary.Path, assetLibrary.Path))
             {
                 _currentAssetLibrary = null;
@@ -8674,86 +5870,18 @@ namespace GalExcleTools
             AppendLog(LogKind.User, $"删除素材库：{assetLibrary.Name}");
         }
 
-        private void UpdateProjectAssetLibraryReferences(string oldFolderName, string oldName, string newName, string newFolderName)
-        {
-            foreach (var project in GetProjects())
-            {
-                var metaPath = Path.Combine(project.Path, ToolsFolderName, ProjectMetaFileName);
-                var meta = ReadJson<ProjectMeta>(metaPath) ?? new ProjectMeta();
-                if (string.Equals(meta.AssetLibraryFolderName, oldFolderName, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(meta.AssetLibraryName, oldName, StringComparison.OrdinalIgnoreCase))
-                {
-                    meta.AssetLibraryName = newName;
-                    meta.AssetLibraryFolderName = newFolderName;
-                    meta.LastEditedAt = DateTime.Now;
-                    File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
-                }
-            }
-        }
-
-        private void ClearProjectAssetLibraryReferences(string folderName, string name)
-        {
-            foreach (var project in GetProjects())
-            {
-                var metaPath = Path.Combine(project.Path, ToolsFolderName, ProjectMetaFileName);
-                var meta = ReadJson<ProjectMeta>(metaPath) ?? new ProjectMeta();
-                if (string.Equals(meta.AssetLibraryFolderName, folderName, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(meta.AssetLibraryName, name, StringComparison.OrdinalIgnoreCase))
-                {
-                    meta.AssetLibraryName = null;
-                    meta.AssetLibraryFolderName = null;
-                    meta.LastEditedAt = DateTime.Now;
-                    File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
-                }
-            }
-        }
-
         private async Task<string?> ShowNameInputDialogAsync(string title, string header, string currentName)
         {
-            var textBox = new TextBox
-            {
-                Width = 360,
-                Header = header,
-                Text = currentName
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = textBox,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            return result == ContentDialogResult.Primary ? textBox.Text.Trim() : null;
+            return await _dialogService.PromptTextAsync(new TextInputDialogRequest(title, header, currentName));
         }
 
         private async Task<bool> ShowDeleteConfirmDialogAsync(string title, string content)
         {
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = content,
-                PrimaryButtonText = "删除",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+            return await _dialogService.ConfirmAsync(new DialogRequest(
+                title,
+                content,
+                PrimaryButtonText: "删除",
+                CloseButtonText: "取消"));
         }
 
         private bool ValidateCardName(string value, string label)
@@ -8787,28 +5915,33 @@ namespace GalExcleTools
 
         private void RefreshProjectsButton_Click(object sender, RoutedEventArgs e)
         {
+            PlaySelectionSound();
             LoadProjects();
             AppendLog(LogKind.User, "手动刷新项目列表。");
         }
 
         private void RefreshAssetLibrariesButton_Click(object sender, RoutedEventArgs e)
         {
+            PlaySelectionSound();
             LoadAssetLibraries();
             AppendLog(LogKind.User, "手动刷新素材库列表。");
         }
 
         private void CancelCreateProjectButton_Click(object sender, RoutedEventArgs e)
         {
+            PlayNegativeSound();
             ShowWorkbenchPage();
         }
 
         private void CancelCreateAssetLibraryButton_Click(object sender, RoutedEventArgs e)
         {
+            PlayNegativeSound();
             ShowAssetLibraryPage();
         }
 
         private async void ChooseProjectThumbnailButton_Click(object sender, RoutedEventArgs e)
         {
+            PlaySelectionSound();
             var selectedPath = await PickThumbnailPathAsync();
             if (selectedPath is null)
             {
@@ -8824,6 +5957,7 @@ namespace GalExcleTools
 
         private async void ChooseAssetLibraryThumbnailButton_Click(object sender, RoutedEventArgs e)
         {
+            PlaySelectionSound();
             var selectedPath = await PickThumbnailPathAsync();
             if (selectedPath is null)
             {
@@ -8857,17 +5991,9 @@ namespace GalExcleTools
 
         private void CreateProjectButton_Click(object sender, RoutedEventArgs e)
         {
+            PlayPositiveSound();
             var projectName = CreateProjectNameTextBox.Text.Trim();
-            if (!ValidateFolderName(projectName, "项目名称", ShowCreateProjectError))
-            {
-                return;
-            }
-
             var projectCode = CreateProjectCodeTextBox.Text.Trim();
-            if (!ValidateFolderName(projectCode, "项目英文代号", ShowCreateProjectError))
-            {
-                return;
-            }
 
             if (ProjectAssetLibraryComboBox.SelectedItem is not ComboBoxItem { Tag: string assetLibraryFolderName })
             {
@@ -8882,29 +6008,20 @@ namespace GalExcleTools
                 return;
             }
 
-            var projectPath = Path.Combine(_projectRootPath, $"项目-{projectName}");
-            if (Directory.Exists(projectPath))
+            try
             {
-                ShowCreateProjectError("同名文件夹已经存在。");
+                _projectWorkspaceService.CreateProject(
+                    _projectRootPath,
+                    projectName,
+                    projectCode,
+                    assetLibrary,
+                    _selectedProjectThumbnailPath);
+            }
+            catch (IOException ex)
+            {
+                ShowCreateProjectError(ex.Message);
                 return;
             }
-
-            var toolsPath = Path.Combine(projectPath, ToolsFolderName);
-            Directory.CreateDirectory(toolsPath);
-            Directory.CreateDirectory(Path.Combine(projectPath, ExcelFolderName));
-
-            var thumbnailFileName = CopyThumbnailToTools(_selectedProjectThumbnailPath, toolsPath);
-            var meta = new ProjectMeta
-            {
-                ProjectName = projectName,
-                ProjectCode = projectCode,
-                ThumbnailFileName = thumbnailFileName,
-                AssetLibraryName = assetLibrary.Name,
-                AssetLibraryFolderName = assetLibrary.FolderName,
-                LastEditedAt = DateTime.Now
-            };
-            File.WriteAllText(Path.Combine(toolsPath, ProjectMetaFileName), JsonSerializer.Serialize(meta, _jsonOptions));
-            Directory.CreateDirectory(Path.Combine(projectPath, ChaptersFolderName));
 
             ResetCreateProjectForm();
             ShowWorkbenchPage();
@@ -8914,32 +6031,21 @@ namespace GalExcleTools
 
         private void CreateAssetLibraryButton_Click(object sender, RoutedEventArgs e)
         {
+            PlayPositiveSound();
             var assetLibraryName = CreateAssetLibraryNameTextBox.Text.Trim();
-            if (!ValidateFolderName(assetLibraryName, "素材库名称", ShowCreateAssetLibraryError))
+
+            try
             {
+                _projectWorkspaceService.CreateAssetLibrary(
+                    _projectRootPath,
+                    assetLibraryName,
+                    _selectedAssetLibraryThumbnailPath);
+            }
+            catch (IOException ex)
+            {
+                ShowCreateAssetLibraryError(ex.Message);
                 return;
             }
-
-            var assetLibraryPath = Path.Combine(_projectRootPath, $"素材库-{assetLibraryName}");
-            if (Directory.Exists(assetLibraryPath))
-            {
-                ShowCreateAssetLibraryError("同名文件夹已经存在。");
-                return;
-            }
-
-            var toolsPath = Path.Combine(assetLibraryPath, ToolsFolderName);
-            Directory.CreateDirectory(toolsPath);
-            Directory.CreateDirectory(Path.Combine(assetLibraryPath, ExcelFolderName));
-            EnsureAssetLibraryCategoryFolders(assetLibraryPath);
-
-            var thumbnailFileName = CopyThumbnailToTools(_selectedAssetLibraryThumbnailPath, toolsPath);
-            var meta = new AssetLibraryMeta
-            {
-                AssetLibraryName = assetLibraryName,
-                ThumbnailFileName = thumbnailFileName,
-                LastEditedAt = DateTime.Now
-            };
-            File.WriteAllText(Path.Combine(toolsPath, AssetLibraryMetaFileName), JsonSerializer.Serialize(meta, _jsonOptions));
 
             ResetCreateAssetLibraryForm();
             ShowAssetLibraryPage();
@@ -8949,43 +6055,7 @@ namespace GalExcleTools
 
         private static void EnsureAssetLibraryCategoryFolders(string assetLibraryPath)
         {
-            Directory.CreateDirectory(Path.Combine(assetLibraryPath, BackgroundFolderName));
-            Directory.CreateDirectory(Path.Combine(assetLibraryPath, CharacterFolderName));
-            Directory.CreateDirectory(Path.Combine(assetLibraryPath, MusicFolderName));
-            Directory.CreateDirectory(Path.Combine(assetLibraryPath, AmbientSoundFolderName));
-            Directory.CreateDirectory(Path.Combine(assetLibraryPath, SoundEffectFolderName));
-            Directory.CreateDirectory(Path.Combine(assetLibraryPath, FunctionFolderName));
-            Directory.CreateDirectory(Path.Combine(assetLibraryPath, CharacterFilterFolderName));
-        }
-
-        private static bool ValidateFolderName(string value, string label, Action<string> showError)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                showError($"请输入{label}。");
-                return false;
-            }
-
-            if (value.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-            {
-                showError($"{label}包含不能用于文件夹名称的字符。");
-                return false;
-            }
-
-            return true;
-        }
-
-        private static string? CopyThumbnailToTools(string? sourcePath, string toolsPath)
-        {
-            if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
-            {
-                return null;
-            }
-
-            var extension = Path.GetExtension(sourcePath);
-            var thumbnailFileName = $"thumbnail{extension}";
-            File.Copy(sourcePath, Path.Combine(toolsPath, thumbnailFileName), overwrite: true);
-            return thumbnailFileName;
+            ProjectWorkspaceService.EnsureAssetLibraryCategoryFolders(assetLibraryPath);
         }
 
         private void ShowCreateProjectError(string message)
@@ -9030,6 +6100,7 @@ namespace GalExcleTools
 
         private void BackToAssetLibraryPageButton_Click(object sender, RoutedEventArgs e)
         {
+            PlayNegativeSound();
             ShowAssetLibraryPage();
         }
 
@@ -9040,11 +6111,12 @@ namespace GalExcleTools
                 return;
             }
 
+            PlayPositiveSound();
             var picker = new FileOpenPicker
             {
                 SuggestedStartLocation = PickerLocationId.PicturesLibrary
             };
-            foreach (var extension in ImageExtensions)
+            foreach (var extension in BackgroundImageService.Extensions)
             {
                 picker.FileTypeFilter.Add(extension);
             }
@@ -9056,9 +6128,6 @@ namespace GalExcleTools
             {
                 return;
             }
-
-            var backgroundFolderPath = GetBackgroundFolderPath(_currentAssetLibrary);
-            Directory.CreateDirectory(backgroundFolderPath);
 
             try
             {
@@ -9079,48 +6148,30 @@ namespace GalExcleTools
                 return 0;
             }
 
-            var validSourcePaths = sourcePaths
-                .Where(path =>
-                    !string.IsNullOrWhiteSpace(path) &&
-                    File.Exists(path) &&
-                    ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                .ToList();
-
-            if (validSourcePaths.Count == 0)
-            {
-                return 0;
-            }
-
             var backgroundFolderPath = GetBackgroundFolderPath(_currentAssetLibrary);
-            Directory.CreateDirectory(backgroundFolderPath);
-            var existingOrderedPaths = GetBackgroundImagePaths(backgroundFolderPath);
-            var importedEntries = new List<BackgroundImageEntry>();
-
-            foreach (var sourcePath in validSourcePaths)
-            {
-                var tempPngPath = Path.Combine(backgroundFolderPath, $"__bg_import_{Guid.NewGuid():N}.png");
-                await ImportBackgroundImageAsPngAsync(sourcePath, tempPngPath);
-                importedEntries.Add(new BackgroundImageEntry(tempPngPath, SanitizeRemark(Path.GetFileNameWithoutExtension(sourcePath))));
-            }
-
             _isNormalizingBackgroundImages = true;
+            var importedCount = 0;
             try
             {
-                var entries = existingOrderedPaths
-                    .Select(ParseBackgroundImageFileName)
-                    .Concat(importedEntries)
-                    .ToList();
-                await RenameBackgroundEntriesAsync(entries);
+                importedCount = await _backgroundImageService.ImportFilesAsync(
+                    backgroundFolderPath,
+                    sourcePaths,
+                    ImportBackgroundImageAsPngAsync);
             }
             finally
             {
                 _isNormalizingBackgroundImages = false;
             }
 
+            if (importedCount == 0)
+            {
+                return 0;
+            }
+
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshBackgroundImageCards(_currentAssetLibrary);
             RequestDelayedRefresh();
-            return validSourcePaths.Count;
+            return importedCount;
         }
 
         private async void AddMusicButton_Click(object sender, RoutedEventArgs e)
@@ -9130,11 +6181,12 @@ namespace GalExcleTools
                 return;
             }
 
+            PlayPositiveSound();
             var picker = new FileOpenPicker
             {
                 SuggestedStartLocation = PickerLocationId.MusicLibrary
             };
-            foreach (var extension in MusicExtensions)
+            foreach (var extension in AudioAssetService.Extensions)
             {
                 picker.FileTypeFilter.Add(extension);
             }
@@ -9146,13 +6198,13 @@ namespace GalExcleTools
                 return;
             }
 
-            var importedCount = await ImportMusicFilesAsync(selectedFiles.Select(file => file.Path));
+            var importedCount = ImportMusicFiles(selectedFiles.Select(file => file.Path));
             AppendLog(LogKind.User, $"导入音乐：{importedCount} 个文件。");
         }
 
-        private async Task<int> ImportMusicFilesAsync(IEnumerable<string> sourcePaths)
+        private int ImportMusicFiles(IEnumerable<string> sourcePaths)
         {
-            return await ImportAudioFilesAsync(AudioAssetKind.Music, sourcePaths);
+            return ImportAudioFiles(AudioAssetKind.Music, sourcePaths);
         }
 
         private async void AddAmbientSoundButton_Click(object sender, RoutedEventArgs e)
@@ -9172,11 +6224,12 @@ namespace GalExcleTools
                 return;
             }
 
+            PlayPositiveSound();
             var picker = new FileOpenPicker
             {
                 SuggestedStartLocation = PickerLocationId.MusicLibrary
             };
-            foreach (var extension in MusicExtensions)
+            foreach (var extension in AudioAssetService.Extensions)
             {
                 picker.FileTypeFilter.Add(extension);
             }
@@ -9188,259 +6241,92 @@ namespace GalExcleTools
                 return;
             }
 
-            var importedCount = await ImportAudioFilesAsync(kind, selectedFiles.Select(file => file.Path));
-            AppendLog(LogKind.User, $"导入{GetAudioDisplayName(kind)}：{importedCount} 个文件。");
+            var importedCount = ImportAudioFiles(kind, selectedFiles.Select(file => file.Path));
+            AppendLog(LogKind.User, $"导入{AudioAssetService.GetDisplayName(kind)}：{importedCount} 个文件。");
         }
 
-        private async Task<int> ImportAudioFilesAsync(AudioAssetKind kind, IEnumerable<string> sourcePaths)
+        private int ImportAudioFiles(AudioAssetKind kind, IEnumerable<string> sourcePaths)
         {
             if (_currentAssetLibrary is null)
             {
                 return 0;
             }
 
-            var validSourcePaths = sourcePaths
-                .Where(path =>
-                    !string.IsNullOrWhiteSpace(path) &&
-                    File.Exists(path) &&
-                    MusicExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                .ToList();
-
-            if (validSourcePaths.Count == 0)
-            {
-                return 0;
-            }
-
             var musicFolderPath = GetAudioFolderPath(_currentAssetLibrary, kind);
-            Directory.CreateDirectory(musicFolderPath);
-            var existingOrderedPaths = GetAudioFilePaths(musicFolderPath);
-            var importedEntries = new List<MusicEntry>();
-
-            foreach (var sourcePath in validSourcePaths)
-            {
-                var tempWavPath = Path.Combine(musicFolderPath, $"__{GetAudioPrefix(kind).ToLowerInvariant()}_import_{Guid.NewGuid():N}.wav");
-                File.Copy(sourcePath, tempWavPath, overwrite: true);
-                importedEntries.Add(new MusicEntry(tempWavPath, SanitizeRemark(Path.GetFileNameWithoutExtension(sourcePath))));
-            }
-
             SetAudioNormalizing(kind, true);
+            var importedCount = 0;
             try
             {
-                var entries = existingOrderedPaths
-                    .Select(path => ParseAudioFileName(kind, path))
-                    .Concat(importedEntries)
-                    .ToList();
-                await RenameAudioEntriesAsync(kind, entries);
+                importedCount = _audioAssetService.ImportFiles(kind, musicFolderPath, sourcePaths);
             }
             finally
             {
                 SetAudioNormalizing(kind, false);
             }
 
+            if (importedCount == 0)
+            {
+                return 0;
+            }
+
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshAudioCards(_currentAssetLibrary, kind);
             RequestDelayedRefresh();
-            return validSourcePaths.Count;
+            return importedCount;
         }
 
         private async void AddCharacterClothesButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_currentCharacter is null)
-            {
-                return;
-            }
-
-            var picker = new FileOpenPicker
-            {
-                SuggestedStartLocation = PickerLocationId.PicturesLibrary
-            };
-            foreach (var extension in ImageExtensions)
-            {
-                picker.FileTypeFilter.Add(extension);
-            }
-
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-            var selectedFiles = await picker.PickMultipleFilesAsync();
-            if (selectedFiles.Count == 0)
-            {
-                return;
-            }
-
-            try
-            {
-                var importedCount = await ImportCharacterClothesAsync(selectedFiles.Select(file => file.Path));
-                AppendLog(LogKind.User, $"导入服装：{importedCount} 个文件。");
-            }
-            catch (Exception ex)
-            {
-                AppendLog(LogKind.Error, "导入服装失败。", ex);
-            }
+            await PickAndImportCharacterLayerAsync(ImportCharacterClothesAsync, "服装", "导入服装失败。");
         }
 
         private Task<int> ImportCharacterClothesAsync(IEnumerable<string> sourcePaths)
         {
-            if (_currentCharacter is null)
-            {
-                return Task.FromResult(0);
-            }
-
-            var validSourcePaths = sourcePaths
-                .Where(path =>
-                    !string.IsNullOrWhiteSpace(path) &&
-                    File.Exists(path) &&
-                    ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                .ToList();
-
-            if (validSourcePaths.Count == 0)
-            {
-                return Task.FromResult(0);
-            }
-
-            var clothFolderPath = Path.Combine(_currentCharacter.Path, "DN_Cloth");
-            Directory.CreateDirectory(clothFolderPath);
-            var existingOrderedPaths = GetCharacterLayerImagePaths(clothFolderPath);
-            var importedEntries = new List<CharacterLayerEntry>();
-
-            foreach (var sourcePath in validSourcePaths)
-            {
-                var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
-                var tempPath = Path.Combine(clothFolderPath, $"__dn_import_{Guid.NewGuid():N}{extension}");
-                File.Copy(sourcePath, tempPath, overwrite: true);
-                importedEntries.Add(new CharacterLayerEntry(
-                    tempPath,
-                    SanitizeRemark(Path.GetFileNameWithoutExtension(sourcePath)),
-                    string.Empty));
-            }
-
-            _isNormalizingCharacterClothes = true;
-            try
-            {
-                var entries = existingOrderedPaths
-                    .Select(path => ParseCharacterLayerFileName(path, CharacterLayerKind.Cloth, string.Empty))
-                    .Concat(importedEntries)
-                    .ToList();
-                RenameCharacterLayerEntries(entries, CharacterLayerKind.Cloth, _currentCharacter.Code);
-            }
-            finally
-            {
-                _isNormalizingCharacterClothes = false;
-            }
-
-            if (_currentAssetLibrary is not null)
-            {
-                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            }
-
-            ReloadCharacterDetailLayersPreservingScroll();
-            RequestDelayedRefresh();
-            return Task.FromResult(validSourcePaths.Count);
+            return ImportCharacterLayerAsync(
+                sourcePaths,
+                CharacterLayerKind.Cloth,
+                string.Empty,
+                () => _isNormalizingCharacterClothes = true,
+                () => _isNormalizingCharacterClothes = false,
+                character => character.Code);
         }
 
         private async void AddCharacterFacesButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_currentCharacter is null)
-            {
-                return;
-            }
-
-            var picker = new FileOpenPicker
-            {
-                SuggestedStartLocation = PickerLocationId.PicturesLibrary
-            };
-            foreach (var extension in ImageExtensions)
-            {
-                picker.FileTypeFilter.Add(extension);
-            }
-
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-            var selectedFiles = await picker.PickMultipleFilesAsync();
-            if (selectedFiles.Count == 0)
-            {
-                return;
-            }
-
-            try
-            {
-                var importedCount = await ImportCharacterFacesAsync(selectedFiles.Select(file => file.Path));
-                AppendLog(LogKind.User, $"导入表情：{importedCount} 个文件。");
-            }
-            catch (Exception ex)
-            {
-                AppendLog(LogKind.Error, "导入表情失败。", ex);
-            }
+            await PickAndImportCharacterLayerAsync(ImportCharacterFacesAsync, "表情", "导入表情失败。");
         }
 
         private Task<int> ImportCharacterFacesAsync(IEnumerable<string> sourcePaths)
         {
-            if (_currentCharacter is null)
-            {
-                return Task.FromResult(0);
-            }
-
-            var validSourcePaths = sourcePaths
-                .Where(path =>
-                    !string.IsNullOrWhiteSpace(path) &&
-                    File.Exists(path) &&
-                    ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                .ToList();
-
-            if (validSourcePaths.Count == 0)
-            {
-                return Task.FromResult(0);
-            }
-
-            var faceFolderPath = Path.Combine(_currentCharacter.Path, "FC_Face");
-            Directory.CreateDirectory(faceFolderPath);
-            var existingOrderedPaths = GetCharacterLayerImagePaths(faceFolderPath);
-            var importedEntries = new List<CharacterLayerEntry>();
-
-            foreach (var sourcePath in validSourcePaths)
-            {
-                var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
-                var tempPath = Path.Combine(faceFolderPath, $"__fc_import_{Guid.NewGuid():N}{extension}");
-                File.Copy(sourcePath, tempPath, overwrite: true);
-                importedEntries.Add(new CharacterLayerEntry(
-                    tempPath,
-                    SanitizeRemark(Path.GetFileNameWithoutExtension(sourcePath)),
-                    string.Empty));
-            }
-
-            _isNormalizingCharacterFaces = true;
-            try
-            {
-                var entries = existingOrderedPaths
-                    .Select(path => ParseCharacterLayerFileName(path, CharacterLayerKind.Face, string.Empty))
-                    .Concat(importedEntries)
-                    .ToList();
-                RenameCharacterFaceEntriesAndUpdateMeta(entries);
-            }
-            finally
-            {
-                _isNormalizingCharacterFaces = false;
-            }
-
-            if (_currentAssetLibrary is not null)
-            {
-                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            }
-
-            ReloadCharacterDetailLayersPreservingScroll();
-            RequestDelayedRefresh();
-            return Task.FromResult(validSourcePaths.Count);
+            return ImportCharacterLayerAsync(
+                sourcePaths,
+                CharacterLayerKind.Face,
+                string.Empty,
+                () => _isNormalizingCharacterFaces = true,
+                () => _isNormalizingCharacterFaces = false);
         }
 
         private async void AddCharacterAdornsButton_Click(object sender, RoutedEventArgs e)
+        {
+            await PickAndImportCharacterLayerAsync(ImportCharacterAdornsAsync, "装饰", "导入装饰失败。");
+        }
+
+        private async Task PickAndImportCharacterLayerAsync(
+            Func<IEnumerable<string>, Task<int>> importAsync,
+            string logLabel,
+            string errorMessage)
         {
             if (_currentCharacter is null)
             {
                 return;
             }
 
+            PlayPositiveSound();
             var picker = new FileOpenPicker
             {
                 SuggestedStartLocation = PickerLocationId.PicturesLibrary
             };
-            foreach (var extension in ImageExtensions)
+            foreach (var extension in BackgroundImageService.Extensions)
             {
                 picker.FileTypeFilter.Add(extension);
             }
@@ -9454,62 +6340,60 @@ namespace GalExcleTools
 
             try
             {
-                var importedCount = await ImportCharacterAdornsAsync(selectedFiles.Select(file => file.Path));
-                AppendLog(LogKind.User, $"导入装饰：{importedCount} 个文件。");
+                var importedCount = await importAsync(selectedFiles.Select(file => file.Path));
+                AppendLog(LogKind.User, $"导入{logLabel}：{importedCount} 个文件。");
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Error, "导入装饰失败。", ex);
+                AppendLog(LogKind.Error, errorMessage, ex);
             }
         }
 
         private Task<int> ImportCharacterAdornsAsync(IEnumerable<string> sourcePaths)
         {
+            return ImportCharacterLayerAsync(
+                sourcePaths,
+                CharacterLayerKind.Adorn,
+                string.Empty,
+                () => _isNormalizingCharacterAdorns = true,
+                () => _isNormalizingCharacterAdorns = false);
+        }
+
+        private Task<int> ImportCharacterLayerAsync(
+            IEnumerable<string> sourcePaths,
+            CharacterLayerKind layerKind,
+            string defaultScope,
+            Action beginNormalize,
+            Action endNormalize,
+            Func<CharacterInfo, string?>? characterCodeSelector = null)
+        {
             if (_currentCharacter is null)
             {
                 return Task.FromResult(0);
             }
 
-            var validSourcePaths = sourcePaths
-                .Where(path =>
-                    !string.IsNullOrWhiteSpace(path) &&
-                    File.Exists(path) &&
-                    ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                .ToList();
-
-            if (validSourcePaths.Count == 0)
-            {
-                return Task.FromResult(0);
-            }
-
-            var adornFolderPath = Path.Combine(_currentCharacter.Path, "AD_Adorn");
-            Directory.CreateDirectory(adornFolderPath);
-            var existingOrderedPaths = GetCharacterLayerImagePaths(adornFolderPath);
-            var importedEntries = new List<CharacterLayerEntry>();
-
-            foreach (var sourcePath in validSourcePaths)
-            {
-                var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
-                var tempPath = Path.Combine(adornFolderPath, $"__ad_import_{Guid.NewGuid():N}{extension}");
-                File.Copy(sourcePath, tempPath, overwrite: true);
-                importedEntries.Add(new CharacterLayerEntry(
-                    tempPath,
-                    SanitizeRemark(Path.GetFileNameWithoutExtension(sourcePath)),
-                    string.Empty));
-            }
-
-            _isNormalizingCharacterAdorns = true;
+            var folderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, layerKind);
+            var characterCode = characterCodeSelector?.Invoke(_currentCharacter);
+            var importedCount = 0;
+            beginNormalize();
             try
             {
-                var entries = existingOrderedPaths
-                    .Select(path => ParseCharacterLayerFileName(path, CharacterLayerKind.Adorn, string.Empty))
-                    .Concat(importedEntries)
-                    .ToList();
-                RenameCharacterAdornEntriesAndUpdateMeta(entries);
+                var entries = _characterLayerAssetService.CreateImportEntries(
+                    folderPath,
+                    layerKind,
+                    sourcePaths,
+                    defaultScope,
+                    out importedCount);
+                _characterLayerAssetService.RenameEntriesAndScopeMeta(entries, layerKind, characterCode);
             }
             finally
             {
-                _isNormalizingCharacterAdorns = false;
+                endNormalize();
+            }
+
+            if (importedCount == 0)
+            {
+                return Task.FromResult(0);
             }
 
             if (_currentAssetLibrary is not null)
@@ -9519,7 +6403,7 @@ namespace GalExcleTools
 
             ReloadCharacterDetailLayersPreservingScroll();
             RequestDelayedRefresh();
-            return Task.FromResult(validSourcePaths.Count);
+            return Task.FromResult(importedCount);
         }
 
         private async void LoadBackgroundImages(AssetLibraryInfo assetLibrary)
@@ -9592,7 +6476,7 @@ namespace GalExcleTools
         private void RefreshBackgroundImageCards(AssetLibraryInfo assetLibrary)
         {
             var backgroundFolderPath = GetBackgroundFolderPath(assetLibrary);
-            var imagePaths = GetBackgroundImagePaths(backgroundFolderPath);
+            var imagePaths = BackgroundImageService.GetFilePaths(backgroundFolderPath);
 
             BackgroundImagesGridView.Items.Clear();
             foreach (var imagePath in imagePaths)
@@ -9607,47 +6491,19 @@ namespace GalExcleTools
 
         private GridViewItem CreateBackgroundImageCard(string imagePath)
         {
-            var item = new GridViewItem
-            {
-                Width = 160,
-                Height = 190,
-                Margin = new Thickness(0, 0, 14, 14),
-                Tag = imagePath
-            };
-
-            var flyout = new MenuFlyout();
-            var remarkItem = new MenuFlyoutItem
-            {
-                Text = "设置备注"
-            };
-            remarkItem.Click += async (_, _) => await SetBackgroundImageRemarkAsync(imagePath);
-            flyout.Items.Add(remarkItem);
-
-            var deleteItem = new MenuFlyoutItem
-            {
-                Text = "删除"
-            };
-            deleteItem.Click += async (_, _) => await DeleteBackgroundImageAsync(imagePath);
-            flyout.Items.Add(deleteItem);
-            item.ContextFlyout = flyout;
-            item.Tapped += (_, _) => ShowBackgroundImageViewerPage(imagePath);
-
-            var panel = new StackPanel
-            {
-                Spacing = 6
-            };
-
-            panel.Children.Add(CreateThumbnail(imagePath, 148, 148, showAddIcon: false));
-            panel.Children.Add(new TextBlock
-            {
-                Text = Path.GetFileNameWithoutExtension(imagePath),
-                TextAlignment = TextAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
-            });
-
-            item.Content = panel;
-            return item;
+            return AssetCardFactory.CreateCard(
+                160,
+                190,
+                AssetCardContentFactory.CreateImageAssetCardContent(imagePath, 148, 148),
+                imagePath,
+                (_, _) =>
+                {
+                    PlaySelectionSound();
+                    ShowBackgroundImageViewerPage(imagePath);
+                },
+                GridViewItemFactory.CreateMenu(
+                    GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetBackgroundImageRemarkAsync(imagePath)),
+                    GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(imagePath))));
         }
 
         private void RefreshMusicCards(AssetLibraryInfo assetLibrary)
@@ -9658,7 +6514,7 @@ namespace GalExcleTools
         private void RefreshAudioCards(AssetLibraryInfo assetLibrary, AudioAssetKind kind)
         {
             var musicFolderPath = GetAudioFolderPath(assetLibrary, kind);
-            var musicPaths = GetAudioFilePaths(musicFolderPath);
+            var musicPaths = AudioAssetService.GetFilePaths(musicFolderPath);
             var gridView = GetAudioGridView(kind);
 
             gridView.Items.Clear();
@@ -9679,18 +6535,12 @@ namespace GalExcleTools
                     SoundEffectExpander.Header = $"特殊音效 [数量：{musicPaths.Count}]";
                     break;
             }
-            AppendLog(LogKind.Info, $"已加载{GetAudioDisplayName(kind)}：{musicPaths.Count} 个文件。");
+            AppendLog(LogKind.Info, $"已加载{AudioAssetService.GetDisplayName(kind)}：{musicPaths.Count} 个文件。");
         }
 
         private void LoadCharacters(AssetLibraryInfo assetLibrary)
         {
-            var characterFolderPath = GetCharacterFolderPath(assetLibrary);
-            Directory.CreateDirectory(characterFolderPath);
-            var characters = Directory
-                .EnumerateDirectories(characterFolderPath)
-                .Select(ReadCharacterInfo)
-                .OrderBy(character => character.Name)
-                .ToList();
+            var characters = _characterWorkspaceService.GetCharactersByName(assetLibrary);
 
             CharacterGridView.Items.Clear();
             foreach (var character in characters)
@@ -9705,7 +6555,7 @@ namespace GalExcleTools
 
         private void LoadFunctions(AssetLibraryInfo assetLibrary)
         {
-            var functions = ReadFunctions(assetLibrary);
+            var functions = StoryFunctionService.ReadFunctions(assetLibrary, _jsonOptions);
             FunctionGridView.Items.Clear();
             foreach (var function in functions)
             {
@@ -9715,241 +6565,6 @@ namespace GalExcleTools
             FunctionGridView.Items.Add(CreateAddFunctionCard());
             FunctionExpander.Header = $"函数 [数量：{functions.Count}]";
             AppendLog(LogKind.Info, $"已加载函数卡：{functions.Count} 个。");
-        }
-
-        private List<FunctionEntry> ReadFunctions(AssetLibraryInfo assetLibrary)
-        {
-            var folderPath = GetFunctionFolderPath(assetLibrary);
-            Directory.CreateDirectory(folderPath);
-            var indexPath = GetFunctionIndexPath(assetLibrary);
-            var index = ReadJson<FunctionIndex>(indexPath);
-            if (index?.Entries is not { Count: > 0 })
-            {
-                var defaults = CreateDefaultFunctions();
-                WriteFunctions(assetLibrary, defaults);
-                return defaults;
-            }
-
-            var changed = false;
-            var normalized = index.Entries
-                .Where(entry => !string.IsNullOrWhiteSpace(entry.Indicator))
-                .Select(entry =>
-                {
-                    var id = entry.Id;
-                    if (string.IsNullOrWhiteSpace(id))
-                    {
-                        id = Guid.NewGuid().ToString("N");
-                        changed = true;
-                    }
-
-                    var name = string.IsNullOrWhiteSpace(entry.Name) ? entry.Indicator : entry.Name.Trim();
-                    var category = string.IsNullOrWhiteSpace(entry.Category) ? "自定义" : entry.Category.Trim();
-                    var choiceNotes = (entry.ChoiceNotes ?? [])
-                        .Select(NormalizeFunctionChoiceNote)
-                        .Where(note => !string.IsNullOrWhiteSpace(note))
-                        .ToList();
-                    var originalChoiceNotes = entry.ChoiceNotes ?? [];
-                    if (id != entry.Id ||
-                        name != entry.Name ||
-                        category != entry.Category ||
-                        !choiceNotes.SequenceEqual(originalChoiceNotes))
-                    {
-                        changed = true;
-                    }
-
-                    return entry with
-                    {
-                        Id = id,
-                        Name = name,
-                        Indicator = entry.Indicator.Trim(),
-                        Category = category,
-                        ChoiceNotes = choiceNotes
-                    };
-                })
-                .ToList();
-
-            changed |= EnsureBuiltInFunctionTemplates(normalized);
-
-            if (changed || normalized.Count != index.Entries.Count)
-            {
-                WriteFunctions(assetLibrary, normalized);
-            }
-
-            return normalized;
-        }
-
-        private void WriteFunctions(AssetLibraryInfo assetLibrary, IReadOnlyList<FunctionEntry> functions)
-        {
-            var folderPath = GetFunctionFolderPath(assetLibrary);
-            Directory.CreateDirectory(folderPath);
-            var index = new FunctionIndex
-            {
-                Entries = functions.ToList()
-            };
-            File.WriteAllText(GetFunctionIndexPath(assetLibrary), JsonSerializer.Serialize(index, _jsonOptions));
-        }
-
-        private static List<FunctionEntry> CreateDefaultFunctions()
-        {
-            return
-            [
-                CreateChoiceFunctionTemplate(),
-                CreateChapterJumpFunctionTemplate(),
-                CreateSegmentJumpFunctionTemplate(),
-                new FunctionEntry("default-scene-sfx", "播放一次性特殊音效", "Scene_", "音频", []),
-                new FunctionEntry("default-bglerp-mode", "背景切换模式", "BGLerpMode_", "背景", []),
-                new FunctionEntry("default-vfx-on", "开启指定特效", "VFXON_", "特效", []),
-                new FunctionEntry("default-vfx-off", "关闭指定特效", "VFXOFF_", "特效", []),
-                new FunctionEntry("default-transanim", "播放动画序列", "TransAnim_", "动画", []),
-                new FunctionEntry("default-transanim-end", "停止目前动画", "TransAnim_END", "动画", []),
-                new FunctionEntry("default-medplay", "播放视频", "MedPlay_", "视频", []),
-                CreateBgmFunctionTemplate(),
-                new FunctionEntry("default-title-show", "大标题显示", "TitleShowMode", "标题", []),
-                new FunctionEntry("default-close-all-fx", "关闭所有特效", "CloseAllFX", "特效", []),
-                new FunctionEntry("default-custom", "纯自定义函数", "CustomFunction", "自定义", [])
-            ];
-        }
-
-        private static FunctionEntry CreateChoiceFunctionTemplate()
-        {
-            return new FunctionEntry(ChoiceFunctionTemplateId, "创建触发选项", ChoiceFunctionTemplateIndicator, ChoiceFunctionCategory, []);
-        }
-
-        private static FunctionEntry CreateChapterJumpFunctionTemplate()
-        {
-            return new FunctionEntry(ChapterJumpFunctionTemplateId, "跳转章节", ChapterJumpFunctionTemplateIndicator, JumpFunctionCategory, []);
-        }
-
-        private static FunctionEntry CreateSegmentJumpFunctionTemplate()
-        {
-            return new FunctionEntry(SegmentJumpFunctionTemplateId, "跳转小节", SegmentJumpFunctionTemplateIndicator, JumpFunctionCategory, []);
-        }
-
-        private static FunctionEntry CreateBgmFunctionTemplate()
-        {
-            return new FunctionEntry(BgmFunctionTemplateId, "BGM", BgmFunctionTemplateIndicator, "音频", []);
-        }
-
-        private static bool EnsureBuiltInFunctionTemplates(List<FunctionEntry> functions)
-        {
-            var changed = false;
-            changed |= RemoveLegacyBgmFunctionTemplates(functions);
-            changed |= EnsureBuiltInFunctionTemplate(functions, CreateChoiceFunctionTemplate(), IsChoiceFunctionTemplate, 0);
-            changed |= EnsureBuiltInFunctionTemplate(functions, CreateChapterJumpFunctionTemplate(), IsChapterJumpFunctionTemplate, 1);
-            changed |= EnsureBuiltInFunctionTemplate(functions, CreateSegmentJumpFunctionTemplate(), IsSegmentJumpFunctionTemplate, 2);
-            changed |= EnsureBuiltInFunctionTemplate(functions, CreateBgmFunctionTemplate(), IsBgmFunctionTemplate, 3);
-            return changed;
-        }
-
-        private static bool RemoveLegacyBgmFunctionTemplates(List<FunctionEntry> functions)
-        {
-            var removed = functions.RemoveAll(function =>
-                string.Equals(function.Id, "default-bgm-start", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(function.Id, "default-bgm-stop", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(function.Indicator, "BGM_Start", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(function.Indicator, "BGM_Stop", StringComparison.OrdinalIgnoreCase));
-            return removed > 0;
-        }
-
-        private static bool EnsureBuiltInFunctionTemplate(
-            List<FunctionEntry> functions,
-            FunctionEntry target,
-            Func<FunctionEntry, bool> isTemplate,
-            int desiredIndex)
-        {
-            var templateIndex = functions.FindIndex(function =>
-                string.Equals(function.Id, target.Id, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(function.Indicator, target.Indicator, StringComparison.OrdinalIgnoreCase) ||
-                isTemplate(function));
-            desiredIndex = Math.Clamp(desiredIndex, 0, functions.Count);
-            if (templateIndex < 0)
-            {
-                functions.Insert(desiredIndex, target);
-                return true;
-            }
-
-            var template = functions[templateIndex];
-            var normalizedTemplate = template with
-            {
-                Id = target.Id,
-                Name = string.IsNullOrWhiteSpace(template.Name) ? target.Name : template.Name.Trim(),
-                Indicator = target.Indicator,
-                Category = target.Category,
-                ChoiceNotes = []
-            };
-            var changed =
-                !string.Equals(normalizedTemplate.Id, template.Id, StringComparison.Ordinal) ||
-                !string.Equals(normalizedTemplate.Name, template.Name, StringComparison.Ordinal) ||
-                !string.Equals(normalizedTemplate.Indicator, template.Indicator, StringComparison.Ordinal) ||
-                !string.Equals(normalizedTemplate.Category, template.Category, StringComparison.Ordinal) ||
-                (template.ChoiceNotes?.Count ?? 0) != 0 ||
-                templateIndex != desiredIndex;
-
-            functions.RemoveAt(templateIndex);
-            if (templateIndex < desiredIndex)
-            {
-                desiredIndex--;
-            }
-
-            desiredIndex = Math.Clamp(desiredIndex, 0, functions.Count);
-            functions.Insert(desiredIndex, normalizedTemplate);
-            return changed;
-        }
-
-        private static bool EnsureChoiceFunctionTemplate(List<FunctionEntry> functions)
-        {
-            var templateIndex = functions.FindIndex(function => string.Equals(function.Id, ChoiceFunctionTemplateId, StringComparison.OrdinalIgnoreCase));
-            if (templateIndex < 0)
-            {
-                functions.Insert(0, CreateChoiceFunctionTemplate());
-                return true;
-            }
-
-            var template = functions[templateIndex];
-            var normalizedTemplate = template with
-            {
-                Name = string.IsNullOrWhiteSpace(template.Name) ? "创建触发选项" : template.Name.Trim(),
-                Indicator = ChoiceFunctionTemplateIndicator,
-                Category = ChoiceFunctionCategory,
-                ChoiceNotes = []
-            };
-            if (normalizedTemplate == template && templateIndex == 0)
-            {
-                return false;
-            }
-
-            functions[templateIndex] = normalizedTemplate;
-            if (templateIndex > 0)
-            {
-                functions.RemoveAt(templateIndex);
-                functions.Insert(0, normalizedTemplate);
-            }
-
-            return true;
-        }
-
-        private static bool IsChoiceFunctionTemplate(FunctionEntry function)
-        {
-            return string.Equals(function.Id, ChoiceFunctionTemplateId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(function.Indicator, ChoiceFunctionTemplateIndicator, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsChapterJumpFunctionTemplate(FunctionEntry function)
-        {
-            return string.Equals(function.Id, ChapterJumpFunctionTemplateId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(function.Indicator, ChapterJumpFunctionTemplateIndicator, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsSegmentJumpFunctionTemplate(FunctionEntry function)
-        {
-            return string.Equals(function.Id, SegmentJumpFunctionTemplateId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(function.Indicator, SegmentJumpFunctionTemplateIndicator, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsBgmFunctionTemplate(FunctionEntry function)
-        {
-            return string.Equals(function.Id, BgmFunctionTemplateId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(function.Indicator, BgmFunctionTemplateIndicator, StringComparison.OrdinalIgnoreCase);
         }
 
         private async void AddFunctionButton_Click(object sender, RoutedEventArgs e)
@@ -9964,15 +6579,18 @@ namespace GalExcleTools
                 return;
             }
 
-            var input = await ShowFunctionEditorDialogAsync("新建函数", null);
+            var input = await _functionDialogService.EditFunctionAsync(
+                "新建函数",
+                null,
+                BuildSuggestedChoiceFunctionIndicator());
             if (input is null)
             {
                 return;
             }
 
-            var functions = ReadFunctions(_currentAssetLibrary);
+            var functions = StoryFunctionService.ReadFunctions(_currentAssetLibrary, _jsonOptions);
             functions.Add(new FunctionEntry(Guid.NewGuid().ToString("N"), input.Name, input.Indicator, input.Category, input.ChoiceNotes));
-            WriteFunctions(_currentAssetLibrary, functions);
+            StoryFunctionService.WriteFunctions(_currentAssetLibrary, functions, _jsonOptions);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             LoadFunctions(_currentAssetLibrary);
             RequestDelayedRefresh();
@@ -9985,13 +6603,16 @@ namespace GalExcleTools
                 return;
             }
 
-            var input = await ShowFunctionEditorDialogAsync("修改函数", function);
+            var input = await _functionDialogService.EditFunctionAsync(
+                "修改函数",
+                function,
+                string.Empty);
             if (input is null)
             {
                 return;
             }
 
-            var functions = ReadFunctions(_currentAssetLibrary)
+            var functions = StoryFunctionService.ReadFunctions(_currentAssetLibrary, _jsonOptions)
                 .Select(entry => entry.Id == function.Id ? entry with
                 {
                     Name = input.Name,
@@ -10000,7 +6621,7 @@ namespace GalExcleTools
                     ChoiceNotes = input.ChoiceNotes
                 } : entry)
                 .ToList();
-            WriteFunctions(_currentAssetLibrary, functions);
+            StoryFunctionService.WriteFunctions(_currentAssetLibrary, functions, _jsonOptions);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             LoadFunctions(_currentAssetLibrary);
             RequestDelayedRefresh();
@@ -10019,163 +6640,13 @@ namespace GalExcleTools
                 return;
             }
 
-            var functions = ReadFunctions(_currentAssetLibrary)
+            var functions = StoryFunctionService.ReadFunctions(_currentAssetLibrary, _jsonOptions)
                 .Where(entry => entry.Id != function.Id)
                 .ToList();
-            WriteFunctions(_currentAssetLibrary, functions);
+            StoryFunctionService.WriteFunctions(_currentAssetLibrary, functions, _jsonOptions);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             LoadFunctions(_currentAssetLibrary);
             RequestDelayedRefresh();
-        }
-
-        private async Task<FunctionEditorInput?> ShowFunctionEditorDialogAsync(string title, FunctionEntry? function)
-        {
-            var isNew = function is null;
-            var suggestedChoiceIndicator = isNew ? BuildSuggestedChoiceFunctionIndicator() : string.Empty;
-            var nameBox = new TextBox
-            {
-                Width = 420,
-                Header = "中文名称",
-                Text = function?.Name ?? (string.IsNullOrWhiteSpace(suggestedChoiceIndicator) ? string.Empty : ChoiceFunctionCategory),
-                PlaceholderText = "例如：播放一次性特殊音效"
-            };
-            var indicatorBox = new TextBox
-            {
-                Width = 420,
-                Header = "函数指示器",
-                Text = function?.Indicator ?? suggestedChoiceIndicator,
-                PlaceholderText = "例如：Scene_、BGM_Stop、M2-04-Choice2"
-            };
-            var categoryBox = new TextBox
-            {
-                Width = 420,
-                Header = "分类",
-                Text = function?.Category ?? (string.IsNullOrWhiteSpace(suggestedChoiceIndicator) ? "自定义" : ChoiceFunctionCategory),
-                PlaceholderText = "音频 / 背景 / 特效 / 动画 / 视频 / 标题 / 触发选项 / 自定义"
-            };
-            var choiceNotesPanel = new StackPanel
-            {
-                Spacing = 8
-            };
-
-            void AddChoiceNoteRow(string note = "")
-            {
-                var row = new Grid
-                {
-                    ColumnSpacing = 8
-                };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-                var noteBox = new TextBox
-                {
-                    Header = $"选项备注 {choiceNotesPanel.Children.Count + 1}",
-                    Text = note,
-                    PlaceholderText = "仅用于查看，不写入剧情表"
-                };
-                var removeButton = new Button
-                {
-                    Content = "删除",
-                    Margin = new Thickness(0, 28, 0, 0)
-                };
-                removeButton.Click += (_, _) =>
-                {
-                    choiceNotesPanel.Children.Remove(row);
-                    RenumberFunctionChoiceNoteRows(choiceNotesPanel);
-                };
-
-                Grid.SetColumn(removeButton, 1);
-                row.Children.Add(noteBox);
-                row.Children.Add(removeButton);
-                choiceNotesPanel.Children.Add(row);
-            }
-
-            foreach (var note in function?.ChoiceNotes ?? [])
-            {
-                AddChoiceNoteRow(note);
-            }
-
-            var addChoiceNoteButton = new Button
-            {
-                Width = 36,
-                Height = 32,
-                Padding = new Thickness(0),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Content = "+"
-            };
-            addChoiceNoteButton.Click += (_, _) => AddChoiceNoteRow();
-
-            var panel = new StackPanel
-            {
-                Spacing = 12,
-                Children =
-                {
-                    nameBox,
-                    indicatorBox,
-                    categoryBox,
-                    new TextBlock
-                    {
-                        Text = "选项备注",
-                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-                    },
-                    choiceNotesPanel,
-                    addChoiceNoteButton,
-                    new TextBlock
-                    {
-                        Text = "备注只保存在函数卡里，方便查看选项内容，不会写入剧情表 Custom 字段。",
-                        TextWrapping = TextWrapping.Wrap,
-                        Style = TryGetTextBlockStyle("SubtleTextStyle")
-                    }
-                }
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = panel,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
-            {
-                return null;
-            }
-
-            var name = nameBox.Text.Trim();
-            var indicator = indicatorBox.Text.Trim();
-            var category = string.IsNullOrWhiteSpace(categoryBox.Text) ? "自定义" : categoryBox.Text.Trim();
-            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(indicator))
-            {
-                return null;
-            }
-
-            var choiceNotes = choiceNotesPanel.Children
-                .OfType<Grid>()
-                .Select(row => row.Children.OfType<TextBox>().FirstOrDefault()?.Text)
-                .Select(NormalizeFunctionChoiceNote)
-                .Where(note => !string.IsNullOrWhiteSpace(note))
-                .ToList();
-
-            return new FunctionEditorInput(name, indicator, category, choiceNotes);
-        }
-
-        private static void RenumberFunctionChoiceNoteRows(StackPanel choiceNotesPanel)
-        {
-            var index = 1;
-            foreach (var noteBox in choiceNotesPanel.Children.OfType<Grid>().SelectMany(row => row.Children.OfType<TextBox>()))
-            {
-                noteBox.Header = $"选项备注 {index}";
-                index++;
-            }
         }
 
         private string BuildSuggestedChoiceFunctionIndicator()
@@ -10186,12 +6657,10 @@ namespace GalExcleTools
             }
 
             var prefix = BuildCurrentStoryChapterSectionChoicePrefix();
-            var existingCount = _currentStoryAssetLibrary is null
-                ? 0
-                : ReadFunctions(_currentStoryAssetLibrary)
-                    .Count(function => string.Equals(function.Category, ChoiceFunctionCategory, StringComparison.OrdinalIgnoreCase) &&
-                        function.Indicator.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-            return $"{prefix}{existingCount + 1}";
+            var functions = _currentStoryAssetLibrary is null
+                ? []
+                : StoryFunctionService.ReadFunctions(_currentStoryAssetLibrary, _jsonOptions);
+            return StoryFunctionService.BuildSuggestedChoiceIndicator(prefix, functions);
         }
 
         private static string RemoveProjectCodePrefix(string chapterCode, string? projectCode)
@@ -10207,15 +6676,10 @@ namespace GalExcleTools
                 : chapterCode.Trim();
         }
 
-        private static string NormalizeFunctionChoiceNote(string? note)
-        {
-            return Regex.Replace(note ?? string.Empty, @"\s+", " ").Trim();
-        }
-
         private void LoadCharacterFilters(AssetLibraryInfo assetLibrary)
         {
-            var storedFilters = ReadStoredCharacterFilters(assetLibrary);
-            var filters = NormalizeCharacterFilters(storedFilters);
+            var storedFilters = _characterFilterService.ReadStored(assetLibrary);
+            var filters = CharacterFilterService.Normalize(storedFilters);
             CharacterFilterGridView.Items.Clear();
             foreach (var indexedFilter in filters.Select((filter, index) => new { filter, index }))
             {
@@ -10233,38 +6697,6 @@ namespace GalExcleTools
             }
         }
 
-        private List<CharacterFilterEntry> ReadCharacterFilters(AssetLibraryInfo assetLibrary)
-        {
-            return NormalizeCharacterFilters(ReadStoredCharacterFilters(assetLibrary));
-        }
-
-        private List<CharacterFilterEntry> ReadStoredCharacterFilters(AssetLibraryInfo assetLibrary)
-        {
-            var folderPath = GetCharacterFilterFolderPath(assetLibrary);
-            Directory.CreateDirectory(folderPath);
-            var indexPath = GetCharacterFilterIndexPath(assetLibrary);
-            var index = ReadJson<CharacterFilterIndex>(indexPath);
-            if (index?.Entries is not { Count: > 0 })
-            {
-                var defaults = CreateDefaultCharacterFilters();
-                WriteCharacterFilters(assetLibrary, defaults);
-                return defaults;
-            }
-
-            return index.Entries.ToList();
-        }
-
-        private void WriteCharacterFilters(AssetLibraryInfo assetLibrary, IReadOnlyList<CharacterFilterEntry> filters)
-        {
-            var folderPath = GetCharacterFilterFolderPath(assetLibrary);
-            Directory.CreateDirectory(folderPath);
-            var index = new CharacterFilterIndex
-            {
-                Entries = filters.ToList()
-            };
-            File.WriteAllText(GetCharacterFilterIndexPath(assetLibrary), JsonSerializer.Serialize(index, _jsonOptions));
-        }
-
         private async Task RepairStoredCharacterFiltersAsync(
             AssetLibraryInfo assetLibrary,
             IReadOnlyList<CharacterFilterEntry> oldFilters,
@@ -10278,10 +6710,10 @@ namespace GalExcleTools
             _isRepairingCharacterFilters = true;
             try
             {
-                var indexRemap = BuildCharacterFilterIndexRemap(oldFilters, newFilters);
+                var indexRemap = CharacterFilterService.BuildIndexRemap(oldFilters, newFilters);
                 var oldLabels = oldFilters.Select((filter, index) => (filter, index)).ToDictionary(item => item.index, item => item.filter.Remark);
                 var newLabels = newFilters.Select((filter, index) => (filter, index)).ToDictionary(item => item.index, item => item.filter.Remark);
-                WriteCharacterFilters(assetLibrary, newFilters);
+                _characterFilterService.Write(assetLibrary, newFilters);
 
                 AssetIndexSyncResult? syncResult = null;
                 if (indexRemap.Count > 0)
@@ -10314,53 +6746,9 @@ namespace GalExcleTools
             }
         }
 
-        private static List<CharacterFilterEntry> CreateDefaultCharacterFilters()
-        {
-            return
-            [
-                CreateEmptyCharacterFilter(),
-                new CharacterFilterEntry("default-cool-rain", "冷色调（下雨）"),
-                new CharacterFilterEntry("default-warm-dusk", "暖色调（黄昏）"),
-                new CharacterFilterEntry("default-half-black-mask", "上半身黑遮罩")
-            ];
-        }
-
-        private static CharacterFilterEntry CreateEmptyCharacterFilter()
-        {
-            return new CharacterFilterEntry("default-none", "空");
-        }
-
-        private static List<CharacterFilterEntry> NormalizeCharacterFilters(IEnumerable<CharacterFilterEntry> filters)
-        {
-            var normalized = new List<CharacterFilterEntry> { CreateEmptyCharacterFilter() };
-            foreach (var filter in filters)
-            {
-                var remark = (filter.Remark ?? string.Empty).Trim();
-                var current = filter with
-                {
-                    Id = string.IsNullOrWhiteSpace(filter.Id) ? Guid.NewGuid().ToString("N") : filter.Id.Trim(),
-                    Remark = remark
-                };
-                if (IsEmptyCharacterFilter(current) || string.IsNullOrWhiteSpace(current.Remark))
-                {
-                    continue;
-                }
-
-                normalized.Add(current);
-            }
-
-            return normalized;
-        }
-
-        private static bool IsEmptyCharacterFilter(CharacterFilterEntry filter)
-        {
-            return string.Equals(filter.Id, "default-none", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(filter.Remark, "空", StringComparison.OrdinalIgnoreCase);
-        }
-
         private List<CharacterFilterEntry> GetStoryCharacterFilters()
         {
-            return _currentStoryAssetLibrary is null ? [] : ReadCharacterFilters(_currentStoryAssetLibrary);
+            return _currentStoryAssetLibrary is null ? [] : _characterFilterService.Read(_currentStoryAssetLibrary);
         }
 
         private string? ResolveStoryCharacterFilterName(int index)
@@ -10372,12 +6760,7 @@ namespace GalExcleTools
 
             var filters = GetStoryCharacterFilters();
             var resolvedIndex = ResolveStoryAssetIndex(index, filters.Count);
-            return resolvedIndex is null ? null : GetCharacterFilterDisplayName(filters[resolvedIndex.Value], resolvedIndex.Value);
-        }
-
-        private static string GetCharacterFilterDisplayName(CharacterFilterEntry filter, int index)
-        {
-            return $"VFX{index:00}_{filter.Remark}";
+            return resolvedIndex is null ? null : CharacterFilterService.GetDisplayName(filters[resolvedIndex.Value], resolvedIndex.Value);
         }
 
         private async Task AddCharacterFilterAsync()
@@ -10393,9 +6776,9 @@ namespace GalExcleTools
                 return;
             }
 
-            var filters = ReadCharacterFilters(_currentAssetLibrary);
+            var filters = _characterFilterService.Read(_currentAssetLibrary);
             filters.Add(new CharacterFilterEntry(Guid.NewGuid().ToString("N"), remark));
-            WriteCharacterFilters(_currentAssetLibrary, NormalizeCharacterFilters(filters));
+            _characterFilterService.Write(_currentAssetLibrary, CharacterFilterService.Normalize(filters));
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             LoadCharacterFilters(_currentAssetLibrary);
             RequestDelayedRefresh();
@@ -10409,7 +6792,7 @@ namespace GalExcleTools
                 return;
             }
 
-            if (IsEmptyCharacterFilter(filter))
+            if (CharacterFilterService.IsEmpty(filter))
             {
                 return;
             }
@@ -10421,10 +6804,10 @@ namespace GalExcleTools
             }
 
             var oldRemark = filter.Remark;
-            var filters = ReadCharacterFilters(_currentAssetLibrary)
+            var filters = _characterFilterService.Read(_currentAssetLibrary)
                 .Select(entry => entry.Id == filter.Id ? entry with { Remark = remark } : entry)
                 .ToList();
-            WriteCharacterFilters(_currentAssetLibrary, NormalizeCharacterFilters(filters));
+            _characterFilterService.Write(_currentAssetLibrary, CharacterFilterService.Normalize(filters));
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             LoadCharacterFilters(_currentAssetLibrary);
             RequestDelayedRefresh();
@@ -10438,41 +6821,29 @@ namespace GalExcleTools
                 return;
             }
 
-            if (IsEmptyCharacterFilter(filter))
+            if (CharacterFilterService.IsEmpty(filter))
             {
                 return;
             }
 
-            var dialog = new ContentDialog
-            {
-                Title = "删除滤镜",
-                Content = $"确定删除 {filter.Remark} 吗？引用它的剧情行会重置为 VFX00，后续滤镜索引会同步前移。",
-                PrimaryButtonText = "删除",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                PrimaryButtonStyle = CreateDestructivePrimaryButtonStyle(),
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                "删除滤镜",
+                $"确定删除 {filter.Remark} 吗？引用它的剧情行会重置为 VFX00，后续滤镜索引会同步前移。",
+                "删除",
+                "取消"));
+            if (!confirmed)
             {
                 return;
             }
 
-            var oldFilters = ReadCharacterFilters(_currentAssetLibrary);
-            var filters = NormalizeCharacterFilters(oldFilters
+            var oldFilters = _characterFilterService.Read(_currentAssetLibrary);
+            var filters = CharacterFilterService.Normalize(oldFilters
                 .Where(entry => entry.Id != filter.Id)
                 .ToList());
-            var indexRemap = BuildCharacterFilterIndexRemap(oldFilters, filters);
+            var indexRemap = CharacterFilterService.BuildIndexRemap(oldFilters, filters);
             var oldLabels = oldFilters.Select((entry, index) => (entry, index)).ToDictionary(item => item.index, item => item.entry.Remark);
             var newLabels = filters.Select((entry, index) => (entry, index)).ToDictionary(item => item.index, item => item.entry.Remark);
-            WriteCharacterFilters(_currentAssetLibrary, filters);
+            _characterFilterService.Write(_currentAssetLibrary, filters);
             var syncResult = await SyncStoryCharacterFilterIndexesWithProgressAsync(_currentAssetLibrary, indexRemap, oldLabels, newLabels, filters.Count);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             LoadCharacterFilters(_currentAssetLibrary);
@@ -10487,119 +6858,46 @@ namespace GalExcleTools
 
         private async Task<string?> ShowCharacterFilterRemarkDialogAsync(string title, string currentRemark)
         {
-            var remarkBox = new TextBox
-            {
-                Width = 360,
-                Header = "备注",
-                Text = currentRemark,
-                PlaceholderText = "例如：冷色调（下雨）"
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = remarkBox,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var input = await _dialogService.PromptTextAsync(new TextInputDialogRequest(
+                title,
+                "备注",
+                currentRemark,
+                "例如：冷色调（下雨）"));
+            if (input is null)
             {
                 return null;
             }
 
-            var remark = SanitizeRemark(remarkBox.Text);
+            var remark = SanitizeRemark(input);
             return string.IsNullOrWhiteSpace(remark) ? null : remark;
         }
 
         private GridViewItem CreateAddCharacterCard()
         {
-            var item = new GridViewItem
-            {
-                Width = 150,
-                Height = 220,
-                Margin = new Thickness(0, 0, 14, 14)
-            };
-            item.Tapped += async (_, _) => await CreateCharacterAsync();
-
-            item.Content = new Border
-            {
-                CornerRadius = new CornerRadius(8),
-                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(1),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.White),
-                Child = new TextBlock
-                {
-                    Text = "+",
-                    FontSize = 64,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                }
-            };
-            return item;
+            return AssetCardFactory.CreateCard(
+                150,
+                220,
+                AssetCardContentFactory.CreateAddCharacterCardContent(),
+                tappedHandler: async (_, _) => await CreateCharacterAsync());
         }
 
         private GridViewItem CreateCharacterCard(CharacterInfo character)
         {
-            var item = new GridViewItem
-            {
-                Width = 150,
-                Height = 220,
-                Margin = new Thickness(0, 0, 14, 14),
-                Tag = character
-            };
-
-            var flyout = new MenuFlyout();
-            var renameItem = new MenuFlyoutItem
-            {
-                Text = "重命名"
-            };
-            renameItem.Click += async (_, _) => await RenameCharacterAsync(character);
-            flyout.Items.Add(renameItem);
-            item.ContextFlyout = flyout;
-            item.Tapped += (_, _) => ShowCharacterDetailPage(character);
-
-            var color = ParseColor(character.ColorHex, Microsoft.UI.Colors.LightGray);
-            item.Content = new StackPanel
-            {
-                Spacing = 8,
-                Children =
+            return AssetCardFactory.CreateCard(
+                150,
+                220,
+                AssetCardContentFactory.CreateCharacterCardContent(
+                    character.Code,
+                    character.Name,
+                    character.ColorHex),
+                character,
+                (_, _) =>
                 {
-                    new Border
-                    {
-                        Width = 138,
-                        Height = 178,
-                        CornerRadius = new CornerRadius(8),
-                        BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                        BorderThickness = new Thickness(1),
-                        Background = new SolidColorBrush(color),
-                        Child = new TextBlock
-                        {
-                            Text = character.Code,
-                            FontSize = 22,
-                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                            VerticalAlignment = VerticalAlignment.Center
-                        }
-                    },
-                    new TextBlock
-                    {
-                        Text = character.Name,
-                        TextAlignment = TextAlignment.Center,
-                        TextTrimming = TextTrimming.CharacterEllipsis
-                    }
-                }
-            };
-            return item;
+                    PlaySelectionSound();
+                    ShowCharacterDetailPage(character);
+                },
+                GridViewItemFactory.CreateMenu(
+                    GridViewItemFactory.CreateMenuItem("重命名", async (_, _) => await RenameCharacterAsync(character))));
         }
 
         private GridViewItem CreateMusicCard(string musicPath)
@@ -10613,282 +6911,71 @@ namespace GalExcleTools
             var detailText = choiceNotes.Count > 0
                 ? $"{function.Name} / {function.Category} / 选项备注 {choiceNotes.Count}"
                 : $"{function.Name} / {function.Category}";
-            var item = new GridViewItem
-            {
-                Width = 240,
-                Height = 104,
-                Margin = new Thickness(0, 0, 14, 14),
-                Tag = function
-            };
-
-            var flyout = new MenuFlyout();
-            var editItem = new MenuFlyoutItem { Text = "修改函数" };
-            editItem.Click += async (_, _) => await EditFunctionAsync(function);
-            flyout.Items.Add(editItem);
-
-            var deleteItem = new MenuFlyoutItem { Text = "删除" };
-            deleteItem.Click += async (_, _) => await DeleteFunctionAsync(function);
-            flyout.Items.Add(deleteItem);
-            item.ContextFlyout = flyout;
-            item.Tapped += async (_, _) => await EditFunctionAsync(function);
-
-            item.Content = new Border
-            {
-                CornerRadius = new CornerRadius(6),
-                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(1),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.White),
-                Child = new Grid
-                {
-                    Padding = new Thickness(14, 10, 14, 10),
-                    RowDefinitions =
-                    {
-                        new RowDefinition { Height = new GridLength(1, GridUnitType.Star) },
-                        new RowDefinition { Height = GridLength.Auto }
-                    },
-                    Children =
-                    {
-                        new TextBlock
-                        {
-                            Text = function.Indicator,
-                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                            TextTrimming = TextTrimming.CharacterEllipsis,
-                            VerticalAlignment = VerticalAlignment.Center
-                        },
-                        new TextBlock
-                        {
-                            Text = detailText,
-                            Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush,
-                            TextTrimming = TextTrimming.CharacterEllipsis,
-                            VerticalAlignment = VerticalAlignment.Bottom
-                        }
-                    }
-                }
-            };
-
-            if (item.Content is Border { Child: Grid grid } &&
-                grid.Children.Count > 1 &&
-                grid.Children[1] is FrameworkElement detailElement)
-            {
-                Grid.SetRow(detailElement, 1);
-            }
-
-            if (choiceNotes.Count > 0)
-            {
-                ToolTipService.SetToolTip(item, string.Join(Environment.NewLine, choiceNotes.Select((note, index) => $"{index + 1}. {note}")));
-            }
-
-            return item;
+            return AssetCardFactory.CreateCard(
+                240,
+                104,
+                AssetCardContentFactory.CreateFunctionCardContent(function.Indicator, detailText),
+                function,
+                async (_, _) => await EditFunctionAsync(function),
+                GridViewItemFactory.CreateMenu(
+                    GridViewItemFactory.CreateMenuItem("修改函数", async (_, _) => await EditFunctionAsync(function)),
+                    GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteFunctionAsync(function))),
+                toolTip: choiceNotes.Count > 0
+                    ? string.Join(Environment.NewLine, choiceNotes.Select((note, index) => $"{index + 1}. {note}"))
+                    : null);
         }
 
         private GridViewItem CreateAddFunctionCard()
         {
-            var item = new GridViewItem
-            {
-                Width = 240,
-                Height = 104,
-                Margin = new Thickness(0, 0, 14, 14)
-            };
-            item.Tapped += async (_, _) => await AddFunctionAsync();
-
-            item.Content = new Border
-            {
-                CornerRadius = new CornerRadius(6),
-                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(1),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.White),
-                Child = new TextBlock
-                {
-                    Text = "+",
-                    FontSize = 42,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                }
-            };
-            return item;
+            return AssetCardFactory.CreateCard(
+                240,
+                104,
+                AssetCardContentFactory.CreateAddTextCardContent("+"),
+                tappedHandler: async (_, _) => await AddFunctionAsync());
         }
 
         private GridViewItem CreateCharacterFilterCard(CharacterFilterEntry filter, int index)
         {
-            var canEdit = !IsEmptyCharacterFilter(filter);
-            var item = new GridViewItem
-            {
-                Width = 220,
-                Height = 92,
-                Margin = new Thickness(0, 0, 14, 14),
-                Tag = filter,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                VerticalContentAlignment = VerticalAlignment.Stretch
-            };
-
-            var flyout = new MenuFlyout();
-            if (canEdit)
-            {
-                var deleteItem = new MenuFlyoutItem { Text = "删除" };
-                deleteItem.Click += async (_, _) => await DeleteCharacterFilterAsync(filter);
-                flyout.Items.Add(deleteItem);
-                item.ContextFlyout = flyout;
-            }
-
-            var title = CreateCharacterFilterCardTitle(filter);
-            Grid.SetColumn(title, 1);
-
-            var grid = new Grid
-            {
-                Padding = new Thickness(14, 10, 10, 10),
-                ColumnDefinitions =
-                {
-                    new ColumnDefinition { Width = GridLength.Auto },
-                    new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }
-                },
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Text = $"VFX{index:00}",
-                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                        VerticalAlignment = VerticalAlignment.Center
-                    },
-                    title
-                }
-            };
-
-            item.Content = new Border
-            {
-                CornerRadius = new CornerRadius(6),
-                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(1),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.White),
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch,
-                Child = grid
-            };
-
-            return item;
+            var canEdit = !CharacterFilterService.IsEmpty(filter);
+            return AssetCardFactory.CreateCard(
+                220,
+                92,
+                AssetCardContentFactory.CreateCharacterFilterCardContent($"VFX{index:00}", filter.Remark),
+                filter,
+                contextFlyout: canEdit
+                    ? GridViewItemFactory.CreateMenu(
+                        GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteCharacterFilterAsync(filter)))
+                    : null,
+                stretchContent: true);
         }
 
         private GridViewItem CreateAddCharacterFilterCard()
         {
-            var item = new GridViewItem
-            {
-                Width = 220,
-                Height = 64,
-                Margin = new Thickness(0, 0, 14, 14),
-                Tag = null,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                VerticalContentAlignment = VerticalAlignment.Stretch
-            };
-            item.Tapped += async (_, _) => await AddCharacterFilterAsync();
-
-            item.Content = new Border
-            {
-                CornerRadius = new CornerRadius(6),
-                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(1),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.White),
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch,
-                Child = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 10,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Children =
-                    {
-                        new SymbolIcon
-                        {
-                            Symbol = Symbol.Add,
-                            Width = 18,
-                            Height = 18,
-                            VerticalAlignment = VerticalAlignment.Center
-                        },
-                        new TextBlock
-                        {
-                            Text = "新增滤镜",
-                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                            VerticalAlignment = VerticalAlignment.Center
-                        }
-                    }
-                }
-            };
-            return item;
-        }
-
-        private static TextBlock CreateCharacterFilterCardTitle(CharacterFilterEntry filter)
-        {
-            return new TextBlock
-            {
-                Text = filter.Remark,
-                Margin = new Thickness(14, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis
-            };
+            return AssetCardFactory.CreateCard(
+                220,
+                64,
+                AssetCardContentFactory.CreateAddCharacterFilterCardContent(),
+                tappedHandler: async (_, _) => await AddCharacterFilterAsync(),
+                stretchContent: true);
         }
 
         private GridViewItem CreateAudioCard(AudioAssetKind kind, string musicPath)
         {
-            var item = new GridViewItem
-            {
-                Width = 220,
-                Height = 92,
-                Margin = new Thickness(0, 0, 14, 14),
-                Tag = musicPath
-            };
-
-            var flyout = new MenuFlyout();
-            var remarkItem = new MenuFlyoutItem
-            {
-                Text = "设置备注"
-            };
-            remarkItem.Click += async (_, _) => await SetAudioRemarkAsync(kind, musicPath);
-            flyout.Items.Add(remarkItem);
-
-            var deleteItem = new MenuFlyoutItem
-            {
-                Text = "删除"
-            };
-            deleteItem.Click += async (_, _) => await DeleteAudioAsync(kind, musicPath);
-            flyout.Items.Add(deleteItem);
-            item.ContextFlyout = flyout;
-            item.Tapped += (_, _) => ShowMusicPlayerPage(musicPath, kind);
-
-            var title = CreateMusicCardTitle(musicPath);
-            Grid.SetColumn(title, 1);
-            item.Content = new Border
-            {
-                CornerRadius = new CornerRadius(6),
-                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(1),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.White),
-                Child = new Grid
+            return AssetCardFactory.CreateCard(
+                220,
+                92,
+                AssetCardContentFactory.CreateIconAssetCardContent(
+                    Symbol.Audio,
+                    Path.GetFileNameWithoutExtension(musicPath)),
+                musicPath,
+                (_, _) =>
                 {
-                    Padding = new Thickness(14, 10, 14, 10),
-                    ColumnDefinitions =
-                    {
-                        new ColumnDefinition { Width = GridLength.Auto },
-                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }
-                    },
-                    Children =
-                    {
-                        new SymbolIcon { Symbol = Symbol.Audio, VerticalAlignment = VerticalAlignment.Center },
-                        title
-                    }
-                }
-            };
-            return item;
-        }
-
-        private static TextBlock CreateMusicCardTitle(string musicPath)
-        {
-            return new TextBlock
-            {
-                Text = Path.GetFileNameWithoutExtension(musicPath),
-                Margin = new Thickness(12, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis
-            };
+                    PlaySelectionSound();
+                    ShowMusicPlayerPage(musicPath, kind);
+                },
+                GridViewItemFactory.CreateMenu(
+                    GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetAudioRemarkAsync(kind, musicPath)),
+                    GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteAudioAsync(kind, musicPath))));
         }
 
         private async void BackgroundImagesGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
@@ -10899,12 +6986,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var orderedPaths = BackgroundImagesGridView.Items
-                .OfType<GridViewItem>()
-                .Select(item => item.Tag as string)
-                .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                .Cast<string>()
-                .ToList();
+            var orderedPaths = GetOrderedExistingTaggedPaths(BackgroundImagesGridView);
 
             if (orderedPaths.Count == 0)
             {
@@ -10912,8 +6994,8 @@ namespace GalExcleTools
                 return;
             }
 
-            var indexRemap = BuildAssetIndexRemap(orderedPaths, GetBackgroundImageIndex);
-            var assetLabels = BuildAssetIndexLabelMaps(orderedPaths, GetBackgroundImageIndex);
+            var indexRemap = BuildAssetIndexRemap(orderedPaths, BackgroundImageService.GetAssetIndex);
+            var assetLabels = StoryAssetIndexSyncService.BuildLabelMaps(orderedPaths, BackgroundImageService.GetAssetIndex);
             _isNormalizingBackgroundImages = true;
             try
             {
@@ -10945,18 +7027,12 @@ namespace GalExcleTools
 
         private void BackgroundImagesGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
         {
-            var draggedObject = e.Items.FirstOrDefault();
-            _draggingBackgroundImageItem =
-                draggedObject as GridViewItem ??
-                (draggedObject is null ? null : BackgroundImagesGridView.ContainerFromItem(draggedObject) as GridViewItem) ??
-                BackgroundImagesGridView.Items
-                    .OfType<GridViewItem>()
-                    .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject));
+            _draggingBackgroundImageItem = ResolveDraggedGridViewItem(BackgroundImagesGridView, e);
 
             AppendLog(
                 LogKind.Info,
                 _draggingBackgroundImageItem is null
-                    ? $"背景图拖拽开始，但未识别拖拽项。Items[0]={draggedObject?.GetType().Name ?? "null"}"
+                    ? $"背景图拖拽开始，但未识别拖拽项。Items[0]={e.Items.FirstOrDefault()?.GetType().Name ?? "null"}"
                     : $"背景图拖拽开始：{Path.GetFileName(_draggingBackgroundImageItem.Tag as string)}");
         }
 
@@ -11017,146 +7093,32 @@ namespace GalExcleTools
 
         private async void MusicGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
         {
-            if (_currentAssetLibrary is null || _isNormalizingMusicFiles)
-            {
-                _draggingMusicItem = null;
-                return;
-            }
-
-            var orderedPaths = MusicGridView.Items
-                .OfType<GridViewItem>()
-                .Select(item => item.Tag as string)
-                .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                .Cast<string>()
-                .ToList();
-
-            if (orderedPaths.Count == 0)
-            {
-                _draggingMusicItem = null;
-                return;
-            }
-
-            var indexRemap = BuildAssetIndexRemap(orderedPaths, path => GetAudioAssetIndex(AudioAssetKind.Music, path));
-            var assetLabels = BuildAssetIndexLabelMaps(orderedPaths, path => GetAudioAssetIndex(AudioAssetKind.Music, path));
-            _isNormalizingMusicFiles = true;
-            try
-            {
-                await NormalizeMusicFilesAsync(GetMusicFolderPath(_currentAssetLibrary), orderedPaths);
-            }
-            finally
-            {
-                _isNormalizingMusicFiles = false;
-            }
-
-            var syncResult = await SyncStoryGlobalAssetIndexesWithProgressAsync(
-                _currentAssetLibrary,
-                "BGM",
-                "BGM",
-                indexRemap,
-                assetLabels.OldLabels,
-                assetLabels.NewLabels,
-                orderedPaths.Count);
-            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshMusicCards(_currentAssetLibrary);
-            RequestDelayedRefresh();
-            if (syncResult.ChangedCsvCount > 0)
-            {
-                AppendLog(LogKind.Info, $"已同步 {syncResult.ChangedCsvCount} 个章节 CSV 的 BGM 索引。");
-            }
-            AppendLog(LogKind.User, "已调整音乐顺序并触发自动命名。");
-            _draggingMusicItem = null;
+            await AudioGridView_DragItemsCompleted(AudioAssetKind.Music);
         }
 
         private void MusicGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
         {
-            var draggedObject = e.Items.FirstOrDefault();
-            _draggingMusicItem =
-                draggedObject as GridViewItem ??
-                (draggedObject is null ? null : MusicGridView.ContainerFromItem(draggedObject) as GridViewItem) ??
-                MusicGridView.Items
-                    .OfType<GridViewItem>()
-                    .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject));
+            AudioGridView_DragItemsStarting(AudioAssetKind.Music, sender, e);
         }
 
         private void MusicGridView_DragOver(object sender, DragEventArgs e)
         {
-            if (_draggingMusicItem is null || MusicGridView.Items.Count <= 1)
-            {
-                return;
-            }
-
-            e.AcceptedOperation = DataPackageOperation.Move;
+            AudioGridView_DragOver(AudioAssetKind.Music, e);
         }
 
         private void MusicDropZone_DragEnter(object sender, DragEventArgs e)
         {
-            if (_draggingMusicItem is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-            }
-            else if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
+            AudioDropZone_DragEnter(AudioAssetKind.Music, e);
         }
 
         private void MusicDropZone_DragOver(object sender, DragEventArgs e)
         {
-            if (_draggingMusicItem is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-                return;
-            }
-
-            if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
+            AudioDropZone_DragOver(AudioAssetKind.Music, e);
         }
 
         private async void MusicDropZone_Drop(object sender, DragEventArgs e)
         {
-            if (_draggingMusicItem is not null)
-            {
-                MoveDraggingMusicToEnd();
-                e.Handled = true;
-                return;
-            }
-
-            if (!e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                return;
-            }
-
-            e.Handled = true;
-            var deferral = e.GetDeferral();
-            try
-            {
-                var storageItems = await e.DataView.GetStorageItemsAsync();
-                var droppedMusicPaths = storageItems
-                    .OfType<StorageFile>()
-                    .Select(file => file.Path)
-                    .Where(path => MusicExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                    .ToList();
-
-                var importedCount = await ImportMusicFilesAsync(droppedMusicPaths);
-                if (importedCount > 0)
-                {
-                    AppendLog(LogKind.User, $"拖入导入音乐：{importedCount} 个文件。");
-                }
-                else
-                {
-                    AppendLog(LogKind.Warning, "拖入内容中没有可导入的 wav 音乐文件。");
-                }
-            }
-            finally
-            {
-                deferral.Complete();
-            }
+            await AudioDropZone_Drop(AudioAssetKind.Music, e);
         }
 
         private async void AmbientSoundGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
@@ -11233,21 +7195,21 @@ namespace GalExcleTools
                 .Where(entry => entry is not null)
                 .Cast<CharacterFilterEntry>()
                 .ToList();
-            filters = NormalizeCharacterFilters(filters);
+            filters = CharacterFilterService.Normalize(filters);
             if (filters.Count == 0)
             {
                 _draggingCharacterFilterItem = null;
                 return;
             }
 
-            var oldFilters = ReadCharacterFilters(_currentAssetLibrary);
-            var indexRemap = BuildCharacterFilterIndexRemap(oldFilters, filters);
+            var oldFilters = _characterFilterService.Read(_currentAssetLibrary);
+            var indexRemap = CharacterFilterService.BuildIndexRemap(oldFilters, filters);
             var oldLabels = oldFilters.Select((filter, index) => (filter, index)).ToDictionary(item => item.index, item => item.filter.Remark);
             var newLabels = filters.Select((filter, index) => (filter, index)).ToDictionary(item => item.index, item => item.filter.Remark);
             _isReorderingCharacterFilters = true;
             try
             {
-                WriteCharacterFilters(_currentAssetLibrary, filters);
+                _characterFilterService.Write(_currentAssetLibrary, filters);
             }
             finally
             {
@@ -11268,13 +7230,7 @@ namespace GalExcleTools
 
         private void CharacterFilterGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
         {
-            var draggedObject = e.Items.FirstOrDefault();
-            _draggingCharacterFilterItem =
-                draggedObject as GridViewItem ??
-                (draggedObject is null ? null : CharacterFilterGridView.ContainerFromItem(draggedObject) as GridViewItem) ??
-                CharacterFilterGridView.Items
-                    .OfType<GridViewItem>()
-                    .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject));
+            _draggingCharacterFilterItem = ResolveDraggedGridViewItem(CharacterFilterGridView, e);
 
             if (_draggingCharacterFilterItem?.Tag is not CharacterFilterEntry)
             {
@@ -11294,362 +7250,137 @@ namespace GalExcleTools
 
         private async void CharacterClothGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
         {
-            if (_currentCharacter is null || _isNormalizingCharacterClothes)
-            {
-                _draggingCharacterClothItem = null;
-                return;
-            }
-
-            var orderedPaths = CharacterClothGridView.Items
-                .OfType<GridViewItem>()
-                .Select(item => item.Tag as string)
-                .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                .Cast<string>()
-                .ToList();
-
-            if (orderedPaths.Count == 0)
-            {
-                _draggingCharacterClothItem = null;
-                return;
-            }
-
-            var indexRemap = BuildAssetIndexRemap(orderedPaths, path => GetCharacterLayerIndex(path, CharacterLayerKind.Cloth));
-            var assetLabels = BuildAssetIndexLabelMaps(orderedPaths, path => GetCharacterLayerIndex(path, CharacterLayerKind.Cloth));
-            _isNormalizingCharacterClothes = true;
-            try
-            {
-                var entries = orderedPaths
-                    .Select(path => ParseCharacterLayerFileName(path, CharacterLayerKind.Cloth, string.Empty))
-                    .ToList();
-                RenameCharacterLayerEntries(entries, CharacterLayerKind.Cloth, _currentCharacter.Code);
-            }
-            finally
-            {
-                _isNormalizingCharacterClothes = false;
-            }
-
-            if (_currentAssetLibrary is not null)
-            {
-                var syncResult = await SyncStoryCharacterLayerIndexesWithProgressAsync(
-                    _currentAssetLibrary,
-                    _currentCharacter,
-                    CharacterLayerKind.Cloth,
-                    indexRemap,
-                    assetLabels.OldLabels,
-                    assetLabels.NewLabels,
-                    orderedPaths.Count);
-                if (syncResult.ChangedCsvCount > 0)
-                {
-                    AppendLog(LogKind.Info, $"已同步 {syncResult.ChangedCsvCount} 个章节 CSV 的服装索引。");
-                }
-
-                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            }
-
-            ReloadCharacterDetailLayersPreservingScroll();
-            RequestDelayedRefresh();
-            AppendLog(LogKind.User, "已调整服装顺序并触发自动命名。");
-            _draggingCharacterClothItem = null;
-            await Task.CompletedTask;
+            await CharacterLayerGridView_DragItemsCompleted(
+                CharacterClothGridView,
+                CharacterLayerKind.Cloth,
+                _isNormalizingCharacterClothes,
+                () => _isNormalizingCharacterClothes = true,
+                () => _isNormalizingCharacterClothes = false,
+                () => _draggingCharacterClothItem = null,
+                "服装",
+                character => character.Code);
         }
 
         private void CharacterClothGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
         {
-            var draggedObject = e.Items.FirstOrDefault();
-            _draggingCharacterClothItem =
-                draggedObject as GridViewItem ??
-                (draggedObject is null ? null : CharacterClothGridView.ContainerFromItem(draggedObject) as GridViewItem) ??
-                CharacterClothGridView.Items
-                    .OfType<GridViewItem>()
-                    .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject));
+            CharacterLayerGridView_DragItemsStarting(CharacterClothGridView, e, item => _draggingCharacterClothItem = item);
         }
 
         private void CharacterClothGridView_DragOver(object sender, DragEventArgs e)
         {
-            if (_draggingCharacterClothItem is null || CharacterClothGridView.Items.Count <= 1)
-            {
-                return;
-            }
-
-            e.AcceptedOperation = DataPackageOperation.Move;
-            var pointerPosition = e.GetPosition(CharacterClothGridView);
-            if (IsPointerInTrailingBlankArea(CharacterClothGridView, pointerPosition, _draggingCharacterClothItem))
-            {
-                MoveDraggingCharacterClothToEnd();
-            }
+            CharacterLayerGridView_DragOver(CharacterClothGridView, _draggingCharacterClothItem, e);
         }
 
         private void CharacterClothDropZone_DragEnter(object sender, DragEventArgs e)
         {
-            if (_draggingCharacterClothItem is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-            }
-            else if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
+            CharacterLayerDropZone_DragEnterOrOver(_draggingCharacterClothItem, e);
         }
 
         private void CharacterClothDropZone_DragOver(object sender, DragEventArgs e)
         {
-            if (_draggingCharacterClothItem is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-                return;
-            }
-
-            if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
+            CharacterLayerDropZone_DragEnterOrOver(_draggingCharacterClothItem, e);
         }
 
         private async void CharacterClothDropZone_Drop(object sender, DragEventArgs e)
         {
-            if (_draggingCharacterClothItem is not null)
-            {
-                MoveDraggingCharacterClothToEnd();
-                e.Handled = true;
-                return;
-            }
-
-            if (!e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                return;
-            }
-
-            e.Handled = true;
-            var deferral = e.GetDeferral();
-            try
-            {
-                var storageItems = await e.DataView.GetStorageItemsAsync();
-                var droppedClothPaths = storageItems
-                    .OfType<StorageFile>()
-                    .Select(file => file.Path)
-                    .Where(path => ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                    .ToList();
-
-                var importedCount = await ImportCharacterClothesAsync(droppedClothPaths);
-                if (importedCount > 0)
-                {
-                    AppendLog(LogKind.User, $"拖入导入服装：{importedCount} 个文件。");
-                }
-                else
-                {
-                    AppendLog(LogKind.Warning, "拖入内容中没有可导入的服装图片文件。");
-                }
-            }
-            catch (Exception ex)
-            {
-                AppendLog(LogKind.Error, "拖入导入服装失败。", ex);
-            }
-            finally
-            {
-                deferral.Complete();
-            }
+            await CharacterLayerDropZone_Drop(
+                e,
+                _draggingCharacterClothItem,
+                () => MoveGridViewItemToEnd(CharacterClothGridView, _draggingCharacterClothItem),
+                ImportCharacterClothesAsync,
+                "服装");
         }
 
         private async void CharacterFaceGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
         {
-            if (_currentCharacter is null || _isNormalizingCharacterFaces)
-            {
-                _draggingCharacterFaceItem = null;
-                return;
-            }
-
-            var orderedPaths = CharacterFaceGridView.Items
-                .OfType<GridViewItem>()
-                .Select(item => item.Tag as string)
-                .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                .Cast<string>()
-                .ToList();
-
-            if (orderedPaths.Count == 0)
-            {
-                _draggingCharacterFaceItem = null;
-                return;
-            }
-
-            var indexRemap = BuildAssetIndexRemap(orderedPaths, path => GetCharacterLayerIndex(path, CharacterLayerKind.Face));
-            var assetLabels = BuildAssetIndexLabelMaps(orderedPaths, path => GetCharacterLayerIndex(path, CharacterLayerKind.Face));
-            _isNormalizingCharacterFaces = true;
-            try
-            {
-                var entries = orderedPaths
-                    .Select(path => ParseCharacterLayerFileName(path, CharacterLayerKind.Face, string.Empty))
-                    .ToList();
-                RenameCharacterFaceEntriesAndUpdateMeta(entries);
-            }
-            finally
-            {
-                _isNormalizingCharacterFaces = false;
-            }
-
-            if (_currentAssetLibrary is not null)
-            {
-                var syncResult = await SyncStoryCharacterLayerIndexesWithProgressAsync(
-                    _currentAssetLibrary,
-                    _currentCharacter,
-                    CharacterLayerKind.Face,
-                    indexRemap,
-                    assetLabels.OldLabels,
-                    assetLabels.NewLabels,
-                    orderedPaths.Count);
-                if (syncResult.ChangedCsvCount > 0)
-                {
-                    AppendLog(LogKind.Info, $"已同步 {syncResult.ChangedCsvCount} 个章节 CSV 的表情索引。");
-                }
-
-                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            }
-
-            ReloadCharacterDetailLayersPreservingScroll();
-            RequestDelayedRefresh();
-            AppendLog(LogKind.User, "已调整表情顺序并触发自动命名。");
-            _draggingCharacterFaceItem = null;
-            await Task.CompletedTask;
+            await CharacterLayerGridView_DragItemsCompleted(
+                CharacterFaceGridView,
+                CharacterLayerKind.Face,
+                _isNormalizingCharacterFaces,
+                () => _isNormalizingCharacterFaces = true,
+                () => _isNormalizingCharacterFaces = false,
+                () => _draggingCharacterFaceItem = null,
+                "表情");
         }
 
         private void CharacterFaceGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
         {
-            var draggedObject = e.Items.FirstOrDefault();
-            _draggingCharacterFaceItem =
-                draggedObject as GridViewItem ??
-                (draggedObject is null ? null : CharacterFaceGridView.ContainerFromItem(draggedObject) as GridViewItem) ??
-                CharacterFaceGridView.Items
-                    .OfType<GridViewItem>()
-                    .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject));
+            CharacterLayerGridView_DragItemsStarting(CharacterFaceGridView, e, item => _draggingCharacterFaceItem = item);
         }
 
         private void CharacterFaceGridView_DragOver(object sender, DragEventArgs e)
         {
-            if (_draggingCharacterFaceItem is null || CharacterFaceGridView.Items.Count <= 1)
-            {
-                return;
-            }
-
-            e.AcceptedOperation = DataPackageOperation.Move;
-            var pointerPosition = e.GetPosition(CharacterFaceGridView);
-            if (IsPointerInTrailingBlankArea(CharacterFaceGridView, pointerPosition, _draggingCharacterFaceItem))
-            {
-                MoveDraggingCharacterFaceToEnd();
-            }
+            CharacterLayerGridView_DragOver(CharacterFaceGridView, _draggingCharacterFaceItem, e);
         }
 
         private void CharacterFaceDropZone_DragEnter(object sender, DragEventArgs e)
         {
-            if (_draggingCharacterFaceItem is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-            }
-            else if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
+            CharacterLayerDropZone_DragEnterOrOver(_draggingCharacterFaceItem, e);
         }
 
         private void CharacterFaceDropZone_DragOver(object sender, DragEventArgs e)
         {
-            if (_draggingCharacterFaceItem is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-                return;
-            }
-
-            if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
+            CharacterLayerDropZone_DragEnterOrOver(_draggingCharacterFaceItem, e);
         }
 
         private async void CharacterFaceDropZone_Drop(object sender, DragEventArgs e)
         {
-            if (_draggingCharacterFaceItem is not null)
-            {
-                MoveDraggingCharacterFaceToEnd();
-                e.Handled = true;
-                return;
-            }
-
-            if (!e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                return;
-            }
-
-            e.Handled = true;
-            var deferral = e.GetDeferral();
-            try
-            {
-                var storageItems = await e.DataView.GetStorageItemsAsync();
-                var droppedFacePaths = storageItems
-                    .OfType<StorageFile>()
-                    .Select(file => file.Path)
-                    .Where(path => ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                    .ToList();
-
-                var importedCount = await ImportCharacterFacesAsync(droppedFacePaths);
-                if (importedCount > 0)
-                {
-                    AppendLog(LogKind.User, $"拖入导入表情：{importedCount} 个文件。");
-                }
-                else
-                {
-                    AppendLog(LogKind.Warning, "拖入内容中没有可导入的表情图片文件。");
-                }
-            }
-            catch (Exception ex)
-            {
-                AppendLog(LogKind.Error, "拖入导入表情失败。", ex);
-            }
-            finally
-            {
-                deferral.Complete();
-            }
+            await CharacterLayerDropZone_Drop(
+                e,
+                _draggingCharacterFaceItem,
+                () => MoveGridViewItemToEnd(CharacterFaceGridView, _draggingCharacterFaceItem),
+                ImportCharacterFacesAsync,
+                "表情");
         }
 
         private async void CharacterAdornGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
         {
-            if (_currentCharacter is null || _isNormalizingCharacterAdorns)
+            await CharacterLayerGridView_DragItemsCompleted(
+                CharacterAdornGridView,
+                CharacterLayerKind.Adorn,
+                _isNormalizingCharacterAdorns,
+                () => _isNormalizingCharacterAdorns = true,
+                () => _isNormalizingCharacterAdorns = false,
+                () => _draggingCharacterAdornItem = null,
+                "装饰");
+        }
+
+        private async Task CharacterLayerGridView_DragItemsCompleted(
+            GridView gridView,
+            CharacterLayerKind layerKind,
+            bool isNormalizing,
+            Action beginNormalize,
+            Action endNormalize,
+            Action clearDraggingItem,
+            string logLabel,
+            Func<CharacterInfo, string?>? characterCodeSelector = null)
+        {
+            if (_currentCharacter is null || isNormalizing)
             {
-                _draggingCharacterAdornItem = null;
+                clearDraggingItem();
                 return;
             }
 
-            var orderedPaths = CharacterAdornGridView.Items
-                .OfType<GridViewItem>()
-                .Select(item => item.Tag as string)
-                .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                .Cast<string>()
-                .ToList();
-
+            var orderedPaths = GetOrderedExistingTaggedPaths(gridView);
             if (orderedPaths.Count == 0)
             {
-                _draggingCharacterAdornItem = null;
+                clearDraggingItem();
                 return;
             }
 
-            var indexRemap = BuildAssetIndexRemap(orderedPaths, path => GetCharacterLayerIndex(path, CharacterLayerKind.Adorn));
-            var assetLabels = BuildAssetIndexLabelMaps(orderedPaths, path => GetCharacterLayerIndex(path, CharacterLayerKind.Adorn));
-            _isNormalizingCharacterAdorns = true;
+            var indexRemap = BuildAssetIndexRemap(orderedPaths, path => CharacterLayerAssetService.GetIndex(path, layerKind));
+            var assetLabels = StoryAssetIndexSyncService.BuildLabelMaps(orderedPaths, path => CharacterLayerAssetService.GetIndex(path, layerKind));
+            beginNormalize();
             try
             {
                 var entries = orderedPaths
-                    .Select(path => ParseCharacterLayerFileName(path, CharacterLayerKind.Adorn, string.Empty))
+                    .Select(path => CharacterLayerAssetService.ParseFileName(path, layerKind, string.Empty))
                     .ToList();
-                RenameCharacterAdornEntriesAndUpdateMeta(entries);
+                _characterLayerAssetService.RenameEntriesAndScopeMeta(entries, layerKind, characterCodeSelector?.Invoke(_currentCharacter));
             }
             finally
             {
-                _isNormalizingCharacterAdorns = false;
+                endNormalize();
             }
 
             if (_currentAssetLibrary is not null)
@@ -11657,14 +7388,14 @@ namespace GalExcleTools
                 var syncResult = await SyncStoryCharacterLayerIndexesWithProgressAsync(
                     _currentAssetLibrary,
                     _currentCharacter,
-                    CharacterLayerKind.Adorn,
+                    layerKind,
                     indexRemap,
                     assetLabels.OldLabels,
                     assetLabels.NewLabels,
                     orderedPaths.Count);
                 if (syncResult.ChangedCsvCount > 0)
                 {
-                    AppendLog(LogKind.Info, $"已同步 {syncResult.ChangedCsvCount} 个章节 CSV 的装饰索引。");
+                    AppendLog(LogKind.Info, $"已同步 {syncResult.ChangedCsvCount} 个章节 CSV 的{logLabel}索引。");
                 }
 
                 TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
@@ -11672,54 +7403,13 @@ namespace GalExcleTools
 
             ReloadCharacterDetailLayersPreservingScroll();
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, "已调整装饰顺序并触发自动命名。");
-            _draggingCharacterAdornItem = null;
-            await Task.CompletedTask;
+            AppendLog(LogKind.User, $"已调整{logLabel}顺序并触发自动命名。");
+            clearDraggingItem();
         }
 
-        private void CharacterAdornGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
+        private static void CharacterLayerDropZone_DragEnterOrOver(GridViewItem? draggingItem, DragEventArgs e)
         {
-            var draggedObject = e.Items.FirstOrDefault();
-            _draggingCharacterAdornItem =
-                draggedObject as GridViewItem ??
-                (draggedObject is null ? null : CharacterAdornGridView.ContainerFromItem(draggedObject) as GridViewItem) ??
-                CharacterAdornGridView.Items
-                    .OfType<GridViewItem>()
-                    .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject));
-        }
-
-        private void CharacterAdornGridView_DragOver(object sender, DragEventArgs e)
-        {
-            if (_draggingCharacterAdornItem is null || CharacterAdornGridView.Items.Count <= 1)
-            {
-                return;
-            }
-
-            e.AcceptedOperation = DataPackageOperation.Move;
-            var pointerPosition = e.GetPosition(CharacterAdornGridView);
-            if (IsPointerInTrailingBlankArea(CharacterAdornGridView, pointerPosition, _draggingCharacterAdornItem))
-            {
-                MoveDraggingCharacterAdornToEnd();
-            }
-        }
-
-        private void CharacterAdornDropZone_DragEnter(object sender, DragEventArgs e)
-        {
-            if (_draggingCharacterAdornItem is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-            }
-            else if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
-        }
-
-        private void CharacterAdornDropZone_DragOver(object sender, DragEventArgs e)
-        {
-            if (_draggingCharacterAdornItem is not null)
+            if (draggingItem is not null)
             {
                 e.AcceptedOperation = DataPackageOperation.Move;
                 e.Handled = true;
@@ -11733,11 +7423,54 @@ namespace GalExcleTools
             }
         }
 
+        private void CharacterAdornGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
+        {
+            CharacterLayerGridView_DragItemsStarting(CharacterAdornGridView, e, item => _draggingCharacterAdornItem = item);
+        }
+
+        private static void CharacterLayerGridView_DragItemsStarting(
+            GridView gridView,
+            DragItemsStartingEventArgs e,
+            Action<GridViewItem?> setDraggingItem)
+        {
+            setDraggingItem(ResolveDraggedGridViewItem(gridView, e));
+        }
+
+        private void CharacterAdornGridView_DragOver(object sender, DragEventArgs e)
+        {
+            CharacterLayerGridView_DragOver(CharacterAdornGridView, _draggingCharacterAdornItem, e);
+        }
+
+        private void CharacterAdornDropZone_DragEnter(object sender, DragEventArgs e)
+        {
+            CharacterLayerDropZone_DragEnterOrOver(_draggingCharacterAdornItem, e);
+        }
+
+        private void CharacterAdornDropZone_DragOver(object sender, DragEventArgs e)
+        {
+            CharacterLayerDropZone_DragEnterOrOver(_draggingCharacterAdornItem, e);
+        }
+
         private async void CharacterAdornDropZone_Drop(object sender, DragEventArgs e)
         {
-            if (_draggingCharacterAdornItem is not null)
+            await CharacterLayerDropZone_Drop(
+                e,
+                _draggingCharacterAdornItem,
+                () => MoveGridViewItemToEnd(CharacterAdornGridView, _draggingCharacterAdornItem),
+                ImportCharacterAdornsAsync,
+                "装饰");
+        }
+
+        private async Task CharacterLayerDropZone_Drop(
+            DragEventArgs e,
+            GridViewItem? draggingItem,
+            Action moveDraggingItemToEnd,
+            Func<IEnumerable<string>, Task<int>> importAsync,
+            string logLabel)
+        {
+            if (draggingItem is not null)
             {
-                MoveDraggingCharacterAdornToEnd();
+                moveDraggingItemToEnd();
                 e.Handled = true;
                 return;
             }
@@ -11752,29 +7485,44 @@ namespace GalExcleTools
             try
             {
                 var storageItems = await e.DataView.GetStorageItemsAsync();
-                var droppedAdornPaths = storageItems
+                var droppedPaths = storageItems
                     .OfType<StorageFile>()
                     .Select(file => file.Path)
-                    .Where(path => ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+                    .Where(path => BackgroundImageService.Extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
                     .ToList();
 
-                var importedCount = await ImportCharacterAdornsAsync(droppedAdornPaths);
+                var importedCount = await importAsync(droppedPaths);
                 if (importedCount > 0)
                 {
-                    AppendLog(LogKind.User, $"拖入导入装饰：{importedCount} 个文件。");
+                    AppendLog(LogKind.User, $"拖入导入{logLabel}：{importedCount} 个文件。");
                 }
                 else
                 {
-                    AppendLog(LogKind.Warning, "拖入内容中没有可导入的装饰图片文件。");
+                    AppendLog(LogKind.Warning, $"拖入内容中没有可导入的{logLabel}图片文件。");
                 }
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Error, "拖入导入装饰失败。", ex);
+                AppendLog(LogKind.Error, $"拖入导入{logLabel}失败。", ex);
             }
             finally
             {
                 deferral.Complete();
+            }
+        }
+
+        private static void CharacterLayerGridView_DragOver(GridView gridView, GridViewItem? draggingItem, DragEventArgs e)
+        {
+            if (draggingItem is null || gridView.Items.Count <= 1)
+            {
+                return;
+            }
+
+            e.AcceptedOperation = DataPackageOperation.Move;
+            var pointerPosition = e.GetPosition(gridView);
+            if (IsPointerInTrailingBlankArea(gridView, pointerPosition, draggingItem))
+            {
+                MoveGridViewItemToEnd(gridView, draggingItem);
             }
         }
 
@@ -11787,17 +7535,18 @@ namespace GalExcleTools
                 return;
             }
 
+            PlaySelectionSound();
             if (ReferenceEquals(sender, CharacterClothGridView))
             {
-                ShowCharacterClothViewerPage(imagePath);
+                ShowCharacterLayerViewerPage(imagePath, CharacterLayerKind.Cloth);
             }
             else if (ReferenceEquals(sender, CharacterFaceGridView))
             {
-                ShowCharacterFaceViewerPage(imagePath);
+                ShowCharacterLayerViewerPage(imagePath, CharacterLayerKind.Face);
             }
             else if (ReferenceEquals(sender, CharacterAdornGridView))
             {
-                ShowCharacterAdornViewerPage(imagePath);
+                ShowCharacterLayerViewerPage(imagePath, CharacterLayerKind.Adorn);
             }
         }
 
@@ -11864,24 +7613,6 @@ namespace GalExcleTools
             AppendLog(LogKind.Warning, "角色拖入导入暂未实现：后续会用于识别角色压缩包。");
         }
 
-        private void MoveDraggingMusicToEnd()
-        {
-            if (_draggingMusicItem is null)
-            {
-                return;
-            }
-
-            var currentIndex = MusicGridView.Items.IndexOf(_draggingMusicItem);
-            var lastIndex = MusicGridView.Items.Count - 1;
-            if (currentIndex == lastIndex)
-            {
-                return;
-            }
-
-            MusicGridView.Items.Remove(_draggingMusicItem);
-            MusicGridView.Items.Add(_draggingMusicItem);
-        }
-
         private async Task AudioGridView_DragItemsCompleted(AudioAssetKind kind)
         {
             if (_currentAssetLibrary is null || IsAudioNormalizing(kind))
@@ -11891,12 +7622,7 @@ namespace GalExcleTools
             }
 
             var gridView = GetAudioGridView(kind);
-            var orderedPaths = gridView.Items
-                .OfType<GridViewItem>()
-                .Select(item => item.Tag as string)
-                .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                .Cast<string>()
-                .ToList();
+            var orderedPaths = GetOrderedExistingTaggedPaths(gridView);
 
             if (orderedPaths.Count == 0)
             {
@@ -11904,8 +7630,8 @@ namespace GalExcleTools
                 return;
             }
 
-            var indexRemap = BuildAssetIndexRemap(orderedPaths, path => GetAudioAssetIndex(kind, path));
-            var assetLabels = BuildAssetIndexLabelMaps(orderedPaths, path => GetAudioAssetIndex(kind, path));
+            var indexRemap = BuildAssetIndexRemap(orderedPaths, path => AudioAssetService.GetAssetIndex(kind, path));
+            var assetLabels = StoryAssetIndexSyncService.BuildLabelMaps(orderedPaths, path => AudioAssetService.GetAssetIndex(kind, path));
             SetAudioNormalizing(kind, true);
             try
             {
@@ -11935,21 +7661,13 @@ namespace GalExcleTools
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshAudioCards(_currentAssetLibrary, kind);
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已调整{GetAudioDisplayName(kind)}顺序并触发自动命名。");
+            AppendLog(LogKind.User, $"已调整{AudioAssetService.GetDisplayName(kind)}顺序并触发自动命名。");
             SetDraggingAudioItem(kind, null);
         }
 
         private void AudioGridView_DragItemsStarting(AudioAssetKind kind, object sender, DragItemsStartingEventArgs e)
         {
-            var gridView = GetAudioGridView(kind);
-            var draggedObject = e.Items.FirstOrDefault();
-            SetDraggingAudioItem(
-                kind,
-                draggedObject as GridViewItem ??
-                (draggedObject is null ? null : gridView.ContainerFromItem(draggedObject) as GridViewItem) ??
-                gridView.Items
-                    .OfType<GridViewItem>()
-                    .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject)));
+            SetDraggingAudioItem(kind, ResolveDraggedGridViewItem(GetAudioGridView(kind), e));
         }
 
         private void AudioGridView_DragOver(AudioAssetKind kind, DragEventArgs e)
@@ -12014,15 +7732,15 @@ namespace GalExcleTools
                 var droppedMusicPaths = storageItems
                     .OfType<StorageFile>()
                     .Select(file => file.Path)
-                    .Where(path => MusicExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+                    .Where(AudioAssetService.IsValidAudioPath)
                     .ToList();
 
-                var importedCount = await ImportAudioFilesAsync(kind, droppedMusicPaths);
+                var importedCount = ImportAudioFiles(kind, droppedMusicPaths);
                 AppendLog(
                     importedCount > 0 ? LogKind.User : LogKind.Warning,
                     importedCount > 0
-                        ? $"拖入导入{GetAudioDisplayName(kind)}：{importedCount} 个文件。"
-                        : $"拖入内容中没有可导入的 wav {GetAudioDisplayName(kind)}文件。");
+                        ? $"拖入导入{AudioAssetService.GetDisplayName(kind)}：{importedCount} 个文件。"
+                        : $"拖入内容中没有可导入的 wav {AudioAssetService.GetDisplayName(kind)}文件。");
             }
             finally
             {
@@ -12032,76 +7750,7 @@ namespace GalExcleTools
 
         private void MoveDraggingAudioToEnd(AudioAssetKind kind)
         {
-            var draggingItem = GetDraggingAudioItem(kind);
-            if (draggingItem is null)
-            {
-                return;
-            }
-
-            var gridView = GetAudioGridView(kind);
-            var currentIndex = gridView.Items.IndexOf(draggingItem);
-            var lastIndex = gridView.Items.Count - 1;
-            if (currentIndex == lastIndex)
-            {
-                return;
-            }
-
-            gridView.Items.Remove(draggingItem);
-            gridView.Items.Add(draggingItem);
-        }
-
-        private void MoveDraggingCharacterClothToEnd()
-        {
-            if (_draggingCharacterClothItem is null)
-            {
-                return;
-            }
-
-            var currentIndex = CharacterClothGridView.Items.IndexOf(_draggingCharacterClothItem);
-            var lastIndex = CharacterClothGridView.Items.Count - 1;
-            if (currentIndex == lastIndex)
-            {
-                return;
-            }
-
-            CharacterClothGridView.Items.Remove(_draggingCharacterClothItem);
-            CharacterClothGridView.Items.Add(_draggingCharacterClothItem);
-        }
-
-        private void MoveDraggingCharacterFaceToEnd()
-        {
-            if (_draggingCharacterFaceItem is null)
-            {
-                return;
-            }
-
-            var currentIndex = CharacterFaceGridView.Items.IndexOf(_draggingCharacterFaceItem);
-            var lastIndex = CharacterFaceGridView.Items.Count - 1;
-            if (currentIndex == lastIndex)
-            {
-                return;
-            }
-
-            CharacterFaceGridView.Items.Remove(_draggingCharacterFaceItem);
-            CharacterFaceGridView.Items.Add(_draggingCharacterFaceItem);
-        }
-
-        private void MoveDraggingCharacterAdornToEnd()
-        {
-            if (_draggingCharacterAdornItem is null)
-            {
-                return;
-            }
-
-            var currentIndex = CharacterAdornGridView.Items.IndexOf(_draggingCharacterAdornItem);
-            var lastIndex = CharacterAdornGridView.Items.Count - 1;
-            if (currentIndex == lastIndex)
-            {
-                return;
-            }
-
-            CharacterAdornGridView.Items.Remove(_draggingCharacterAdornItem);
-            CharacterAdornGridView.Items.Add(_draggingCharacterAdornItem);
+            MoveGridViewItemToEnd(GetAudioGridView(kind), GetDraggingAudioItem(kind));
         }
 
         private async void BackgroundImagesDropZone_Drop(object sender, DragEventArgs e)
@@ -12126,7 +7775,7 @@ namespace GalExcleTools
                 var droppedImagePaths = storageItems
                     .OfType<StorageFile>()
                     .Select(file => file.Path)
-                    .Where(path => ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+                    .Where(BackgroundImageService.IsValidSourcePath)
                     .ToList();
 
                 var importedCount = await ImportBackgroundImagesAsync(droppedImagePaths);
@@ -12151,20 +7800,7 @@ namespace GalExcleTools
 
         private void MoveDraggingBackgroundImageToEnd()
         {
-            if (_draggingBackgroundImageItem is null)
-            {
-                return;
-            }
-
-            var currentIndex = BackgroundImagesGridView.Items.IndexOf(_draggingBackgroundImageItem);
-            var lastIndex = BackgroundImagesGridView.Items.Count - 1;
-            if (currentIndex == lastIndex)
-            {
-                return;
-            }
-
-            BackgroundImagesGridView.Items.Remove(_draggingBackgroundImageItem);
-            BackgroundImagesGridView.Items.Add(_draggingBackgroundImageItem);
+            MoveGridViewItemToEnd(BackgroundImagesGridView, _draggingBackgroundImageItem);
         }
 
         private bool IsPointerInTrailingBlankArea(Windows.Foundation.Point pointerPosition, GridViewItem draggingItem)
@@ -12205,51 +7841,23 @@ namespace GalExcleTools
                 return null;
             }
 
-            var parsed = ParseBackgroundImageFileName(imagePath);
-            var remarkBox = new TextBox
-            {
-                Width = 360,
-                Header = "备注",
-                Text = parsed.Remark,
-                PlaceholderText = "例如：我是备注"
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = "设置背景图备注",
-                Content = remarkBox,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var parsed = BackgroundImageService.ParseFileName(imagePath);
+            var remarkInput = await _dialogService.PromptTextAsync(new TextInputDialogRequest(
+                "设置背景图备注",
+                "备注",
+                parsed.Remark,
+                "例如：我是备注"));
+            if (remarkInput is null)
             {
                 return null;
             }
 
-            var orderedPaths = GetBackgroundImagePaths(GetBackgroundFolderPath(_currentAssetLibrary));
-            var entries = orderedPaths
-                .Select(path =>
-                {
-                    var entry = ParseBackgroundImageFileName(path);
-                    return PathsEqual(path, imagePath)
-                        ? entry with { Remark = SanitizeRemark(remarkBox.Text) }
-                        : entry;
-                })
-                .ToList();
-
+            var folderPath = GetBackgroundFolderPath(_currentAssetLibrary);
+            string? updatedPath;
             _isNormalizingBackgroundImages = true;
             try
             {
-                await RenameBackgroundEntriesAsync(entries);
+                updatedPath = _backgroundImageService.UpdateRemark(folderPath, imagePath, remarkInput);
             }
             finally
             {
@@ -12260,21 +7868,7 @@ namespace GalExcleTools
             RefreshBackgroundImageCards(_currentAssetLibrary);
             RequestDelayedRefresh();
             AppendLog(LogKind.User, $"已设置背景图备注：{Path.GetFileName(imagePath)}");
-            return entries
-                .Select((entry, index) =>
-                {
-                    var folderPath = Path.GetDirectoryName(entry.Path)!;
-                    var digitCount = Math.Max(2, (entries.Count - 1).ToString().Length);
-                    var baseName = $"BG{index.ToString().PadLeft(digitCount, '0')}";
-                    var fileName = string.IsNullOrWhiteSpace(entry.Remark)
-                        ? $"{baseName}.png"
-                        : $"{baseName}_{entry.Remark}.png";
-                    return Path.Combine(folderPath, fileName);
-                })
-                .FirstOrDefault(path => string.Equals(
-                    Path.GetFileNameWithoutExtension(path).Split('_')[0],
-                    Path.GetFileNameWithoutExtension(imagePath).Split('_')[0],
-                    StringComparison.OrdinalIgnoreCase));
+            return updatedPath;
         }
 
         private async Task<bool> DeleteBackgroundImageAsync(string imagePath)
@@ -12284,35 +7878,21 @@ namespace GalExcleTools
                 return false;
             }
 
-            var dialog = new ContentDialog
-            {
-                Title = "删除背景图",
-                Content = $"确定删除 {Path.GetFileName(imagePath)} 吗？",
-                PrimaryButtonText = "删除",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                PrimaryButtonStyle = CreateDestructivePrimaryButtonStyle(),
-                XamlRoot = Content.XamlRoot
-            };
-
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                "删除背景图",
+                $"确定删除 {Path.GetFileName(imagePath)} 吗？",
+                "删除",
+                "取消",
+                PrimaryButtonStyle: CreateDestructivePrimaryButtonStyle()));
+            if (!confirmed)
             {
                 return false;
             }
 
-            File.Delete(imagePath);
-
             _isNormalizingBackgroundImages = true;
             try
             {
-                await NormalizeBackgroundImagesAsync(GetBackgroundFolderPath(_currentAssetLibrary));
+                _backgroundImageService.DeleteAndNormalize(GetBackgroundFolderPath(_currentAssetLibrary), imagePath);
             }
             finally
             {
@@ -12326,6 +7906,25 @@ namespace GalExcleTools
             return true;
         }
 
+        private async Task<string?> PromptRemarkAsync(string title, string currentRemark, string placeholderText)
+        {
+            return await _dialogService.PromptTextAsync(new TextInputDialogRequest(
+                title,
+                "备注",
+                currentRemark,
+                placeholderText));
+        }
+
+        private async Task<bool> ConfirmDeleteAsync(string title, string message)
+        {
+            return await _dialogService.ConfirmAsync(new DialogRequest(
+                title,
+                message,
+                "删除",
+                "取消",
+                PrimaryButtonStyle: CreateDestructivePrimaryButtonStyle()));
+        }
+
         private async Task<string?> SetCharacterClothRemarkAsync(string clothPath)
         {
             if (_currentCharacter is null || !File.Exists(clothPath))
@@ -12335,53 +7934,26 @@ namespace GalExcleTools
 
             var restoreHorizontalOffset = CharacterDetailScrollViewer.HorizontalOffset;
             var restoreVerticalOffset = CharacterDetailScrollViewer.VerticalOffset;
-            var parsed = ParseCharacterLayerFileName(clothPath, CharacterLayerKind.Cloth, string.Empty);
-            var remarkBox = new TextBox
-            {
-                Width = 360,
-                Header = "备注",
-                Text = parsed.Remark,
-                PlaceholderText = "例如：校服"
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = "设置服装备注",
-                Content = remarkBox,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var parsed = CharacterLayerAssetService.ParseFileName(clothPath, CharacterLayerKind.Cloth, string.Empty);
+            var remark = await PromptRemarkAsync("设置服装备注", parsed.Remark, "例如：校服");
+            if (remark is null)
             {
                 return null;
             }
 
-            var clothFolderPath = Path.Combine(_currentCharacter.Path, "DN_Cloth");
-            var orderedPaths = GetCharacterLayerImagePaths(clothFolderPath);
-            var updatedEntries = orderedPaths
-                .Select(path =>
-                {
-                    var entry = ParseCharacterLayerFileName(path, CharacterLayerKind.Cloth, string.Empty);
-                    return PathsEqual(path, clothPath)
-                        ? entry with { Remark = SanitizeRemark(remarkBox.Text) }
-                        : entry;
-                })
-                .ToList();
-            var updatedIndex = orderedPaths.FindIndex(path => PathsEqual(path, clothPath));
+            var clothFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Cloth);
+            var updatedEntries = _characterLayerAssetService.CreateRemarkEntries(
+                clothFolderPath,
+                clothPath,
+                CharacterLayerKind.Cloth,
+                string.Empty,
+                remark);
+            var updatedIndex = _characterLayerAssetService.FindEntryIndex(updatedEntries, clothPath);
 
             _isNormalizingCharacterClothes = true;
             try
             {
-                RenameCharacterLayerEntries(updatedEntries, CharacterLayerKind.Cloth, _currentCharacter.Code);
+                _characterLayerAssetService.RenameEntries(updatedEntries, CharacterLayerKind.Cloth, _currentCharacter.Code);
             }
             finally
             {
@@ -12394,7 +7966,7 @@ namespace GalExcleTools
             }
 
             var updatedPath = updatedIndex >= 0
-                ? GetCharacterLayerTargetPath(updatedEntries, updatedIndex, CharacterLayerKind.Cloth, _currentCharacter.Code)
+                ? CharacterLayerAssetService.GetTargetPath(updatedEntries, updatedIndex, CharacterLayerKind.Cloth, _currentCharacter.Code)
                 : null;
             ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
             RequestDelayedRefresh();
@@ -12409,37 +7981,21 @@ namespace GalExcleTools
                 return false;
             }
 
-            var dialog = new ContentDialog
-            {
-                Title = "删除服装",
-                Content = $"确定删除 {Path.GetFileName(clothPath)} 吗？",
-                PrimaryButtonText = "删除",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                PrimaryButtonStyle = CreateDestructivePrimaryButtonStyle(),
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var confirmed = await ConfirmDeleteAsync("删除服装", $"确定删除 {Path.GetFileName(clothPath)} 吗？");
+            if (!confirmed)
             {
                 return false;
             }
 
-            File.Delete(clothPath);
             _isNormalizingCharacterClothes = true;
             try
             {
-                NormalizeCharacterLayerFiles(
-                    Path.Combine(_currentCharacter.Path, "DN_Cloth"),
+                var entries = _characterLayerAssetService.DeleteFileAndCreateRemainingEntries(
+                    clothPath,
+                    CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Cloth),
                     CharacterLayerKind.Cloth,
-                    string.Empty,
-                    _currentCharacter.Code);
+                    string.Empty);
+                _characterLayerAssetService.RenameEntries(entries, CharacterLayerKind.Cloth, _currentCharacter.Code);
             }
             finally
             {
@@ -12466,53 +8022,26 @@ namespace GalExcleTools
 
             var restoreHorizontalOffset = CharacterDetailScrollViewer.HorizontalOffset;
             var restoreVerticalOffset = CharacterDetailScrollViewer.VerticalOffset;
-            var parsed = ParseCharacterLayerFileName(facePath, CharacterLayerKind.Face, string.Empty);
-            var remarkBox = new TextBox
-            {
-                Width = 360,
-                Header = "备注",
-                Text = parsed.Remark,
-                PlaceholderText = "例如：微笑"
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = "设置表情备注",
-                Content = remarkBox,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var parsed = CharacterLayerAssetService.ParseFileName(facePath, CharacterLayerKind.Face, string.Empty);
+            var remark = await PromptRemarkAsync("设置表情备注", parsed.Remark, "例如：微笑");
+            if (remark is null)
             {
                 return null;
             }
 
-            var faceFolderPath = Path.Combine(_currentCharacter.Path, "FC_Face");
-            var orderedPaths = GetCharacterLayerImagePaths(faceFolderPath);
-            var updatedEntries = orderedPaths
-                .Select(path =>
-                {
-                    var entry = ParseCharacterLayerFileName(path, CharacterLayerKind.Face, string.Empty);
-                    return PathsEqual(path, facePath)
-                        ? entry with { Remark = SanitizeRemark(remarkBox.Text) }
-                        : entry;
-                })
-                .ToList();
-            var updatedIndex = orderedPaths.FindIndex(path => PathsEqual(path, facePath));
+            var faceFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Face);
+            var updatedEntries = _characterLayerAssetService.CreateRemarkEntries(
+                faceFolderPath,
+                facePath,
+                CharacterLayerKind.Face,
+                string.Empty,
+                remark);
+            var updatedIndex = _characterLayerAssetService.FindEntryIndex(updatedEntries, facePath);
 
             _isNormalizingCharacterFaces = true;
             try
             {
-                RenameCharacterFaceEntriesAndUpdateMeta(updatedEntries);
+                _characterLayerAssetService.RenameEntriesAndScopeMeta(updatedEntries, CharacterLayerKind.Face);
             }
             finally
             {
@@ -12525,7 +8054,7 @@ namespace GalExcleTools
             }
 
             var updatedPath = updatedIndex >= 0
-                ? GetCharacterLayerTargetPath(updatedEntries, updatedIndex, CharacterLayerKind.Face)
+                ? CharacterLayerAssetService.GetTargetPath(updatedEntries, updatedIndex, CharacterLayerKind.Face)
                 : null;
             ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
             RequestDelayedRefresh();
@@ -12540,39 +8069,24 @@ namespace GalExcleTools
                 return false;
             }
 
-            var dialog = new ContentDialog
-            {
-                Title = "删除表情",
-                Content = $"确定删除 {Path.GetFileName(facePath)} 吗？",
-                PrimaryButtonText = "删除",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                PrimaryButtonStyle = CreateDestructivePrimaryButtonStyle(),
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var confirmed = await ConfirmDeleteAsync("删除表情", $"确定删除 {Path.GetFileName(facePath)} 吗？");
+            if (!confirmed)
             {
                 return false;
             }
 
-            var faceFolderPath = Path.Combine(_currentCharacter.Path, "FC_Face");
-            RemoveCharacterFaceScopeEntry(faceFolderPath, Path.GetFileName(facePath));
-            File.Delete(facePath);
+            var faceFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Face);
+            _characterLayerAssetService.RemoveScopeEntry(faceFolderPath, CharacterLayerKind.Face, Path.GetFileName(facePath));
 
             _isNormalizingCharacterFaces = true;
             try
             {
-                var entries = GetCharacterLayerImagePaths(faceFolderPath)
-                    .Select(path => ParseCharacterLayerFileName(path, CharacterLayerKind.Face, string.Empty))
-                    .ToList();
-                RenameCharacterFaceEntriesAndUpdateMeta(entries);
+                var entries = _characterLayerAssetService.DeleteFileAndCreateRemainingEntries(
+                    facePath,
+                    faceFolderPath,
+                    CharacterLayerKind.Face,
+                    string.Empty);
+                _characterLayerAssetService.RenameEntriesAndScopeMeta(entries, CharacterLayerKind.Face);
             }
             finally
             {
@@ -12597,12 +8111,11 @@ namespace GalExcleTools
                 return;
             }
 
-            var faceFolderPath = Path.Combine(_currentCharacter.Path, "FC_Face");
+            var faceFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Face);
             await SetCharacterLayerAvailabilityAsync(
                 facePath,
                 faceFolderPath,
-                ReadCharacterFaceScopeMeta,
-                WriteCharacterFaceScopeMeta,
+                CharacterLayerKind.Face,
                 "表情可用范围",
                 "表情");
         }
@@ -12610,8 +8123,7 @@ namespace GalExcleTools
         private async Task SetCharacterLayerAvailabilityAsync(
             string layerPath,
             string layerFolderPath,
-            Func<string, CharacterLayerScopeMeta> readMeta,
-            Action<string, CharacterLayerScopeMeta> writeMeta,
+            CharacterLayerKind layerKind,
             string title,
             string logLabel)
         {
@@ -12620,118 +8132,42 @@ namespace GalExcleTools
                 return;
             }
 
-            var clothFolderPath = Path.Combine(_currentCharacter.Path, "DN_Cloth");
-            var clothPaths = GetCharacterLayerImagePaths(clothFolderPath);
+            var clothFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Cloth);
+            var clothPaths = CharacterLayerAssetService.GetImagePaths(clothFolderPath);
             if (clothPaths.Count == 0)
             {
                 AppendLog(LogKind.Warning, $"还没有服装，暂时无法设置{logLabel}可用范围。");
                 return;
             }
 
-            var meta = readMeta(layerFolderPath);
+            var meta = _characterLayerAssetService.ReadScopeMeta(layerFolderPath, layerKind);
             var layerFileName = Path.GetFileName(layerPath);
             var existingEntry = meta.Entries.TryGetValue(layerFileName, out var savedEntry)
                 ? savedEntry
                 : new CharacterLayerScopeEntry { UseAllCostumes = true };
-            var selectedHashes = existingEntry.CostumeHashes.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var checkBoxes = new List<(CheckBox CheckBox, string CostumeHash)>();
-            var cards = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 18,
-                Padding = new Thickness(8, 0, 8, 8)
-            };
+            var dialogContent = CharacterDialogContentFactory.CreateCharacterLayerAvailabilityContent(
+                clothPaths,
+                existingEntry,
+                ComputeFileHash,
+                clothPath => ThumbnailFactory.CreateThumbnail(clothPath, 120, 150, showAddIcon: false),
+                PlaySelectionSound);
 
-            foreach (var clothPath in clothPaths)
-            {
-                var costumeHash = ComputeFileHash(clothPath);
-                var checkBox = new CheckBox
-                {
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    IsChecked = existingEntry.UseAllCostumes || selectedHashes.Contains(costumeHash)
-                };
-                checkBoxes.Add((checkBox, costumeHash));
-                var card = new StackPanel
-                {
-                    Width = 132,
-                    Spacing = 8,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    Children =
-                    {
-                        CreateThumbnail(clothPath, 120, 150, showAddIcon: false),
-                        new TextBlock
-                        {
-                            Text = Path.GetFileNameWithoutExtension(clothPath),
-                            Width = 132,
-                            TextAlignment = TextAlignment.Center,
-                            TextTrimming = TextTrimming.CharacterEllipsis,
-                            HorizontalAlignment = HorizontalAlignment.Center
-                        },
-                        checkBox
-                    }
-                };
-                cards.Children.Add(card);
-            }
-
-            var dialogContent = new ScrollViewer
-            {
-                MaxWidth = 640,
-                MaxHeight = 430,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollMode = ScrollMode.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                VerticalScrollMode = ScrollMode.Disabled,
-                Content = cards
-            };
-            dialogContent.PointerWheelChanged += (_, args) =>
-            {
-                var delta = args.GetCurrentPoint(dialogContent).Properties.MouseWheelDelta;
-                if (delta == 0)
-                {
-                    return;
-                }
-
-                var direction = delta > 0 ? -1 : 1;
-                var targetOffset = Math.Clamp(
-                    dialogContent.HorizontalOffset + 72 * direction,
-                    0,
-                    dialogContent.ScrollableWidth);
-                dialogContent.ChangeView(targetOffset, null, null, true);
-                args.Handled = true;
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = dialogContent,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var result = await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                title,
+                dialogContent.Content,
+                "确定",
+                "取消"));
+            if (result != DialogResultKind.Primary)
             {
                 return;
             }
 
-            var checkedHashes = checkBoxes
-                .Where(pair => pair.CheckBox.IsChecked == true)
-                .Select(pair => pair.CostumeHash)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            meta.Entries[layerFileName] = new CharacterLayerScopeEntry
+            var checkedHashes = dialogContent.ReadCheckedHashes();
+            _characterLayerAssetService.SaveScopeEntry(layerFolderPath, layerKind, layerFileName, new CharacterLayerScopeEntry
             {
                 UseAllCostumes = checkedHashes.Count == clothPaths.Count,
                 CostumeHashes = checkedHashes.Count == clothPaths.Count ? [] : checkedHashes
-            };
-            writeMeta(layerFolderPath, meta);
+            });
             await UpdateCharacterLayerPreviewAsync();
             AppendLog(LogKind.User, $"已设置{logLabel}可用范围：{layerFileName}");
         }
@@ -12745,53 +8181,26 @@ namespace GalExcleTools
 
             var restoreHorizontalOffset = CharacterDetailScrollViewer.HorizontalOffset;
             var restoreVerticalOffset = CharacterDetailScrollViewer.VerticalOffset;
-            var parsed = ParseCharacterLayerFileName(adornPath, CharacterLayerKind.Adorn, string.Empty);
-            var remarkBox = new TextBox
-            {
-                Width = 360,
-                Header = "备注",
-                Text = parsed.Remark,
-                PlaceholderText = "例如：帽子"
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = "设置装饰备注",
-                Content = remarkBox,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var parsed = CharacterLayerAssetService.ParseFileName(adornPath, CharacterLayerKind.Adorn, string.Empty);
+            var remark = await PromptRemarkAsync("设置装饰备注", parsed.Remark, "例如：帽子");
+            if (remark is null)
             {
                 return null;
             }
 
-            var adornFolderPath = Path.Combine(_currentCharacter.Path, "AD_Adorn");
-            var orderedPaths = GetCharacterLayerImagePaths(adornFolderPath);
-            var updatedEntries = orderedPaths
-                .Select(path =>
-                {
-                    var entry = ParseCharacterLayerFileName(path, CharacterLayerKind.Adorn, string.Empty);
-                    return PathsEqual(path, adornPath)
-                        ? entry with { Remark = SanitizeRemark(remarkBox.Text) }
-                        : entry;
-                })
-                .ToList();
-            var updatedIndex = orderedPaths.FindIndex(path => PathsEqual(path, adornPath));
+            var adornFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Adorn);
+            var updatedEntries = _characterLayerAssetService.CreateRemarkEntries(
+                adornFolderPath,
+                adornPath,
+                CharacterLayerKind.Adorn,
+                string.Empty,
+                remark);
+            var updatedIndex = _characterLayerAssetService.FindEntryIndex(updatedEntries, adornPath);
 
             _isNormalizingCharacterAdorns = true;
             try
             {
-                RenameCharacterAdornEntriesAndUpdateMeta(updatedEntries);
+                _characterLayerAssetService.RenameEntriesAndScopeMeta(updatedEntries, CharacterLayerKind.Adorn);
             }
             finally
             {
@@ -12804,7 +8213,7 @@ namespace GalExcleTools
             }
 
             var updatedPath = updatedIndex >= 0
-                ? GetCharacterLayerTargetPath(updatedEntries, updatedIndex, CharacterLayerKind.Adorn)
+                ? CharacterLayerAssetService.GetTargetPath(updatedEntries, updatedIndex, CharacterLayerKind.Adorn)
                 : null;
             ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
             RequestDelayedRefresh();
@@ -12819,39 +8228,24 @@ namespace GalExcleTools
                 return false;
             }
 
-            var dialog = new ContentDialog
-            {
-                Title = "删除装饰",
-                Content = $"确定删除 {Path.GetFileName(adornPath)} 吗？",
-                PrimaryButtonText = "删除",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                PrimaryButtonStyle = CreateDestructivePrimaryButtonStyle(),
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var confirmed = await ConfirmDeleteAsync("删除装饰", $"确定删除 {Path.GetFileName(adornPath)} 吗？");
+            if (!confirmed)
             {
                 return false;
             }
 
-            var adornFolderPath = Path.Combine(_currentCharacter.Path, "AD_Adorn");
-            RemoveCharacterAdornScopeEntry(adornFolderPath, Path.GetFileName(adornPath));
-            File.Delete(adornPath);
+            var adornFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Adorn);
+            _characterLayerAssetService.RemoveScopeEntry(adornFolderPath, CharacterLayerKind.Adorn, Path.GetFileName(adornPath));
 
             _isNormalizingCharacterAdorns = true;
             try
             {
-                var entries = GetCharacterLayerImagePaths(adornFolderPath)
-                    .Select(path => ParseCharacterLayerFileName(path, CharacterLayerKind.Adorn, string.Empty))
-                    .ToList();
-                RenameCharacterAdornEntriesAndUpdateMeta(entries);
+                var entries = _characterLayerAssetService.DeleteFileAndCreateRemainingEntries(
+                    adornPath,
+                    adornFolderPath,
+                    CharacterLayerKind.Adorn,
+                    string.Empty);
+                _characterLayerAssetService.RenameEntriesAndScopeMeta(entries, CharacterLayerKind.Adorn);
             }
             finally
             {
@@ -12876,12 +8270,11 @@ namespace GalExcleTools
                 return;
             }
 
-            var adornFolderPath = Path.Combine(_currentCharacter.Path, "AD_Adorn");
+            var adornFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Adorn);
             await SetCharacterLayerAvailabilityAsync(
                 adornPath,
                 adornFolderPath,
-                ReadCharacterAdornScopeMeta,
-                WriteCharacterAdornScopeMeta,
+                CharacterLayerKind.Adorn,
                 "装饰可用范围",
                 "装饰");
         }
@@ -12898,51 +8291,23 @@ namespace GalExcleTools
                 return null;
             }
 
-            var parsed = ParseAudioFileName(kind, musicPath);
-            var remarkBox = new TextBox
-            {
-                Width = 360,
-                Header = "备注",
-                Text = parsed.Remark,
-                PlaceholderText = kind == AudioAssetKind.Music ? "例如：主题曲" : "例如：雨声"
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = $"设置{GetAudioDisplayName(kind)}备注",
-                Content = remarkBox,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var parsed = AudioAssetService.ParseFileName(kind, musicPath);
+            var remarkInput = await _dialogService.PromptTextAsync(new TextInputDialogRequest(
+                $"设置{AudioAssetService.GetDisplayName(kind)}备注",
+                "备注",
+                parsed.Remark,
+                kind == AudioAssetKind.Music ? "例如：主题曲" : "例如：雨声"));
+            if (remarkInput is null)
             {
                 return null;
             }
 
-            var orderedPaths = GetAudioFilePaths(GetAudioFolderPath(_currentAssetLibrary, kind));
-            var entries = orderedPaths
-                .Select(path =>
-                {
-                    var entry = ParseAudioFileName(kind, path);
-                    return PathsEqual(path, musicPath)
-                        ? entry with { Remark = SanitizeRemark(remarkBox.Text) }
-                        : entry;
-                })
-                .ToList();
-
+            var folderPath = GetAudioFolderPath(_currentAssetLibrary, kind);
+            string? renamedPath;
             SetAudioNormalizing(kind, true);
             try
             {
-                await RenameAudioEntriesAsync(kind, entries);
+                renamedPath = _audioAssetService.UpdateRemark(kind, folderPath, musicPath, remarkInput);
             }
             finally
             {
@@ -12952,8 +8317,8 @@ namespace GalExcleTools
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshAudioCards(_currentAssetLibrary, kind);
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已设置{GetAudioDisplayName(kind)}备注：{Path.GetFileName(musicPath)}");
-            return FindRenamedAudioPath(kind, entries, musicPath);
+            AppendLog(LogKind.User, $"已设置{AudioAssetService.GetDisplayName(kind)}备注：{Path.GetFileName(musicPath)}");
+            return renamedPath;
         }
 
         private async Task<bool> DeleteMusicAsync(string musicPath)
@@ -12968,34 +8333,21 @@ namespace GalExcleTools
                 return false;
             }
 
-            var dialog = new ContentDialog
-            {
-                Title = $"删除{GetAudioDisplayName(kind)}",
-                Content = $"确定删除 {Path.GetFileName(musicPath)} 吗？",
-                PrimaryButtonText = "删除",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                PrimaryButtonStyle = CreateDestructivePrimaryButtonStyle(),
-                XamlRoot = Content.XamlRoot
-            };
-            dialog.RightTapped += (_, args) =>
-            {
-                dialog.Hide();
-                args.Handled = true;
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                $"删除{AudioAssetService.GetDisplayName(kind)}",
+                $"确定删除 {Path.GetFileName(musicPath)} 吗？",
+                "删除",
+                "取消",
+                PrimaryButtonStyle: CreateDestructivePrimaryButtonStyle()));
+            if (!confirmed)
             {
                 return false;
             }
 
-            File.Delete(musicPath);
-
             SetAudioNormalizing(kind, true);
             try
             {
-                await NormalizeAudioFilesAsync(kind, GetAudioFolderPath(_currentAssetLibrary, kind));
+                _audioAssetService.DeleteAndNormalize(kind, GetAudioFolderPath(_currentAssetLibrary, kind), musicPath);
             }
             finally
             {
@@ -13005,7 +8357,7 @@ namespace GalExcleTools
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshAudioCards(_currentAssetLibrary, kind);
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已删除{GetAudioDisplayName(kind)}：{Path.GetFileName(musicPath)}");
+            AppendLog(LogKind.User, $"已删除{AudioAssetService.GetDisplayName(kind)}：{Path.GetFileName(musicPath)}");
             return true;
         }
 
@@ -13016,119 +8368,8 @@ namespace GalExcleTools
 
         private async Task NormalizeAudioFilesAsync(AudioAssetKind kind, string musicFolderPath, IReadOnlyList<string>? orderedPaths = null)
         {
-            var sourcePaths = orderedPaths is null
-                ? Directory
-                    .EnumerateFiles(musicFolderPath)
-                    .Where(path => MusicExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                    .OrderBy(Path.GetFileName)
-                    .ToList()
-                : orderedPaths
-                    .Where(path => MusicExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                    .ToList();
-
-            var entries = sourcePaths
-                .Select(path => ParseAudioFileName(kind, path))
-                .ToList();
-
-            await RenameAudioEntriesAsync(kind, entries);
-        }
-
-        private static Task RenameMusicEntriesAsync(IReadOnlyList<MusicEntry> entries)
-        {
-            return RenameAudioEntriesAsync(AudioAssetKind.Music, entries);
-        }
-
-        private static Task RenameAudioEntriesAsync(AudioAssetKind kind, IReadOnlyList<MusicEntry> entries)
-        {
-            if (entries.Count == 0)
-            {
-                return Task.CompletedTask;
-            }
-
-            var digitCount = Math.Max(2, (entries.Count - 1).ToString().Length);
-            var plannedMoves = entries
-                .Select((entry, index) =>
-                {
-                    var folderPath = Path.GetDirectoryName(entry.Path)!;
-                    var baseName = $"{GetAudioPrefix(kind)}{index.ToString().PadLeft(digitCount, '0')}";
-                    var fileName = string.IsNullOrWhiteSpace(entry.Remark)
-                        ? $"{baseName}.wav"
-                        : $"{baseName}_{entry.Remark}.wav";
-                    return new MusicRename(entry, Path.Combine(folderPath, fileName));
-                })
-                .ToList();
-
-            if (plannedMoves.All(move => PathsExactlyEqual(move.Entry.Path, move.TargetPath)))
-            {
-                return Task.CompletedTask;
-            }
-
-            var tempMoves = plannedMoves
-                .Select(move =>
-                {
-                    var tempPath = Path.Combine(Path.GetDirectoryName(move.Entry.Path)!, $"__{GetAudioPrefix(kind).ToLowerInvariant()}_rename_{Guid.NewGuid():N}.wav");
-                    File.Move(move.Entry.Path, tempPath, overwrite: true);
-                    return move with { Entry = move.Entry with { Path = tempPath } };
-                })
-                .ToList();
-
-            foreach (var move in tempMoves)
-            {
-                File.Move(move.Entry.Path, move.TargetPath, overwrite: true);
-            }
-
-            return Task.CompletedTask;
-        }
-
-        private static List<string> GetMusicFilePaths(string musicFolderPath)
-        {
-            return GetAudioFilePaths(musicFolderPath);
-        }
-
-        private static List<string> GetAudioFilePaths(string musicFolderPath)
-        {
-            return Directory
-                .EnumerateFiles(musicFolderPath, "*.wav")
-                .OrderBy(Path.GetFileName)
-                .ToList();
-        }
-
-        private static MusicEntry ParseMusicFileName(string musicPath)
-        {
-            return ParseAudioFileName(AudioAssetKind.Music, musicPath);
-        }
-
-        private static MusicEntry ParseAudioFileName(AudioAssetKind kind, string musicPath)
-        {
-            var name = Path.GetFileNameWithoutExtension(musicPath);
-            var match = Regex.Match(name, $"^{Regex.Escape(GetAudioPrefix(kind))}\\d+(?:_(?<remark>.+))?$", RegexOptions.IgnoreCase);
-            return new MusicEntry(
-                musicPath,
-                match.Success ? match.Groups["remark"].Value : string.Empty);
-        }
-
-        private static string? FindRenamedMusicPath(IReadOnlyList<MusicEntry> entries, string originalPath)
-        {
-            return FindRenamedAudioPath(AudioAssetKind.Music, entries, originalPath);
-        }
-
-        private static string? FindRenamedAudioPath(AudioAssetKind kind, IReadOnlyList<MusicEntry> entries, string originalPath)
-        {
-            var originalIndex = entries
-                .Select((entry, index) => new { entry, index })
-                .FirstOrDefault(pair => PathsEqual(pair.entry.Path, originalPath))?.index;
-            if (originalIndex is null)
-            {
-                return null;
-            }
-
-            var digitCount = Math.Max(2, (entries.Count - 1).ToString().Length);
-            var entryAtIndex = entries[originalIndex.Value];
-            var baseName = $"{GetAudioPrefix(kind)}{originalIndex.Value.ToString().PadLeft(digitCount, '0')}";
-            var fileName = string.IsNullOrWhiteSpace(entryAtIndex.Remark)
-                ? $"{baseName}.wav"
-                : $"{baseName}_{entryAtIndex.Remark}.wav";
-            return Path.Combine(Path.GetDirectoryName(entryAtIndex.Path)!, fileName);
+            _audioAssetService.NormalizeFiles(kind, musicFolderPath, orderedPaths);
+            await Task.CompletedTask;
         }
 
         private void ShowBackgroundImageViewerPage(string imagePath)
@@ -13139,12 +8380,10 @@ namespace GalExcleTools
             }
 
             _viewingBackgroundImagePath = imagePath;
-            _viewingCharacterClothPath = null;
-            _viewingCharacterFacePath = null;
-            _viewingCharacterAdornPath = null;
+            _viewingCharacterLayer = null;
             BackgroundImageViewerTabTitleText.Text = Path.GetFileNameWithoutExtension(imagePath);
             ResetBackgroundImageViewerTransform();
-            _ = LoadThumbnailFromFileAsync(BackgroundImageViewerImage, imagePath);
+            _ = ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, imagePath);
 
             WorkbenchPage.Visibility = Visibility.Collapsed;
             ProjectDetailPage.Visibility = Visibility.Collapsed;
@@ -13161,21 +8400,19 @@ namespace GalExcleTools
             AppendLog(LogKind.User, $"打开背景图查看：{Path.GetFileName(imagePath)}");
         }
 
-        private void ShowCharacterClothViewerPage(string clothPath)
+        private void ShowCharacterLayerViewerPage(string layerPath, CharacterLayerKind layerKind)
         {
-            if (_currentCharacter is null || !File.Exists(clothPath))
+            if (_currentCharacter is null || !File.Exists(layerPath))
             {
                 return;
             }
 
             _viewingBackgroundImagePath = null;
-            _viewingCharacterClothPath = clothPath;
-            _viewingCharacterFacePath = null;
-            _viewingCharacterAdornPath = null;
-            _selectedCharacterClothPath = clothPath;
-            BackgroundImageViewerTabTitleText.Text = $"服装 {Path.GetFileNameWithoutExtension(clothPath)}";
+            _viewingCharacterLayer = new CharacterLayerViewerState(layerKind, layerPath);
+            SetSelectedCharacterLayerPath(layerKind, layerPath);
+            UpdateCharacterLayerViewerTitle(layerKind, layerPath);
             ResetBackgroundImageViewerTransform();
-            _ = LoadThumbnailFromFileAsync(BackgroundImageViewerImage, clothPath);
+            _ = ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, layerPath);
             _ = UpdateCharacterLayerPreviewAsync();
 
             WorkbenchPage.Visibility = Visibility.Collapsed;
@@ -13191,90 +8428,74 @@ namespace GalExcleTools
             UnrealSyncPage.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerCloseButton.Focus(FocusState.Programmatic);
-            AppendLog(LogKind.User, $"打开服装查看：{Path.GetFileName(clothPath)}");
+            AppendLog(LogKind.User, $"打开{GetCharacterLayerDisplayName(layerKind)}查看：{Path.GetFileName(layerPath)}");
         }
 
-        private void ShowCharacterFaceViewerPage(string facePath)
+        private void SetSelectedCharacterLayerPath(CharacterLayerKind layerKind, string layerPath)
         {
-            if (_currentCharacter is null || !File.Exists(facePath))
+            switch (layerKind)
+            {
+                case CharacterLayerKind.Cloth:
+                    _selectedCharacterClothPath = layerPath;
+                    break;
+                case CharacterLayerKind.Face:
+                    _selectedCharacterFacePath = layerPath;
+                    break;
+                case CharacterLayerKind.Adorn:
+                    _selectedCharacterAdornPath = layerPath;
+                    break;
+            }
+        }
+
+        private void UpdateCharacterLayerViewerTitle(CharacterLayerKind layerKind, string layerPath)
+        {
+            BackgroundImageViewerTabTitleText.Text = $"{GetCharacterLayerDisplayName(layerKind)} {Path.GetFileNameWithoutExtension(layerPath)}";
+        }
+
+        private async Task SetViewingCharacterLayerRemarkAsync(CharacterLayerKind layerKind, string layerPath)
+        {
+            var updatedPath = layerKind switch
+            {
+                CharacterLayerKind.Cloth => await SetCharacterClothRemarkAsync(layerPath),
+                CharacterLayerKind.Face => await SetCharacterFaceRemarkAsync(layerPath),
+                CharacterLayerKind.Adorn => await SetCharacterAdornRemarkAsync(layerPath),
+                _ => null
+            };
+
+            if (string.IsNullOrWhiteSpace(updatedPath) || !File.Exists(updatedPath))
             {
                 return;
             }
 
-            _viewingBackgroundImagePath = null;
-            _viewingCharacterClothPath = null;
-            _viewingCharacterFacePath = facePath;
-            _viewingCharacterAdornPath = null;
-            _selectedCharacterFacePath = facePath;
-            BackgroundImageViewerTabTitleText.Text = $"表情 {Path.GetFileNameWithoutExtension(facePath)}";
-            ResetBackgroundImageViewerTransform();
-            _ = LoadThumbnailFromFileAsync(BackgroundImageViewerImage, facePath);
-            _ = UpdateCharacterLayerPreviewAsync();
-
-            WorkbenchPage.Visibility = Visibility.Collapsed;
-            ProjectDetailPage.Visibility = Visibility.Collapsed;
-            StoryEditorPage.Visibility = Visibility.Collapsed;
-            AssetLibraryPage.Visibility = Visibility.Collapsed;
-            AssetLibraryDetailPage.Visibility = Visibility.Collapsed;
-            CharacterDetailPage.Visibility = Visibility.Collapsed;
-            BackgroundImageViewerPage.Visibility = Visibility.Visible;
-            MusicPlayerPage.Visibility = Visibility.Collapsed;
-            CreateProjectPage.Visibility = Visibility.Collapsed;
-            CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
-            SettingsPage.Visibility = Visibility.Collapsed;
-            BackgroundImageViewerCloseButton.Focus(FocusState.Programmatic);
-            AppendLog(LogKind.User, $"打开表情查看：{Path.GetFileName(facePath)}");
+            _viewingCharacterLayer = new CharacterLayerViewerState(layerKind, updatedPath);
+            SetSelectedCharacterLayerPath(layerKind, updatedPath);
+            UpdateCharacterLayerViewerTitle(layerKind, updatedPath);
+            await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, updatedPath);
         }
 
-        private void ShowCharacterAdornViewerPage(string adornPath)
+        private async Task<bool> DeleteViewingCharacterLayerAsync(CharacterLayerKind layerKind, string layerPath)
         {
-            if (_currentCharacter is null || !File.Exists(adornPath))
+            return layerKind switch
             {
-                return;
-            }
-
-            _viewingBackgroundImagePath = null;
-            _viewingCharacterClothPath = null;
-            _viewingCharacterFacePath = null;
-            _viewingCharacterAdornPath = adornPath;
-            _selectedCharacterAdornPath = adornPath;
-            BackgroundImageViewerTabTitleText.Text = $"装饰 {Path.GetFileNameWithoutExtension(adornPath)}";
-            ResetBackgroundImageViewerTransform();
-            _ = LoadThumbnailFromFileAsync(BackgroundImageViewerImage, adornPath);
-            _ = UpdateCharacterLayerPreviewAsync();
-
-            WorkbenchPage.Visibility = Visibility.Collapsed;
-            ProjectDetailPage.Visibility = Visibility.Collapsed;
-            AssetLibraryPage.Visibility = Visibility.Collapsed;
-            AssetLibraryDetailPage.Visibility = Visibility.Collapsed;
-            CharacterDetailPage.Visibility = Visibility.Collapsed;
-            BackgroundImageViewerPage.Visibility = Visibility.Visible;
-            MusicPlayerPage.Visibility = Visibility.Collapsed;
-            CreateProjectPage.Visibility = Visibility.Collapsed;
-            CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
-            SettingsPage.Visibility = Visibility.Collapsed;
-            BackgroundImageViewerCloseButton.Focus(FocusState.Programmatic);
-            AppendLog(LogKind.User, $"打开装饰查看：{Path.GetFileName(adornPath)}");
+                CharacterLayerKind.Cloth => await DeleteCharacterClothAsync(layerPath),
+                CharacterLayerKind.Face => await DeleteCharacterFaceAsync(layerPath),
+                CharacterLayerKind.Adorn => await DeleteCharacterAdornAsync(layerPath),
+                _ => false
+            };
         }
 
         private void CloseBackgroundImageViewerButton_Click(object sender, RoutedEventArgs e)
         {
+            PlayNegativeSound();
             CloseBackgroundImageViewer();
         }
 
         private void CloseBackgroundImageViewer()
         {
             _isPanningBackgroundImage = false;
-            var wasViewingCharacterLayer =
-                _viewingCharacterClothPath is not null ||
-                _viewingCharacterFacePath is not null ||
-                _viewingCharacterAdornPath is not null;
+            var wasViewingCharacterLayer = _viewingCharacterLayer is not null;
             _viewingBackgroundImagePath = null;
-            _viewingCharacterClothPath = null;
-            _viewingCharacterFacePath = null;
-            _viewingCharacterAdornPath = null;
+            _viewingCharacterLayer = null;
             BackgroundImageViewerImage.Source = null;
             ResetBackgroundImageViewerTransform();
 
@@ -13431,7 +8652,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var orderedPaths = GetBackgroundImagePaths(GetBackgroundFolderPath(_currentAssetLibrary));
+            var orderedPaths = BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(_currentAssetLibrary));
             var currentIndex = orderedPaths.FindIndex(path => PathsEqual(path, _viewingBackgroundImagePath));
             if (currentIndex < 0)
             {
@@ -13444,22 +8665,15 @@ namespace GalExcleTools
                 return;
             }
 
+            PlaySelectionSound();
             ShowBackgroundImageViewerPage(orderedPaths[nextIndex]);
         }
 
         private void ShowAdjacentViewerImage(int direction)
         {
-            if (_viewingCharacterClothPath is not null)
+            if (_viewingCharacterLayer is not null)
             {
-                ShowAdjacentCharacterCloth(direction);
-            }
-            else if (_viewingCharacterFacePath is not null)
-            {
-                ShowAdjacentCharacterFace(direction);
-            }
-            else if (_viewingCharacterAdornPath is not null)
-            {
-                ShowAdjacentCharacterAdorn(direction);
+                ShowAdjacentCharacterLayer(direction, _viewingCharacterLayer.Kind, _viewingCharacterLayer.Path);
             }
             else
             {
@@ -13467,15 +8681,15 @@ namespace GalExcleTools
             }
         }
 
-        private void ShowAdjacentCharacterCloth(int direction)
+        private void ShowAdjacentCharacterLayer(int direction, CharacterLayerKind layerKind, string currentPath)
         {
-            if (_currentCharacter is null || _viewingCharacterClothPath is null)
+            if (_currentCharacter is null)
             {
                 return;
             }
 
-            var orderedPaths = GetCharacterLayerImagePaths(Path.Combine(_currentCharacter.Path, "DN_Cloth"));
-            var currentIndex = orderedPaths.FindIndex(path => PathsEqual(path, _viewingCharacterClothPath));
+            var orderedPaths = CharacterLayerAssetService.GetLayerPaths(_currentCharacter, layerKind);
+            var currentIndex = orderedPaths.FindIndex(path => PathsEqual(path, currentPath));
             if (currentIndex < 0)
             {
                 return;
@@ -13487,96 +8701,16 @@ namespace GalExcleTools
                 return;
             }
 
-            ShowCharacterClothViewerPage(orderedPaths[nextIndex]);
-        }
-
-        private void ShowAdjacentCharacterFace(int direction)
-        {
-            if (_currentCharacter is null || _viewingCharacterFacePath is null)
-            {
-                return;
-            }
-
-            var orderedPaths = GetCharacterLayerImagePaths(Path.Combine(_currentCharacter.Path, "FC_Face"));
-            var currentIndex = orderedPaths.FindIndex(path => PathsEqual(path, _viewingCharacterFacePath));
-            if (currentIndex < 0)
-            {
-                return;
-            }
-
-            var nextIndex = currentIndex + direction;
-            if (nextIndex < 0 || nextIndex >= orderedPaths.Count)
-            {
-                return;
-            }
-
-            ShowCharacterFaceViewerPage(orderedPaths[nextIndex]);
-        }
-
-        private void ShowAdjacentCharacterAdorn(int direction)
-        {
-            if (_currentCharacter is null || _viewingCharacterAdornPath is null)
-            {
-                return;
-            }
-
-            var orderedPaths = GetCharacterLayerImagePaths(Path.Combine(_currentCharacter.Path, "AD_Adorn"));
-            var currentIndex = orderedPaths.FindIndex(path => PathsEqual(path, _viewingCharacterAdornPath));
-            if (currentIndex < 0)
-            {
-                return;
-            }
-
-            var nextIndex = currentIndex + direction;
-            if (nextIndex < 0 || nextIndex >= orderedPaths.Count)
-            {
-                return;
-            }
-
-            ShowCharacterAdornViewerPage(orderedPaths[nextIndex]);
+            PlaySelectionSound();
+            ShowCharacterLayerViewerPage(orderedPaths[nextIndex], layerKind);
         }
 
         private async void BackgroundImageViewerRemarkButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_viewingCharacterClothPath is not null)
+            var currentLayer = _viewingCharacterLayer;
+            if (currentLayer is not null)
             {
-                var updatedClothPath = await SetCharacterClothRemarkAsync(_viewingCharacterClothPath);
-                if (!string.IsNullOrWhiteSpace(updatedClothPath) && File.Exists(updatedClothPath))
-                {
-                    _viewingCharacterClothPath = updatedClothPath;
-                    _selectedCharacterClothPath = updatedClothPath;
-                    BackgroundImageViewerTabTitleText.Text = $"服装 {Path.GetFileNameWithoutExtension(updatedClothPath)}";
-                    await LoadThumbnailFromFileAsync(BackgroundImageViewerImage, updatedClothPath);
-                }
-
-                return;
-            }
-
-            if (_viewingCharacterFacePath is not null)
-            {
-                var updatedFacePath = await SetCharacterFaceRemarkAsync(_viewingCharacterFacePath);
-                if (!string.IsNullOrWhiteSpace(updatedFacePath) && File.Exists(updatedFacePath))
-                {
-                    _viewingCharacterFacePath = updatedFacePath;
-                    _selectedCharacterFacePath = updatedFacePath;
-                    BackgroundImageViewerTabTitleText.Text = $"表情 {Path.GetFileNameWithoutExtension(updatedFacePath)}";
-                    await LoadThumbnailFromFileAsync(BackgroundImageViewerImage, updatedFacePath);
-                }
-
-                return;
-            }
-
-            if (_viewingCharacterAdornPath is not null)
-            {
-                var updatedAdornPath = await SetCharacterAdornRemarkAsync(_viewingCharacterAdornPath);
-                if (!string.IsNullOrWhiteSpace(updatedAdornPath) && File.Exists(updatedAdornPath))
-                {
-                    _viewingCharacterAdornPath = updatedAdornPath;
-                    _selectedCharacterAdornPath = updatedAdornPath;
-                    BackgroundImageViewerTabTitleText.Text = $"装饰 {Path.GetFileNameWithoutExtension(updatedAdornPath)}";
-                    await LoadThumbnailFromFileAsync(BackgroundImageViewerImage, updatedAdornPath);
-                }
-
+                await SetViewingCharacterLayerRemarkAsync(currentLayer.Kind, currentLayer.Path);
                 return;
             }
 
@@ -13593,37 +8727,16 @@ namespace GalExcleTools
 
             _viewingBackgroundImagePath = updatedPath;
             BackgroundImageViewerTabTitleText.Text = Path.GetFileNameWithoutExtension(updatedPath);
-            await LoadThumbnailFromFileAsync(BackgroundImageViewerImage, updatedPath);
+            await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, updatedPath);
         }
 
         private async void BackgroundImageViewerDeleteButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_viewingCharacterClothPath is not null)
+            var currentLayer = _viewingCharacterLayer;
+            if (currentLayer is not null)
             {
-                var deletedCloth = await DeleteCharacterClothAsync(_viewingCharacterClothPath);
-                if (deletedCloth)
-                {
-                    CloseBackgroundImageViewer();
-                }
-
-                return;
-            }
-
-            if (_viewingCharacterFacePath is not null)
-            {
-                var deletedFace = await DeleteCharacterFaceAsync(_viewingCharacterFacePath);
-                if (deletedFace)
-                {
-                    CloseBackgroundImageViewer();
-                }
-
-                return;
-            }
-
-            if (_viewingCharacterAdornPath is not null)
-            {
-                var deletedAdorn = await DeleteCharacterAdornAsync(_viewingCharacterAdornPath);
-                if (deletedAdorn)
+                var deletedLayer = await DeleteViewingCharacterLayerAsync(currentLayer.Kind, currentLayer.Path);
+                if (deletedLayer)
                 {
                     CloseBackgroundImageViewer();
                 }
@@ -13677,11 +8790,12 @@ namespace GalExcleTools
             UnrealSyncPage.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             MusicPlayerCloseButton.Focus(FocusState.Programmatic);
-            AppendLog(LogKind.User, $"打开{GetAudioDisplayName(kind)}播放：{Path.GetFileName(musicPath)}");
+            AppendLog(LogKind.User, $"打开{AudioAssetService.GetDisplayName(kind)}播放：{Path.GetFileName(musicPath)}");
         }
 
         private void CloseMusicPlayerButton_Click(object sender, RoutedEventArgs e)
         {
+            PlayNegativeSound();
             CloseMusicPlayer();
         }
 
@@ -13723,7 +8837,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var orderedPaths = GetAudioFilePaths(GetAudioFolderPath(_currentAssetLibrary, _playingAudioKind));
+            var orderedPaths = AudioAssetService.GetFilePaths(GetAudioFolderPath(_currentAssetLibrary, _playingAudioKind));
             var currentIndex = orderedPaths.FindIndex(path => PathsEqual(path, _playingMusicPath));
             if (currentIndex < 0)
             {
@@ -13736,6 +8850,7 @@ namespace GalExcleTools
                 return;
             }
 
+            PlaySelectionSound();
             ShowMusicPlayerPage(orderedPaths[nextIndex], _playingAudioKind);
         }
 
@@ -13751,6 +8866,8 @@ namespace GalExcleTools
                 MusicPlayerElement.MediaPlayer.Play();
                 MusicPlayPauseButton.Content = "暂停";
             }
+
+            PlaySelectionSound();
         }
 
         private async void MusicPlayerRemarkButton_Click(object sender, RoutedEventArgs e)
@@ -13808,17 +8925,16 @@ namespace GalExcleTools
                 return;
             }
 
-            var characterFolderName = SanitizeCharacterFolderName(input.Code);
-            var characterPath = Path.Combine(GetCharacterFolderPath(_currentAssetLibrary), characterFolderName);
-            if (Directory.Exists(characterPath))
+            try
             {
-                AppendLog(LogKind.Warning, $"无法创建角色，同名英文代号已存在：{input.Code}");
+                _characterWorkspaceService.CreateCharacter(_currentAssetLibrary, input);
+            }
+            catch (IOException ex)
+            {
+                AppendLog(LogKind.Warning, $"无法创建角色：{ex.Message}");
                 return;
             }
 
-            Directory.CreateDirectory(characterPath);
-            EnsureCharacterSubfolders(characterPath);
-            WriteCharacterMeta(characterPath, input);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             LoadCharacters(_currentAssetLibrary);
             AppendLog(LogKind.User, $"创建角色：{input.Name}（{input.Code}）");
@@ -13840,23 +8956,19 @@ namespace GalExcleTools
                 return;
             }
 
-            var newFolderName = SanitizeCharacterFolderName(input.Code);
-            var newPath = Path.Combine(GetCharacterFolderPath(_currentAssetLibrary), newFolderName);
-            if (!PathsEqual(character.Path, newPath))
+            CharacterInfo updatedCharacter;
+            try
             {
-                if (Directory.Exists(newPath))
-                {
-                    AppendLog(LogKind.Warning, $"无法重命名角色，同名英文代号已存在：{input.Code}");
-                    return;
-                }
-
-                Directory.Move(character.Path, newPath);
+                updatedCharacter = _characterWorkspaceService.RenameCharacter(_currentAssetLibrary, character, input);
+            }
+            catch (IOException ex)
+            {
+                AppendLog(LogKind.Warning, $"无法重命名角色：{ex.Message}");
+                return;
             }
 
-            EnsureCharacterSubfolders(newPath);
-            WriteCharacterMeta(newPath, input);
-            NormalizeCharacterLayerFiles(
-                Path.Combine(newPath, "DN_Cloth"),
+            _characterLayerAssetService.NormalizeFiles(
+                CharacterLayerAssetService.GetCharacterFolderPath(updatedCharacter, CharacterLayerKind.Cloth),
                 CharacterLayerKind.Cloth,
                 string.Empty,
                 input.Code);
@@ -13864,7 +8976,7 @@ namespace GalExcleTools
             LoadCharacters(_currentAssetLibrary);
             if (_currentCharacter is not null && PathsEqual(_currentCharacter.Path, character.Path))
             {
-                ShowCharacterDetailPage(ReadCharacterInfo(newPath));
+                ShowCharacterDetailPage(updatedCharacter);
             }
             AppendLog(LogKind.User, $"重命名角色：{input.Name}（{input.Code}）");
             await Task.CompletedTask;
@@ -13872,56 +8984,26 @@ namespace GalExcleTools
 
         private async Task<CharacterEditorInput?> ShowCharacterEditorDialogAsync(string title, CharacterInfo? character)
         {
-            var nameBox = new TextBox
-            {
-                Header = "角色名字",
-                Text = character?.Name ?? string.Empty,
-                PlaceholderText = "例如：明绪"
-            };
-            var codeBox = new TextBox
-            {
-                Header = "英文代号",
-                Text = character?.Code ?? string.Empty,
-                PlaceholderText = "例如：Mio"
-            };
-            var colorBox = new TextBox
-            {
-                Header = "代表色",
-                Text = character?.ColorHex ?? "#D9E8FF",
-                PlaceholderText = "#RRGGBB"
-            };
-            var panel = new StackPanel
-            {
-                Spacing = 12,
-                Children = { nameBox, codeBox, colorBox }
-            };
+            var editorContent = EditorDialogContentFactory.CreateCharacterEditorContent(character);
 
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = panel,
-                PrimaryButtonText = "确定",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
+            var result = await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                title,
+                editorContent.Content,
+                "确定",
+                "取消"));
+            if (result != DialogResultKind.Primary)
             {
                 return null;
             }
 
-            var name = nameBox.Text.Trim();
-            var code = codeBox.Text.Trim();
-            var color = NormalizeColorHex(colorBox.Text.Trim());
-            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(code))
+            var input = editorContent.ReadInput();
+            if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Code))
             {
                 AppendLog(LogKind.Warning, "角色名字和英文代号不能为空。");
                 return null;
             }
 
-            return new CharacterEditorInput(name, code, color);
+            return input;
         }
 
         private void ShowCharacterDetailPage(CharacterInfo character)
@@ -13949,28 +9031,24 @@ namespace GalExcleTools
 
         private void LoadCharacterDetailLayers(CharacterInfo character)
         {
-            EnsureCharacterSubfolders(character.Path);
+            _characterWorkspaceService.EnsureCharacterSubfolders(character.Path);
 
-            var clothFolderPath = Path.Combine(character.Path, "DN_Cloth");
-            var faceFolderPath = Path.Combine(character.Path, "FC_Face");
-            var adornFolderPath = Path.Combine(character.Path, "AD_Adorn");
-            var vfxFolderPath = Path.Combine(character.Path, "VFX");
+            var clothFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(character, CharacterLayerKind.Cloth);
+            var faceFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(character, CharacterLayerKind.Face);
+            var adornFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(character, CharacterLayerKind.Adorn);
+            var vfxFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(character, CharacterLayerKind.Vfx);
 
-            NormalizeCharacterLayerFiles(clothFolderPath, CharacterLayerKind.Cloth, GetCharacterLayerDefaultScope(0), character.Code);
-            var costumeCount = GetCharacterLayerImagePaths(clothFolderPath).Count;
-            var defaultCostumeScope = GetCharacterLayerDefaultScope(costumeCount);
-            NormalizeCharacterLayerFiles(faceFolderPath, CharacterLayerKind.Face, defaultCostumeScope);
-            NormalizeCharacterLayerFiles(adornFolderPath, CharacterLayerKind.Adorn, defaultCostumeScope);
-            NormalizeCharacterLayerFiles(vfxFolderPath, CharacterLayerKind.Vfx, "ALL");
+            _characterLayerAssetService.NormalizeFiles(clothFolderPath, CharacterLayerKind.Cloth, CharacterLayerAssetService.GetDefaultScope(0), character.Code);
+            var costumeCount = CharacterLayerAssetService.GetImagePaths(clothFolderPath).Count;
+            var defaultCostumeScope = CharacterLayerAssetService.GetDefaultScope(costumeCount);
+            _characterLayerAssetService.NormalizeFiles(faceFolderPath, CharacterLayerKind.Face, defaultCostumeScope);
+            _characterLayerAssetService.NormalizeFiles(adornFolderPath, CharacterLayerKind.Adorn, defaultCostumeScope);
+            _characterLayerAssetService.NormalizeFiles(vfxFolderPath, CharacterLayerKind.Vfx, "ALL");
 
-            var clothPaths = GetCharacterLayerImagePaths(clothFolderPath);
-            var facePaths = GetCharacterLayerImagePaths(faceFolderPath);
-            var adornPaths = GetCharacterLayerImagePaths(adornFolderPath);
-            var vfxPaths = Directory
-                .EnumerateFiles(vfxFolderPath)
-                .Where(path => ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                .OrderBy(Path.GetFileName)
-                .ToList();
+            var clothPaths = CharacterLayerAssetService.GetLayerPaths(character, CharacterLayerKind.Cloth);
+            var facePaths = CharacterLayerAssetService.GetLayerPaths(character, CharacterLayerKind.Face);
+            var adornPaths = CharacterLayerAssetService.GetLayerPaths(character, CharacterLayerKind.Adorn);
+            var vfxPaths = CharacterLayerAssetService.GetLayerPaths(character, CharacterLayerKind.Vfx);
 
             _selectedCharacterClothPath = ResolveSelectedCharacterLayerPath(_selectedCharacterClothPath, clothPaths);
             _selectedCharacterFacePath = ResolveSelectedCharacterLayerPath(_selectedCharacterFacePath, facePaths);
@@ -14055,7 +9133,7 @@ namespace GalExcleTools
             Directory.CreateDirectory(folderPath);
             gridView.Items.Clear();
 
-            var imagePaths = GetCharacterLayerImagePaths(folderPath);
+            var imagePaths = CharacterLayerAssetService.GetImagePaths(folderPath);
             foreach (var imagePath in imagePaths)
             {
                 gridView.Items.Add(CreateCharacterImageLayerCard(imagePath, layerKind));
@@ -14083,129 +9161,72 @@ namespace GalExcleTools
             }
         }
 
-        private static List<string> GetCharacterLayerImagePaths(string folderPath)
-        {
-            if (!Directory.Exists(folderPath))
-            {
-                return [];
-            }
-
-            return Directory
-                .EnumerateFiles(folderPath)
-                .Where(path => ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                .OrderBy(Path.GetFileName)
-                .ToList();
-        }
-
         private GridViewItem CreateCharacterImageLayerCard(string imagePath, CharacterLayerKind layerKind)
         {
-            var item = new GridViewItem
-            {
-                Width = 190,
-                Height = 190,
-                Margin = new Thickness(0, 0, 16, 16),
-                Tag = imagePath
-            };
+            TappedEventHandler? tappedHandler = null;
+            MenuFlyout? contextFlyout = null;
 
             if (layerKind == CharacterLayerKind.Cloth)
             {
-                var flyout = new MenuFlyout();
-                var remarkItem = new MenuFlyoutItem
-                {
-                    Text = "设置备注"
-                };
-                remarkItem.Click += async (_, _) => await SetCharacterClothRemarkAsync(imagePath);
-                flyout.Items.Add(remarkItem);
-
-                var deleteItem = new MenuFlyoutItem
-                {
-                    Text = "删除"
-                };
-                deleteItem.Click += async (_, _) => await DeleteCharacterClothAsync(imagePath);
-                flyout.Items.Add(deleteItem);
-                item.ContextFlyout = flyout;
+                contextFlyout = GridViewItemFactory.CreateMenu(
+                    GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetCharacterClothRemarkAsync(imagePath)),
+                    GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteCharacterClothAsync(imagePath)));
             }
             else if (layerKind is CharacterLayerKind.Face or CharacterLayerKind.Adorn)
             {
-                var flyout = new MenuFlyout();
-                var remarkItem = new MenuFlyoutItem
-                {
-                    Text = "设置备注"
-                };
-                remarkItem.Click += async (_, _) =>
-                {
-                    if (layerKind == CharacterLayerKind.Face)
+                contextFlyout = GridViewItemFactory.CreateMenu(
+                    GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) =>
                     {
-                        await SetCharacterFaceRemarkAsync(imagePath);
-                    }
-                    else
+                        if (layerKind == CharacterLayerKind.Face)
+                        {
+                            await SetCharacterFaceRemarkAsync(imagePath);
+                        }
+                        else
+                        {
+                            await SetCharacterAdornRemarkAsync(imagePath);
+                        }
+                    }),
+                    GridViewItemFactory.CreateMenuItem("可用范围", async (_, _) =>
                     {
-                        await SetCharacterAdornRemarkAsync(imagePath);
-                    }
-                };
-                flyout.Items.Add(remarkItem);
-
-                var rangeItem = new MenuFlyoutItem
-                {
-                    Text = "可用范围"
-                };
-                rangeItem.Click += async (_, _) =>
-                {
-                    if (layerKind == CharacterLayerKind.Face)
+                        if (layerKind == CharacterLayerKind.Face)
+                        {
+                            await SetCharacterFaceAvailabilityAsync(imagePath);
+                        }
+                        else
+                        {
+                            await SetCharacterAdornAvailabilityAsync(imagePath);
+                        }
+                    }),
+                    GridViewItemFactory.CreateMenuItem("删除", async (_, _) =>
                     {
-                        await SetCharacterFaceAvailabilityAsync(imagePath);
-                    }
-                    else
-                    {
-                        await SetCharacterAdornAvailabilityAsync(imagePath);
-                    }
-                };
-                flyout.Items.Add(rangeItem);
-
-                var deleteItem = new MenuFlyoutItem
-                {
-                    Text = "删除"
-                };
-                deleteItem.Click += async (_, _) =>
-                {
-                    if (layerKind == CharacterLayerKind.Face)
-                    {
-                        await DeleteCharacterFaceAsync(imagePath);
-                    }
-                    else
-                    {
-                        await DeleteCharacterAdornAsync(imagePath);
-                    }
-                };
-                flyout.Items.Add(deleteItem);
-                item.ContextFlyout = flyout;
+                        if (layerKind == CharacterLayerKind.Face)
+                        {
+                            await DeleteCharacterFaceAsync(imagePath);
+                        }
+                        else
+                        {
+                            await DeleteCharacterAdornAsync(imagePath);
+                        }
+                    }));
             }
             else
             {
-                item.Tapped += async (_, _) =>
+                tappedHandler = async (_, _) =>
                 {
                     SetSelectedCharacterLayer(layerKind, imagePath);
                     await UpdateCharacterLayerPreviewAsync();
                 };
             }
 
-            var panel = new StackPanel
-            {
-                Spacing = 6,
-                Tag = imagePath
-            };
-
-            panel.Children.Add(CreateThumbnail(imagePath, 178, 152, showAddIcon: false));
-            panel.Children.Add(new TextBlock
-            {
-                Text = Path.GetFileNameWithoutExtension(imagePath),
-                TextAlignment = TextAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
-            });
-
-            item.Content = panel;
-            return item;
+            return AssetCardFactory.CreateCard(
+                190,
+                190,
+                AssetCardContentFactory.CreateImageAssetCardContent(imagePath, 178, 152, tagWithPath: true),
+                imagePath,
+                tappedHandler,
+                contextFlyout,
+                marginRight: 16,
+                marginBottom: 16);
         }
 
         private void LoadCharacterVfxLayer(string folderPath)
@@ -14228,50 +9249,18 @@ namespace GalExcleTools
 
         private GridViewItem CreateCharacterVfxIndexCard(string vfxPath)
         {
-            var item = new GridViewItem
-            {
-                Width = 220,
-                Height = 92,
-                Margin = new Thickness(0, 0, 14, 14),
-                Tag = vfxPath
-            };
-            item.Tapped += async (_, _) =>
-            {
-                _selectedCharacterVfxPath = vfxPath;
-                await UpdateCharacterLayerPreviewAsync();
-            };
-
-            var title = new TextBlock
-            {
-                Text = Path.GetFileNameWithoutExtension(vfxPath),
-                Margin = new Thickness(12, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis
-            };
-            Grid.SetColumn(title, 1);
-
-            item.Content = new Border
-            {
-                CornerRadius = new CornerRadius(6),
-                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(1),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.White),
-                Child = new Grid
+            return AssetCardFactory.CreateCard(
+                220,
+                92,
+                AssetCardContentFactory.CreateIconAssetCardContent(
+                    Symbol.Filter,
+                    Path.GetFileNameWithoutExtension(vfxPath)),
+                vfxPath,
+                async (_, _) =>
                 {
-                    Padding = new Thickness(14, 10, 14, 10),
-                    ColumnDefinitions =
-                    {
-                        new ColumnDefinition { Width = GridLength.Auto },
-                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }
-                    },
-                    Children =
-                    {
-                        new SymbolIcon { Symbol = Symbol.Filter, VerticalAlignment = VerticalAlignment.Center },
-                        title
-                    }
-                }
-            };
-            return item;
+                    _selectedCharacterVfxPath = vfxPath;
+                    await UpdateCharacterLayerPreviewAsync();
+                });
         }
 
         private void SetSelectedCharacterLayer(CharacterLayerKind layerKind, string imagePath)
@@ -14332,20 +9321,11 @@ namespace GalExcleTools
 
         private void CharacterPreviewSurface_RightTapped(object sender, RightTappedRoutedEventArgs e)
         {
-            var flyout = new MenuFlyout();
-            var clothItem = new MenuFlyoutItem { Text = "服装" };
-            clothItem.Click += async (_, _) => await ChooseCharacterDetailLayerAsync(CharacterLayerKind.Cloth);
-            flyout.Items.Add(clothItem);
-
-            var faceItem = new MenuFlyoutItem { Text = "表情" };
-            faceItem.Click += async (_, _) => await ChooseCharacterDetailLayerAsync(CharacterLayerKind.Face);
-            flyout.Items.Add(faceItem);
-
-            var adornItem = new MenuFlyoutItem { Text = "装饰" };
-            adornItem.Click += async (_, _) => await ChooseCharacterDetailLayerAsync(CharacterLayerKind.Adorn);
-            flyout.Items.Add(adornItem);
-
-            flyout.ShowAt(CharacterPreviewSurface);
+            GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("服装", async (_, _) => await ChooseCharacterDetailLayerAsync(CharacterLayerKind.Cloth)),
+                GridViewItemFactory.CreateMenuItem("表情", async (_, _) => await ChooseCharacterDetailLayerAsync(CharacterLayerKind.Face)),
+                GridViewItemFactory.CreateMenuItem("装饰", async (_, _) => await ChooseCharacterDetailLayerAsync(CharacterLayerKind.Adorn)))
+                .ShowAt(CharacterPreviewSurface);
             e.Handled = true;
         }
 
@@ -14404,7 +9384,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var selected = await ShowStoryChoiceDialogAsync(
+            var selected = await _storyDialogService.SelectPreviewChoiceAsync(
                 $"选择{GetCharacterLayerDisplayName(layerKind)}",
                 paths.Select((path, index) => new StoryObjectChoice(
                     index.ToString(),
@@ -14450,8 +9430,8 @@ namespace GalExcleTools
             {
                 CharacterLayerKind.Cloth => BuildStoryChoicePreviewPaths(
                     candidatePath,
-                    _currentCharacter is not null && IsCharacterLayerCompatibleWithCloth(_currentCharacter, candidatePath, _selectedCharacterFacePath) ? _selectedCharacterFacePath : null,
-                    _currentCharacter is not null && IsCharacterLayerCompatibleWithCloth(_currentCharacter, candidatePath, _selectedCharacterAdornPath) ? _selectedCharacterAdornPath : null),
+                    _currentCharacter is not null && _characterLayerAssetService.IsCompatibleWithCloth(_currentCharacter, candidatePath, _selectedCharacterFacePath, ComputeFileHash) ? _selectedCharacterFacePath : null,
+                    _currentCharacter is not null && _characterLayerAssetService.IsCompatibleWithCloth(_currentCharacter, candidatePath, _selectedCharacterAdornPath, ComputeFileHash) ? _selectedCharacterAdornPath : null),
                 CharacterLayerKind.Face => BuildStoryChoicePreviewPaths(_selectedCharacterClothPath, candidatePath, _selectedCharacterAdornPath),
                 CharacterLayerKind.Adorn => BuildStoryChoicePreviewPaths(_selectedCharacterClothPath, _selectedCharacterFacePath, candidatePath),
                 CharacterLayerKind.Vfx => BuildStoryChoicePreviewPaths(_selectedCharacterClothPath, _selectedCharacterFacePath, _selectedCharacterAdornPath, candidatePath),
@@ -14505,19 +9485,11 @@ namespace GalExcleTools
                 return [];
             }
 
-            var folderName = layerKind switch
-            {
-                CharacterLayerKind.Cloth => "DN_Cloth",
-                CharacterLayerKind.Face => "FC_Face",
-                CharacterLayerKind.Adorn => "AD_Adorn",
-                CharacterLayerKind.Vfx => "VFX",
-                _ => "DN_Cloth"
-            };
-            var paths = GetCharacterLayerImagePaths(Path.Combine(_currentCharacter.Path, folderName));
+            var paths = CharacterLayerAssetService.GetLayerPaths(_currentCharacter, layerKind);
             if (layerKind is CharacterLayerKind.Face or CharacterLayerKind.Adorn or CharacterLayerKind.Vfx)
             {
                 paths = paths
-                    .Where(path => IsCharacterLayerCompatibleWithCloth(_currentCharacter, _selectedCharacterClothPath, path))
+                    .Where(path => _characterLayerAssetService.IsCompatibleWithCloth(_currentCharacter, _selectedCharacterClothPath, path, ComputeFileHash))
                     .ToList();
             }
 
@@ -14552,89 +9524,14 @@ namespace GalExcleTools
         {
             return _currentCharacter is null
                 ? false
-                : IsCharacterLayerCompatibleWithCloth(_currentCharacter, _selectedCharacterClothPath, layerPath);
-        }
-
-        private bool IsCharacterLayerCompatibleWithCloth(CharacterInfo character, string? clothPath, string? layerPath)
-        {
-            if (string.IsNullOrWhiteSpace(layerPath) || !File.Exists(layerPath))
-            {
-                return false;
-            }
-
-            var clothIndex = GetCharacterLayerIndex(clothPath, CharacterLayerKind.Cloth);
-            if (clothIndex is null)
-            {
-                return true;
-            }
-
-            var layerKind = GetCharacterLayerKindFromPath(layerPath);
-            if (layerKind is null || layerKind == CharacterLayerKind.Cloth)
-            {
-                return true;
-            }
-
-            if (layerKind is CharacterLayerKind.Face or CharacterLayerKind.Adorn)
-            {
-                var layerFolderPath = layerKind == CharacterLayerKind.Face
-                    ? Path.Combine(character.Path, "FC_Face")
-                    : Path.Combine(character.Path, "AD_Adorn");
-                var meta = layerKind == CharacterLayerKind.Face
-                    ? ReadCharacterFaceScopeMeta(layerFolderPath)
-                    : ReadCharacterAdornScopeMeta(layerFolderPath);
-                if (meta.Entries.TryGetValue(Path.GetFileName(layerPath), out var metaEntry))
-                {
-                    if (metaEntry.UseAllCostumes || string.IsNullOrWhiteSpace(clothPath) || !File.Exists(clothPath))
-                    {
-                        return true;
-                    }
-
-                    var selectedCostumeHash = ComputeFileHash(clothPath);
-                    return metaEntry.CostumeHashes.Contains(selectedCostumeHash, StringComparer.OrdinalIgnoreCase);
-                }
-            }
-
-            if (!CharacterLayerUsesScope(layerKind.Value))
-            {
-                return true;
-            }
-
-            var entry = ParseCharacterLayerFileName(layerPath, layerKind.Value, "ALL");
-            return IsCharacterScopeMatchingCostume(entry.Scope, clothIndex.Value);
-        }
-
-        private bool IsCharacterLayerMetaCompatibleWithSelectedCloth(string layerPath, CharacterLayerKind layerKind)
-        {
-            if (_currentCharacter is null || _selectedCharacterClothPath is null)
-            {
-                return true;
-            }
-
-            var layerFolderPath = layerKind == CharacterLayerKind.Face
-                ? Path.Combine(_currentCharacter.Path, "FC_Face")
-                : Path.Combine(_currentCharacter.Path, "AD_Adorn");
-            var meta = layerKind == CharacterLayerKind.Face
-                ? ReadCharacterFaceScopeMeta(layerFolderPath)
-                : ReadCharacterAdornScopeMeta(layerFolderPath);
-            if (!meta.Entries.TryGetValue(Path.GetFileName(layerPath), out var entry) || entry.UseAllCostumes)
-            {
-                return true;
-            }
-
-            if (!File.Exists(_selectedCharacterClothPath))
-            {
-                return true;
-            }
-
-            var selectedCostumeHash = ComputeFileHash(_selectedCharacterClothPath);
-            return entry.CostumeHashes.Contains(selectedCostumeHash, StringComparer.OrdinalIgnoreCase);
+                : _characterLayerAssetService.IsCompatibleWithCloth(_currentCharacter, _selectedCharacterClothPath, layerPath, ComputeFileHash);
         }
 
         private static async Task<bool> SetCharacterPreviewImageAsync(Image image, string? imagePath)
         {
             if (string.IsNullOrWhiteSpace(imagePath) ||
                 !File.Exists(imagePath) ||
-                !ImageExtensions.Contains(Path.GetExtension(imagePath), StringComparer.OrdinalIgnoreCase))
+                !BackgroundImageService.Extensions.Contains(Path.GetExtension(imagePath), StringComparer.OrdinalIgnoreCase))
             {
                 image.Source = null;
                 image.Visibility = Visibility.Collapsed;
@@ -14642,463 +9539,15 @@ namespace GalExcleTools
             }
 
             image.Visibility = Visibility.Visible;
-            await LoadThumbnailFromFileAsync(image, imagePath);
+            await ThumbnailFactory.LoadThumbnailFromFileAsync(image, imagePath);
             return true;
-        }
-
-        private void NormalizeCharacterLayerFiles(
-            string folderPath,
-            CharacterLayerKind layerKind,
-            string defaultScope,
-            string? characterName = null)
-        {
-            Directory.CreateDirectory(folderPath);
-            var sourcePaths = Directory
-                .EnumerateFiles(folderPath)
-                .Where(path => layerKind == CharacterLayerKind.Vfx ||
-                               ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                .OrderBy(Path.GetFileName)
-                .ToList();
-
-            if (sourcePaths.Count == 0)
-            {
-                return;
-            }
-
-            var entries = sourcePaths
-                .Select(path => ParseCharacterLayerFileName(path, layerKind, defaultScope))
-                .ToList();
-            if (layerKind == CharacterLayerKind.Face)
-            {
-                RenameCharacterFaceEntriesAndUpdateMeta(entries);
-                return;
-            }
-
-            if (layerKind == CharacterLayerKind.Adorn)
-            {
-                RenameCharacterAdornEntriesAndUpdateMeta(entries);
-                return;
-            }
-
-            RenameCharacterLayerEntries(entries, layerKind, characterName);
-        }
-
-        private void RenameCharacterLayerEntries(
-            IReadOnlyList<CharacterLayerEntry> entries,
-            CharacterLayerKind layerKind,
-            string? characterName = null)
-        {
-            var renames = new List<CharacterLayerRename>();
-            var digitCount = Math.Max(2, (entries.Count - 1).ToString().Length);
-            for (var i = 0; i < entries.Count; i++)
-            {
-                var entry = entries[i];
-                var folderPath = Path.GetDirectoryName(entry.Path)!;
-                var extension = Path.GetExtension(entry.Path).ToLowerInvariant();
-                var indexName = $"{GetCharacterLayerPrefix(layerKind)}{i.ToString().PadLeft(digitCount, '0')}";
-                var fileName = BuildCharacterLayerFileName(indexName, entry.Remark, entry.Scope, layerKind, extension, characterName);
-                renames.Add(new CharacterLayerRename(entry, Path.Combine(folderPath, fileName)));
-            }
-
-            var tempRenames = new List<(string TempPath, string TargetPath)>();
-            foreach (var rename in renames)
-            {
-                if (PathsExactlyEqual(rename.Entry.Path, rename.TargetPath))
-                {
-                    continue;
-                }
-
-                var tempPath = Path.Combine(Path.GetDirectoryName(rename.Entry.Path)!, $"__character_layer_rename_{Guid.NewGuid():N}{Path.GetExtension(rename.Entry.Path)}");
-                File.Move(rename.Entry.Path, tempPath);
-                tempRenames.Add((tempPath, rename.TargetPath));
-            }
-
-            foreach (var (tempPath, targetPath) in tempRenames)
-            {
-                if (File.Exists(targetPath))
-                {
-                    File.Delete(targetPath);
-                }
-
-                File.Move(tempPath, targetPath);
-            }
-        }
-
-        private void RenameCharacterFaceEntriesAndUpdateMeta(IReadOnlyList<CharacterLayerEntry> entries)
-        {
-            if (entries.Count == 0)
-            {
-                return;
-            }
-
-            var faceFolderPath = Path.GetDirectoryName(entries[0].Path)!;
-            var renameMap = entries
-                .Select((entry, index) => new
-                {
-                    OldFileName = Path.GetFileName(entry.Path),
-                    NewFileName = Path.GetFileName(GetCharacterLayerTargetPath(entries, index, CharacterLayerKind.Face))
-                })
-                .Where(item => !string.Equals(item.OldFileName, item.NewFileName, StringComparison.OrdinalIgnoreCase))
-                .ToDictionary(item => item.OldFileName, item => item.NewFileName, StringComparer.OrdinalIgnoreCase);
-
-            RenameCharacterLayerEntries(entries, CharacterLayerKind.Face);
-            RemapCharacterFaceScopeMeta(faceFolderPath, renameMap);
-        }
-
-        private void RenameCharacterAdornEntriesAndUpdateMeta(IReadOnlyList<CharacterLayerEntry> entries)
-        {
-            if (entries.Count == 0)
-            {
-                return;
-            }
-
-            var adornFolderPath = Path.GetDirectoryName(entries[0].Path)!;
-            var renameMap = entries
-                .Select((entry, index) => new
-                {
-                    OldFileName = Path.GetFileName(entry.Path),
-                    NewFileName = Path.GetFileName(GetCharacterLayerTargetPath(entries, index, CharacterLayerKind.Adorn))
-                })
-                .Where(item => !string.Equals(item.OldFileName, item.NewFileName, StringComparison.OrdinalIgnoreCase))
-                .ToDictionary(item => item.OldFileName, item => item.NewFileName, StringComparer.OrdinalIgnoreCase);
-
-            RenameCharacterLayerEntries(entries, CharacterLayerKind.Adorn);
-            RemapCharacterLayerScopeMeta(adornFolderPath, GetCharacterAdornScopeMetaPath(adornFolderPath), renameMap);
-        }
-
-        private static string GetCharacterFaceScopeMetaPath(string faceFolderPath)
-        {
-            return Path.Combine(faceFolderPath, "face-scope.meta.json");
-        }
-
-        private static string GetCharacterAdornScopeMetaPath(string adornFolderPath)
-        {
-            return Path.Combine(adornFolderPath, "adorn-scope.meta.json");
-        }
-
-        private CharacterLayerScopeMeta ReadCharacterFaceScopeMeta(string faceFolderPath)
-        {
-            return ReadCharacterLayerScopeMeta(GetCharacterFaceScopeMetaPath(faceFolderPath));
-        }
-
-        private void WriteCharacterFaceScopeMeta(string faceFolderPath, CharacterLayerScopeMeta meta)
-        {
-            Directory.CreateDirectory(faceFolderPath);
-            File.WriteAllText(GetCharacterFaceScopeMetaPath(faceFolderPath), JsonSerializer.Serialize(meta, _jsonOptions));
-        }
-
-        private void RemapCharacterFaceScopeMeta(string faceFolderPath, IReadOnlyDictionary<string, string> renameMap)
-        {
-            RemapCharacterLayerScopeMeta(faceFolderPath, GetCharacterFaceScopeMetaPath(faceFolderPath), renameMap);
-        }
-
-        private void RemoveCharacterFaceScopeEntry(string faceFolderPath, string faceFileName)
-        {
-            var meta = ReadCharacterFaceScopeMeta(faceFolderPath);
-            if (meta.Entries.Remove(faceFileName))
-            {
-                WriteCharacterFaceScopeMeta(faceFolderPath, meta);
-            }
-        }
-
-        private CharacterLayerScopeMeta ReadCharacterAdornScopeMeta(string adornFolderPath)
-        {
-            return ReadCharacterLayerScopeMeta(GetCharacterAdornScopeMetaPath(adornFolderPath));
-        }
-
-        private void WriteCharacterAdornScopeMeta(string adornFolderPath, CharacterLayerScopeMeta meta)
-        {
-            Directory.CreateDirectory(adornFolderPath);
-            File.WriteAllText(GetCharacterAdornScopeMetaPath(adornFolderPath), JsonSerializer.Serialize(meta, _jsonOptions));
-        }
-
-        private void RemoveCharacterAdornScopeEntry(string adornFolderPath, string adornFileName)
-        {
-            var meta = ReadCharacterAdornScopeMeta(adornFolderPath);
-            if (meta.Entries.Remove(adornFileName))
-            {
-                WriteCharacterAdornScopeMeta(adornFolderPath, meta);
-            }
-        }
-
-        private CharacterLayerScopeMeta ReadCharacterLayerScopeMeta(string metaPath)
-        {
-            if (!File.Exists(metaPath))
-            {
-                return new CharacterLayerScopeMeta();
-            }
-
-            try
-            {
-                return JsonSerializer.Deserialize<CharacterLayerScopeMeta>(File.ReadAllText(metaPath)) ?? new CharacterLayerScopeMeta();
-            }
-            catch
-            {
-                return new CharacterLayerScopeMeta();
-            }
-        }
-
-        private void RemapCharacterLayerScopeMeta(
-            string folderPath,
-            string metaPath,
-            IReadOnlyDictionary<string, string> renameMap)
-        {
-            if (renameMap.Count == 0)
-            {
-                return;
-            }
-
-            var meta = ReadCharacterLayerScopeMeta(metaPath);
-            if (meta.Entries.Count == 0)
-            {
-                return;
-            }
-
-            var updatedEntries = new Dictionary<string, CharacterLayerScopeEntry>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (fileName, entry) in meta.Entries)
-            {
-                var targetFileName = renameMap.TryGetValue(fileName, out var renamedFileName)
-                    ? renamedFileName
-                    : fileName;
-                updatedEntries[targetFileName] = entry;
-            }
-
-            meta.Entries = updatedEntries;
-            Directory.CreateDirectory(folderPath);
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
-        }
-
-        private static CharacterLayerEntry ParseCharacterLayerFileName(
-            string layerPath,
-            CharacterLayerKind layerKind,
-            string defaultScope)
-        {
-            var name = Path.GetFileNameWithoutExtension(layerPath);
-            var prefix = GetCharacterLayerPrefix(layerKind);
-            var prefixPattern = layerKind == CharacterLayerKind.Cloth
-                ? $"^(?:.+_)?{Regex.Escape(prefix)}\\d+(?:_(?<tail>.+))?$"
-                : $"^{Regex.Escape(prefix)}\\d+(?:_(?<tail>.+))?$";
-            var prefixMatch = Regex.Match(name, prefixPattern, RegexOptions.IgnoreCase);
-            if (!prefixMatch.Success)
-            {
-                return new CharacterLayerEntry(layerPath, SanitizeRemark(name), defaultScope);
-            }
-
-            var tail = prefixMatch.Groups["tail"].Value;
-            if (string.IsNullOrWhiteSpace(tail))
-            {
-                return new CharacterLayerEntry(layerPath, string.Empty, defaultScope);
-            }
-
-            if (IsCharacterLayerScope(tail))
-            {
-                return new CharacterLayerEntry(layerPath, string.Empty, NormalizeCharacterLayerScope(tail));
-            }
-
-            var lastSeparatorIndex = tail.LastIndexOf('_');
-            if (lastSeparatorIndex > 0)
-            {
-                var maybeScope = tail[(lastSeparatorIndex + 1)..];
-                if (IsCharacterLayerScope(maybeScope))
-                {
-                    return new CharacterLayerEntry(
-                        layerPath,
-                        SanitizeRemark(tail[..lastSeparatorIndex]),
-                        NormalizeCharacterLayerScope(maybeScope));
-                }
-            }
-
-            if (!CharacterLayerUsesScope(layerKind))
-            {
-                return new CharacterLayerEntry(layerPath, SanitizeRemark(tail), string.Empty);
-            }
-
-            return new CharacterLayerEntry(layerPath, SanitizeRemark(tail), defaultScope);
-        }
-
-        private static string BuildCharacterLayerFileName(
-            string indexName,
-            string remark,
-            string scope,
-            CharacterLayerKind layerKind,
-            string extension,
-            string? characterName = null)
-        {
-            var safeRemark = SanitizeRemark(remark);
-            var normalizedScope = CharacterLayerUsesScope(layerKind)
-                ? NormalizeCharacterLayerScope(string.IsNullOrWhiteSpace(scope) ? "ALL" : scope)
-                : string.Empty;
-            var safeCharacterName = string.IsNullOrWhiteSpace(characterName) ? string.Empty : SanitizeRemark(characterName);
-            var normalizedIndexName = layerKind == CharacterLayerKind.Cloth && !string.IsNullOrWhiteSpace(safeCharacterName)
-                ? $"{safeCharacterName}_{indexName}"
-                : indexName;
-
-            if (!CharacterLayerUsesScope(layerKind))
-            {
-                return string.IsNullOrWhiteSpace(safeRemark)
-                    ? $"{normalizedIndexName}{extension}"
-                    : $"{normalizedIndexName}_{safeRemark}{extension}";
-            }
-
-            return string.IsNullOrWhiteSpace(safeRemark)
-                ? $"{normalizedIndexName}_{normalizedScope}{extension}"
-                : $"{normalizedIndexName}_{safeRemark}_{normalizedScope}{extension}";
-        }
-
-        private static string GetCharacterLayerTargetPath(
-            IReadOnlyList<CharacterLayerEntry> entries,
-            int index,
-            CharacterLayerKind layerKind,
-            string? characterCode = null)
-        {
-            var entry = entries[index];
-            var digitCount = Math.Max(2, (entries.Count - 1).ToString().Length);
-            var indexName = $"{GetCharacterLayerPrefix(layerKind)}{index.ToString().PadLeft(digitCount, '0')}";
-            var fileName = BuildCharacterLayerFileName(
-                indexName,
-                entry.Remark,
-                entry.Scope,
-                layerKind,
-                Path.GetExtension(entry.Path).ToLowerInvariant(),
-                characterCode);
-            return Path.Combine(Path.GetDirectoryName(entry.Path)!, fileName);
-        }
-
-        private static string GetCharacterLayerDefaultScope(int costumeCount)
-        {
-            if (costumeCount <= 0)
-            {
-                return "ALL";
-            }
-
-            var lastIndex = costumeCount - 1;
-            var digitCount = Math.Max(2, lastIndex.ToString().Length);
-            var startText = 0.ToString().PadLeft(digitCount, '0');
-            if (costumeCount == 1)
-            {
-                return $"DN{startText}";
-            }
-
-            var endText = lastIndex.ToString().PadLeft(digitCount, '0');
-            return $"DN{startText}-{endText}";
-        }
-
-        private static string NormalizeCharacterLayerScope(string scope)
-        {
-            var trimmed = scope.Trim().ToUpperInvariant();
-            if (trimmed == "ALL")
-            {
-                return "ALL";
-            }
-
-            var match = Regex.Match(trimmed, @"^DN(?<start>\d+)(?:-(?<end>\d+))?$", RegexOptions.IgnoreCase);
-            if (!match.Success)
-            {
-                return "ALL";
-            }
-
-            var start = int.Parse(match.Groups["start"].Value);
-            var endText = match.Groups["end"].Value;
-            var digitCount = Math.Max(2, Math.Max(match.Groups["start"].Value.Length, endText.Length));
-            var startText = start.ToString().PadLeft(digitCount, '0');
-            if (string.IsNullOrWhiteSpace(endText))
-            {
-                return $"DN{startText}";
-            }
-
-            var end = int.Parse(endText);
-            var endTextPadded = end.ToString().PadLeft(digitCount, '0');
-            return $"DN{startText}-{endTextPadded}";
-        }
-
-        private static bool IsCharacterLayerScope(string scope)
-        {
-            return Regex.IsMatch(scope.Trim(), @"^(ALL|DN\d+(?:-\d+)?)$", RegexOptions.IgnoreCase);
-        }
-
-        private static bool IsCharacterScopeMatchingCostume(string scope, int costumeIndex)
-        {
-            var normalized = NormalizeCharacterLayerScope(scope);
-            if (normalized == "ALL")
-            {
-                return true;
-            }
-
-            var match = Regex.Match(normalized, @"^DN(?<start>\d+)(?:-(?<end>\d+))?$", RegexOptions.IgnoreCase);
-            if (!match.Success)
-            {
-                return true;
-            }
-
-            var start = int.Parse(match.Groups["start"].Value);
-            var end = string.IsNullOrWhiteSpace(match.Groups["end"].Value)
-                ? start
-                : int.Parse(match.Groups["end"].Value);
-            return costumeIndex >= Math.Min(start, end) && costumeIndex <= Math.Max(start, end);
-        }
-
-        private static int? GetCharacterLayerIndex(string? layerPath, CharacterLayerKind expectedKind)
-        {
-            if (string.IsNullOrWhiteSpace(layerPath))
-            {
-                return null;
-            }
-
-            var prefix = GetCharacterLayerPrefix(expectedKind);
-            var pattern = expectedKind == CharacterLayerKind.Cloth
-                ? $"^(?:.+_)?{Regex.Escape(prefix)}(?<index>\\d+)"
-                : $"^{Regex.Escape(prefix)}(?<index>\\d+)";
-            var match = Regex.Match(Path.GetFileNameWithoutExtension(layerPath), pattern, RegexOptions.IgnoreCase);
-            return match.Success ? int.Parse(match.Groups["index"].Value) : null;
-        }
-
-        private static CharacterLayerKind? GetCharacterLayerKindFromPath(string layerPath)
-        {
-            var name = Path.GetFileNameWithoutExtension(layerPath);
-            if (Regex.IsMatch(name, "^(?:.+_)?DN\\d+", RegexOptions.IgnoreCase))
-            {
-                return CharacterLayerKind.Cloth;
-            }
-
-            if (Regex.IsMatch(name, "^FC\\d+", RegexOptions.IgnoreCase))
-            {
-                return CharacterLayerKind.Face;
-            }
-
-            if (Regex.IsMatch(name, "^AD\\d+", RegexOptions.IgnoreCase))
-            {
-                return CharacterLayerKind.Adorn;
-            }
-
-            if (Regex.IsMatch(name, "^VFX\\d+", RegexOptions.IgnoreCase))
-            {
-                return CharacterLayerKind.Vfx;
-            }
-
-            return null;
-        }
-
-        private static string GetCharacterLayerPrefix(CharacterLayerKind layerKind)
-        {
-            return layerKind switch
-            {
-                CharacterLayerKind.Cloth => "DN",
-                CharacterLayerKind.Face => "FC",
-                CharacterLayerKind.Adorn => "AD",
-                CharacterLayerKind.Vfx => "VFX",
-                _ => "LY"
-            };
-        }
-
-        private static bool CharacterLayerUsesScope(CharacterLayerKind layerKind)
-        {
-            return layerKind is CharacterLayerKind.Adorn or CharacterLayerKind.Vfx;
         }
 
         private void CloseCharacterDetailButton_Click(object sender, RoutedEventArgs e)
         {
             if (_currentAssetLibrary is not null)
             {
+                PlayNegativeSound();
                 ShowAssetLibraryDetailPage(_currentAssetLibrary);
             }
         }
@@ -15129,6 +9578,7 @@ namespace GalExcleTools
                 return;
             }
 
+            PlayPositiveSound();
             await RenameCharacterAsync(_currentCharacter, input);
         }
 
@@ -15175,33 +9625,10 @@ namespace GalExcleTools
 
         private async Task NormalizeBackgroundImagesAsync(string backgroundFolderPath, IReadOnlyList<string>? orderedPaths = null)
         {
-            var sourcePaths = orderedPaths is null
-                ? Directory
-                    .EnumerateFiles(backgroundFolderPath)
-                    .Where(path => ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                    .OrderBy(Path.GetFileName)
-                    .ToList()
-                : orderedPaths.ToList();
-
-            var entries = new List<BackgroundImageEntry>();
-            var convertedCount = 0;
-            foreach (var sourcePath in sourcePaths)
-            {
-                var pngPath = sourcePath;
-                var extension = Path.GetExtension(sourcePath);
-                if (ConvertibleImageExtensions.Contains(extension))
-                {
-                    pngPath = Path.Combine(backgroundFolderPath, $"__bg_convert_{Guid.NewGuid():N}.png");
-                    await ConvertImageToPngAsync(sourcePath, pngPath);
-                    File.Delete(sourcePath);
-                    convertedCount++;
-                }
-
-                var parsed = ParseBackgroundImageFileName(pngPath);
-                entries.Add(parsed with { Path = pngPath });
-            }
-
-            await RenameBackgroundEntriesAsync(entries);
+            var convertedCount = await _backgroundImageService.NormalizeFilesAsync(
+                backgroundFolderPath,
+                ConvertImageToPngAsync,
+                orderedPaths);
             if (convertedCount > 0)
             {
                 AppendLog(LogKind.Info, $"已转换 JPG/JPEG/WebP 背景图为 png：{convertedCount} 个。");
@@ -15218,48 +9645,6 @@ namespace GalExcleTools
             }
 
             return ConvertImageToPngAsync(sourcePath, targetPngPath);
-        }
-
-        private static Task RenameBackgroundEntriesAsync(IReadOnlyList<BackgroundImageEntry> entries)
-        {
-            if (entries.Count == 0)
-            {
-                return Task.CompletedTask;
-            }
-
-            var digitCount = Math.Max(2, (entries.Count - 1).ToString().Length);
-            var plannedMoves = entries
-                .Select((entry, index) =>
-                {
-                    var folderPath = Path.GetDirectoryName(entry.Path)!;
-                    var baseName = $"BG{index.ToString().PadLeft(digitCount, '0')}";
-                    var fileName = string.IsNullOrWhiteSpace(entry.Remark)
-                        ? $"{baseName}.png"
-                        : $"{baseName}_{entry.Remark}.png";
-                    return new BackgroundImageRename(entry, Path.Combine(folderPath, fileName));
-                })
-                .ToList();
-
-            if (plannedMoves.All(move => PathsExactlyEqual(move.Entry.Path, move.TargetPath)))
-            {
-                return Task.CompletedTask;
-            }
-
-            var tempMoves = plannedMoves
-                .Select(move =>
-                {
-                    var tempPath = Path.Combine(Path.GetDirectoryName(move.Entry.Path)!, $"__bg_rename_{Guid.NewGuid():N}.png");
-                    File.Move(move.Entry.Path, tempPath, overwrite: true);
-                    return move with { Entry = move.Entry with { Path = tempPath } };
-                })
-                .ToList();
-
-            foreach (var move in tempMoves)
-            {
-                File.Move(move.Entry.Path, move.TargetPath, overwrite: true);
-            }
-
-            return Task.CompletedTask;
         }
 
         private static async Task ConvertImageToPngAsync(string sourcePath, string targetPngPath)
@@ -15289,163 +9674,6 @@ namespace GalExcleTools
             await encoder.FlushAsync();
         }
 
-        private static List<string> GetBackgroundImagePaths(string backgroundFolderPath)
-        {
-            return Directory
-                .EnumerateFiles(backgroundFolderPath, "*.png")
-                .OrderBy(Path.GetFileName)
-                .ToList();
-        }
-
-        private static BackgroundImageEntry ParseBackgroundImageFileName(string imagePath)
-        {
-            var name = Path.GetFileNameWithoutExtension(imagePath);
-            var match = Regex.Match(name, @"^BG\d+(?:_(?<remark>.+))?$", RegexOptions.IgnoreCase);
-            return new BackgroundImageEntry(
-                imagePath,
-                match.Success ? match.Groups["remark"].Value : string.Empty);
-        }
-
-        private static string SanitizeRemark(string remark)
-        {
-            var invalidChars = Path.GetInvalidFileNameChars().Concat(['_']).ToHashSet();
-            return new string(remark.Trim().Where(ch => !invalidChars.Contains(ch)).ToArray());
-        }
-
-        private static string GetBackgroundFolderPath(AssetLibraryInfo assetLibrary)
-        {
-            return Path.Combine(assetLibrary.Path, BackgroundFolderName);
-        }
-
-        private static string GetMusicFolderPath(AssetLibraryInfo assetLibrary)
-        {
-            return Path.Combine(assetLibrary.Path, MusicFolderName);
-        }
-
-        private static string GetAmbientSoundFolderPath(AssetLibraryInfo assetLibrary)
-        {
-            return Path.Combine(assetLibrary.Path, AmbientSoundFolderName);
-        }
-
-        private static string GetSoundEffectFolderPath(AssetLibraryInfo assetLibrary)
-        {
-            return Path.Combine(assetLibrary.Path, SoundEffectFolderName);
-        }
-
-        private static string GetFunctionFolderPath(AssetLibraryInfo assetLibrary)
-        {
-            return Path.Combine(assetLibrary.Path, FunctionFolderName);
-        }
-
-        private static string GetFunctionIndexPath(AssetLibraryInfo assetLibrary)
-        {
-            return Path.Combine(GetFunctionFolderPath(assetLibrary), FunctionIndexFileName);
-        }
-
-        private static string GetCharacterFilterFolderPath(AssetLibraryInfo assetLibrary)
-        {
-            return Path.Combine(assetLibrary.Path, CharacterFilterFolderName);
-        }
-
-        private static string GetCharacterFilterIndexPath(AssetLibraryInfo assetLibrary)
-        {
-            return Path.Combine(GetCharacterFilterFolderPath(assetLibrary), CharacterFilterIndexFileName);
-        }
-
-        private static string GetAudioFolderPath(AssetLibraryInfo assetLibrary, AudioAssetKind kind)
-        {
-            return kind switch
-            {
-                AudioAssetKind.Music => GetMusicFolderPath(assetLibrary),
-                AudioAssetKind.Ambient => GetAmbientSoundFolderPath(assetLibrary),
-                AudioAssetKind.SoundEffect => GetSoundEffectFolderPath(assetLibrary),
-                _ => GetMusicFolderPath(assetLibrary)
-            };
-        }
-
-        private static string GetCharacterFolderPath(AssetLibraryInfo assetLibrary)
-        {
-            return Path.Combine(assetLibrary.Path, CharacterFolderName);
-        }
-
-        private static void EnsureCharacterSubfolders(string characterPath)
-        {
-            Directory.CreateDirectory(Path.Combine(characterPath, "DN_Cloth"));
-            Directory.CreateDirectory(Path.Combine(characterPath, "FC_Face"));
-            Directory.CreateDirectory(Path.Combine(characterPath, "AD_Adorn"));
-            Directory.CreateDirectory(Path.Combine(characterPath, "VFX"));
-        }
-
-        private static CharacterInfo ReadCharacterInfo(string characterPath)
-        {
-            var metaPath = Path.Combine(characterPath, "character.json");
-            if (File.Exists(metaPath))
-            {
-                try
-                {
-                    var meta = JsonSerializer.Deserialize<CharacterMeta>(File.ReadAllText(metaPath));
-                    return new CharacterInfo(
-                        string.IsNullOrWhiteSpace(meta?.Name) ? Path.GetFileName(characterPath) : meta.Name!,
-                        string.IsNullOrWhiteSpace(meta?.Code) ? Path.GetFileName(characterPath) : meta.Code!,
-                        string.IsNullOrWhiteSpace(meta?.ColorHex) ? "#D9E8FF" : meta.ColorHex!,
-                        characterPath);
-                }
-                catch
-                {
-                    // Fall through to folder-derived defaults.
-                }
-            }
-
-            var fallbackCode = Path.GetFileName(characterPath);
-            return new CharacterInfo(fallbackCode, fallbackCode, "#D9E8FF", characterPath);
-        }
-
-        private void WriteCharacterMeta(string characterPath, CharacterEditorInput input)
-        {
-            var meta = new CharacterMeta
-            {
-                Name = input.Name,
-                Code = input.Code,
-                ColorHex = input.ColorHex
-            };
-            File.WriteAllText(Path.Combine(characterPath, "character.json"), JsonSerializer.Serialize(meta, _jsonOptions));
-        }
-
-        private static string SanitizeCharacterFolderName(string code)
-        {
-            var invalidChars = Path.GetInvalidFileNameChars().ToHashSet();
-            var sanitized = new string(code.Trim().Where(ch => !invalidChars.Contains(ch)).ToArray());
-            return string.IsNullOrWhiteSpace(sanitized) ? $"Character_{Guid.NewGuid():N}" : sanitized;
-        }
-
-        private static string NormalizeColorHex(string value)
-        {
-            var trimmed = value.Trim();
-            if (Regex.IsMatch(trimmed, "^#?[0-9a-fA-F]{6}$"))
-            {
-                return trimmed.StartsWith('#') ? trimmed.ToUpperInvariant() : $"#{trimmed.ToUpperInvariant()}";
-            }
-
-            return "#D9E8FF";
-        }
-
-        private static Windows.UI.Color ParseColor(string hex, Windows.UI.Color fallback)
-        {
-            var normalized = NormalizeColorHex(hex);
-            try
-            {
-                return Windows.UI.Color.FromArgb(
-                    255,
-                    Convert.ToByte(normalized.Substring(1, 2), 16),
-                    Convert.ToByte(normalized.Substring(3, 2), 16),
-                    Convert.ToByte(normalized.Substring(5, 2), 16));
-            }
-            catch
-            {
-                return fallback;
-            }
-        }
-
         private async void ChooseProjectRootButton_Click(object sender, RoutedEventArgs e)
         {
             var picker = new FolderPicker
@@ -15462,7 +9690,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var newProjectRootPath = Path.GetFullPath(Path.Combine(selectedFolder.Path, ProjectRootFolderName));
+            var newProjectRootPath = _appSettingsService.BuildProjectRootPathFromParent(selectedFolder.Path);
             var oldProjectRootPath = Path.GetFullPath(_projectRootPath);
             AppendLog(LogKind.User, $"选择新的整体项目父目录：{selectedFolder.Path}");
 
@@ -15481,16 +9709,22 @@ namespace GalExcleTools
             try
             {
                 AppendLog(LogKind.Info, $"开始迁移整体项目目录：{oldProjectRootPath} -> {newProjectRootPath}");
-                var result = MigrateProjectRoot(oldProjectRootPath, newProjectRootPath);
+                ShowGlobalProgress("迁移整体项目目录", newProjectRootPath);
+                UpdateGlobalProgress("正在复制和校验项目文件...", 5, $"{oldProjectRootPath} -> {newProjectRootPath}");
+                var result = await Task.Run(() => _projectRootMigrationService.Migrate(oldProjectRootPath, newProjectRootPath, GetGlobalProgressCancellationToken()));
 
                 _projectRootPath = newProjectRootPath;
                 _appSettings.ProjectRootPath = _projectRootPath;
                 SaveAppSettings();
                 EnsureProjectRootDirectory(_projectRootPath);
+                CompleteGlobalProgress("目录迁移完成", $"已迁移 {result.FileCount} 个文件、{result.DirectoryCount} 个文件夹");
+                await HideGlobalProgressAfterDelayAsync();
                 SetProjectRootStatus(InfoBarSeverity.Success, "目录迁移完成", $"已迁移并校验 {result.FileCount} 个文件、{result.DirectoryCount} 个文件夹。旧目录已删除：{oldProjectRootPath}");
             }
             catch (Exception ex)
             {
+                CompleteGlobalProgress(ex is OperationCanceledException ? "目录迁移已取消" : "目录迁移失败", ex.Message);
+                await HideGlobalProgressAfterDelayAsync();
                 EnsureProjectRootDirectory(_projectRootPath);
                 AppendLog(LogKind.Error, "整体项目目录迁移失败。", ex);
                 SetProjectRootStatus(InfoBarSeverity.Error, "目录迁移失败", $"已保留原目录和设置，未删除旧目录。错误：{ex.Message}");
@@ -15512,143 +9746,9 @@ namespace GalExcleTools
             AppendLog(logKind, $"{title}：{message}");
         }
 
-        private static MigrationResult MigrateProjectRoot(string oldProjectRootPath, string newProjectRootPath)
-        {
-            if (!Directory.Exists(oldProjectRootPath))
-            {
-                Directory.CreateDirectory(newProjectRootPath);
-                return new MigrationResult(0, 0);
-            }
-
-            Directory.CreateDirectory(newProjectRootPath);
-
-            var sourceDirectories = Directory.EnumerateDirectories(oldProjectRootPath, "*", SearchOption.AllDirectories).ToList();
-            foreach (var sourceDirectory in sourceDirectories)
-            {
-                var targetDirectory = Path.Combine(newProjectRootPath, Path.GetRelativePath(oldProjectRootPath, sourceDirectory));
-                Directory.CreateDirectory(targetDirectory);
-            }
-
-            var sourceFiles = Directory.EnumerateFiles(oldProjectRootPath, "*", SearchOption.AllDirectories).ToList();
-            foreach (var sourceFile in sourceFiles)
-            {
-                var targetFile = Path.Combine(newProjectRootPath, Path.GetRelativePath(oldProjectRootPath, sourceFile));
-                var targetDirectory = Path.GetDirectoryName(targetFile);
-                if (!string.IsNullOrEmpty(targetDirectory))
-                {
-                    Directory.CreateDirectory(targetDirectory);
-                }
-
-                File.Copy(sourceFile, targetFile, overwrite: true);
-            }
-
-            VerifyMigratedFiles(oldProjectRootPath, newProjectRootPath, sourceFiles);
-            Directory.Delete(oldProjectRootPath, recursive: true);
-
-            return new MigrationResult(sourceFiles.Count, sourceDirectories.Count);
-        }
-
-        private static void VerifyMigratedFiles(string oldProjectRootPath, string newProjectRootPath, IReadOnlyCollection<string> sourceFiles)
-        {
-            var failures = new List<string>();
-
-            foreach (var sourceFile in sourceFiles)
-            {
-                var relativePath = Path.GetRelativePath(oldProjectRootPath, sourceFile);
-                var targetFile = Path.Combine(newProjectRootPath, relativePath);
-
-                if (!File.Exists(targetFile))
-                {
-                    failures.Add($"{relativePath} 缺失");
-                    continue;
-                }
-
-                var sourceInfo = new FileInfo(sourceFile);
-                var targetInfo = new FileInfo(targetFile);
-                if (sourceInfo.Length != targetInfo.Length)
-                {
-                    failures.Add($"{relativePath} 大小不一致");
-                    continue;
-                }
-
-                if (!HashesEqual(sourceFile, targetFile))
-                {
-                    failures.Add($"{relativePath} 内容校验失败");
-                }
-            }
-
-            if (failures.Count > 0)
-            {
-                throw new IOException($"迁移校验失败：{string.Join("；", failures.Take(5))}");
-            }
-        }
-
-        private static bool HashesEqual(string leftPath, string rightPath)
-        {
-            using var hashAlgorithm = SHA256.Create();
-            using var leftStream = File.OpenRead(leftPath);
-            using var rightStream = File.OpenRead(rightPath);
-
-            return hashAlgorithm.ComputeHash(leftStream).SequenceEqual(hashAlgorithm.ComputeHash(rightStream));
-        }
-
-        private static string ComputeFileHash(string path)
-        {
-            using var hashAlgorithm = SHA256.Create();
-            using var stream = File.OpenRead(path);
-            return Convert.ToHexString(hashAlgorithm.ComputeHash(stream));
-        }
-
-        private static bool PathsEqual(string leftPath, string rightPath)
-        {
-            return string.Equals(
-                TrimDirectorySeparator(Path.GetFullPath(leftPath)),
-                TrimDirectorySeparator(Path.GetFullPath(rightPath)),
-                StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool PathsExactlyEqual(string leftPath, string rightPath)
-        {
-            return string.Equals(
-                TrimDirectorySeparator(Path.GetFullPath(leftPath)),
-                TrimDirectorySeparator(Path.GetFullPath(rightPath)),
-                StringComparison.Ordinal);
-        }
-
-        private static bool IsPathInsideDirectory(string path, string directoryPath)
-        {
-            var normalizedPath = TrimDirectorySeparator(Path.GetFullPath(path)) + Path.DirectorySeparatorChar;
-            var normalizedDirectoryPath = TrimDirectorySeparator(Path.GetFullPath(directoryPath)) + Path.DirectorySeparatorChar;
-            return normalizedPath.StartsWith(normalizedDirectoryPath, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string TrimDirectorySeparator(string path)
-        {
-            return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        }
-
-        private static AppSettings LoadAppSettings()
-        {
-            if (!File.Exists(SettingsFilePath))
-            {
-                return new AppSettings();
-            }
-
-            try
-            {
-                var settingsJson = File.ReadAllText(SettingsFilePath);
-                return JsonSerializer.Deserialize<AppSettings>(settingsJson) ?? new AppSettings();
-            }
-            catch
-            {
-                return new AppSettings();
-            }
-        }
-
         private void SaveAppSettings()
         {
-            Directory.CreateDirectory(SettingsDirectoryPath);
-            File.WriteAllText(SettingsFilePath, JsonSerializer.Serialize(_appSettings, _jsonOptions));
+            _appSettingsService.Save(_appSettings);
         }
 
         private void ShellNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -15656,6 +9756,11 @@ namespace GalExcleTools
             if (args.SelectedItemContainer?.Tag is not string tag)
             {
                 return;
+            }
+
+            if (!_isChangingShellSelectionInternally)
+            {
+                PlaySelectionSound();
             }
 
             if (tag == "Settings")
@@ -15720,7 +9825,7 @@ namespace GalExcleTools
         private GridViewItem CreateUnrealSyncProjectCard(ProjectInfo project, string? selectedFolderName)
         {
             var isSelected = string.Equals(project.FolderName, selectedFolderName, StringComparison.OrdinalIgnoreCase);
-            var binding = ReadProjectUnrealBinding(project);
+            var binding = _projectWorkspaceService.ReadProjectUnrealBinding(project);
             var footer = binding.IsComplete
                 ? "已保存虚幻关联"
                 : "未完整关联";
@@ -15729,13 +9834,16 @@ namespace GalExcleTools
                 footer = $"当前选择 · {footer}";
             }
 
-            var item = CreateBaseCard(project);
-            item.Tapped += UnrealSyncProjectCard_Tapped;
-            item.Content = CreateCardContent(project.ThumbnailPath, project.Name, $"{project.Code} | {project.AssetLibraryName}", footer);
+            var item = DashboardCardFactory.CreateInfoCard(
+                project,
+                project.ThumbnailPath,
+                project.Name,
+                $"{project.Code} | {project.AssetLibraryName}",
+                footer,
+                UnrealSyncProjectCard_Tapped);
             if (isSelected)
             {
-                item.BorderThickness = new Thickness(2);
-                item.BorderBrush = Application.Current.Resources["AccentFillColorDefaultBrush"] as Brush;
+                DashboardCardFactory.MarkSelected(item);
             }
 
             return item;
@@ -15793,7 +9901,7 @@ namespace GalExcleTools
             var project = GetSelectedUnrealSyncProject();
             var binding = project is null
                 ? new UnrealProjectBinding(_appSettings.UnrealEnginePath, _appSettings.UnrealProjectPath, _appSettings.UnrealContentFolderPath)
-                : ReadProjectUnrealBinding(project);
+                : _projectWorkspaceService.ReadProjectUnrealBinding(project);
             if (project is not null &&
                 !binding.IsComplete &&
                 string.Equals(project.FolderName, _appSettings.UnrealToolProjectFolderName, StringComparison.OrdinalIgnoreCase))
@@ -15804,13 +9912,6 @@ namespace GalExcleTools
             UnrealEnginePathTextBox.Text = binding.EnginePath ?? string.Empty;
             UnrealProjectPathTextBox.Text = binding.ProjectPath ?? string.Empty;
             UnrealContentFolderTextBox.Text = binding.ContentFolderPath ?? string.Empty;
-        }
-
-        private static UnrealProjectBinding ReadProjectUnrealBinding(ProjectInfo project)
-        {
-            var metaPath = Path.Combine(project.Path, ToolsFolderName, ProjectMetaFileName);
-            var meta = ReadJson<ProjectMeta>(metaPath) ?? new ProjectMeta();
-            return new UnrealProjectBinding(meta.UnrealEnginePath, meta.UnrealProjectPath, meta.UnrealContentFolderPath);
         }
 
         private async void ChooseUnrealEngineButton_Click(object sender, RoutedEventArgs e)
@@ -15983,8 +10084,9 @@ namespace GalExcleTools
                     result.Output.Contains("GalExcleTools could not create or load asset index data table", StringComparison.OrdinalIgnoreCase);
                 if (result.ExitCode == 0 && lustrationConfirmed && !assetIndexTableFailed)
                 {
-                    WriteUnrealSyncState(validation.Context, changePlan);
+                    _unrealSyncService.WriteState(validation.Context, changePlan);
                     SetUnrealSyncProgress(true, "同步完成 100%", false, 100);
+                    CompleteGlobalProgress("虚幻同步完成", $"处理 {changePlan.TotalChangedItems} 项，退出码 {result.ExitCode}");
                     if (storyTableFailed)
                     {
                         SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步完成，但剧情表未确认", "Unreal 日志提示 StoryStruct 或 DataTable 写入失败，请查看下方日志输出。");
@@ -16000,15 +10102,18 @@ namespace GalExcleTools
                 }
 
                 AppendLog(result.ExitCode == 0 ? LogKind.User : LogKind.Warning, $"虚幻同步结束，退出码：{result.ExitCode}");
+                NotifyUnrealSyncFinishedIfInactive(result, changePlan);
                 await ShowUnrealSyncFinishedDialogAsync(validation.Context, result, changePlan);
             }
             catch (Exception ex)
             {
+                CompleteGlobalProgress("虚幻同步失败", ex.Message);
                 SetUnrealSyncStatus(InfoBarSeverity.Error, "同步失败", ex.Message);
                 AppendLog(LogKind.Error, "虚幻同步失败。", ex);
             }
             finally
             {
+                await HideGlobalProgressAfterDelayAsync();
                 RunUnrealSyncButton.IsEnabled = true;
                 RefreshWorkbenchUnrealSyncTip();
             }
@@ -16033,26 +10138,9 @@ namespace GalExcleTools
 
             if (selectedProject is not null)
             {
-                SaveProjectUnrealBinding(selectedProject, enginePath, unrealProjectPath, contentFolderPath);
+                _projectWorkspaceService.SaveProjectUnrealBinding(selectedProject, enginePath, unrealProjectPath, contentFolderPath);
                 LoadUnrealSyncProjectOptions();
             }
-        }
-
-        private void SaveProjectUnrealBinding(ProjectInfo project, string enginePath, string unrealProjectPath, string contentFolderPath)
-        {
-            var toolsPath = Path.Combine(project.Path, ToolsFolderName);
-            Directory.CreateDirectory(toolsPath);
-            var metaPath = Path.Combine(toolsPath, ProjectMetaFileName);
-            var meta = ReadJson<ProjectMeta>(metaPath) ?? new ProjectMeta();
-            meta.ProjectName = string.IsNullOrWhiteSpace(meta.ProjectName) ? project.Name : meta.ProjectName;
-            meta.ProjectCode = string.IsNullOrWhiteSpace(meta.ProjectCode) ? project.Code : meta.ProjectCode;
-            meta.AssetLibraryName = string.IsNullOrWhiteSpace(meta.AssetLibraryName) ? project.AssetLibraryName : meta.AssetLibraryName;
-            meta.AssetLibraryFolderName = string.IsNullOrWhiteSpace(meta.AssetLibraryFolderName) ? project.AssetLibraryFolderName : meta.AssetLibraryFolderName;
-            meta.UnrealEnginePath = enginePath;
-            meta.UnrealProjectPath = unrealProjectPath;
-            meta.UnrealContentFolderPath = contentFolderPath;
-            meta.LastEditedAt = DateTime.Now;
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, _jsonOptions));
         }
 
         private void RefreshUnrealSyncStatus()
@@ -16100,14 +10188,52 @@ namespace GalExcleTools
 
         private void SetUnrealSyncProgress(bool isVisible, string message, bool isIndeterminate = true, double value = 0)
         {
-            UnrealSyncProgressPanel.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
-            UnrealSyncProgressBar.IsIndeterminate = isVisible && isIndeterminate;
-            if (!isIndeterminate)
+            UnrealSyncProgressPanel.Visibility = Visibility.Collapsed;
+            UnrealSyncProgressBar.IsIndeterminate = false;
+            UnrealSyncProgressBar.Value = 0;
+            UnrealSyncProgressText.Text = string.Empty;
+            if (isVisible)
             {
-                UnrealSyncProgressBar.Value = value;
+                if (!_isGlobalProgressVisible)
+                {
+                    ShowGlobalProgress("虚幻同步", message);
+                }
+
+                UpdateGlobalProgress(message, value, "正在同步工具箱项目、素材库和 Unreal 目标目录。", isIndeterminate);
+            }
+            else if (_isGlobalProgressVisible && string.Equals(_globalProgressOperationTitle, "虚幻同步", StringComparison.Ordinal))
+            {
+                HideGlobalProgress();
+            }
+        }
+
+        private void NotifyUnrealSyncFinishedIfInactive(UnrealSyncResult result, UnrealSyncChangePlan changePlan)
+        {
+            if (_isWindowActive)
+            {
+                return;
             }
 
-            UnrealSyncProgressText.Text = message;
+            try
+            {
+                var manager = AppNotificationManager.Default;
+                manager.Register();
+
+                var title = result.ExitCode == 0 ? "虚幻同步完成" : "虚幻同步结束";
+                var status = result.ExitCode == 0 ? "同步成功" : $"退出码 {result.ExitCode}";
+                var body = $"{status}，处理 {changePlan.TotalChangedItems} 项。";
+                var notification = new AppNotificationBuilder()
+                    .AddText(title)
+                    .AddText(body)
+                    .BuildNotification();
+                notification.Tag = "UnrealSync";
+                notification.Group = "GalExcleTools";
+                manager.Show(notification);
+            }
+            catch (Exception ex)
+            {
+                AppendLog(LogKind.Warning, $"虚幻同步完成通知发送失败：{ex.Message}");
+            }
         }
 
         private void ApplyUnrealSyncChangePlan(UnrealSyncChangePlan changePlan)
@@ -16130,22 +10256,16 @@ namespace GalExcleTools
         private async Task<bool?> ShowUnrealBackupDialogAsync(UnrealSyncContext context)
         {
             var backupFolder = GetUnrealBackupFolder(context);
-            var dialog = new ContentDialog
-            {
-                Title = "同步前备份虚幻项目？",
-                Content = $"建议在写入虚幻项目前先生成一个不带缓存的干净压缩包。\n默认位置：{backupFolder}",
-                PrimaryButtonText = "备份并同步",
-                SecondaryButtonText = "直接同步",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
+            var result = await _dialogService.ShowAsync(new DialogRequest(
+                "同步前备份虚幻项目？",
+                $"建议在写入虚幻项目前先生成一个不带缓存的干净压缩包。\n默认位置：{backupFolder}",
+                "备份并同步",
+                "取消",
+                "直接同步"));
             return result switch
             {
-                ContentDialogResult.Primary => true,
-                ContentDialogResult.Secondary => false,
+                DialogResultKind.Primary => true,
+                DialogResultKind.Secondary => false,
                 _ => null
             };
         }
@@ -16159,22 +10279,16 @@ namespace GalExcleTools
             }
 
             var processText = string.Join("\n", runningEditors.Select(process => $"{process.ProcessName}  PID {process.Id}"));
-            var dialog = new ContentDialog
-            {
-                Title = "检测到 Unreal Editor 正在运行",
-                Content = $"建议先关闭当前打开的虚幻编辑器，再执行同步。否则编辑器中已加载的资产可能不会刷新，后续保存还可能覆盖同步结果。\n\n{processText}",
-                PrimaryButtonText = "关闭后同步",
-                SecondaryButtonText = "继续同步",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
+            var result = await _dialogService.ShowAsync(new DialogRequest(
+                "检测到 Unreal Editor 正在运行",
+                $"建议先关闭当前打开的虚幻编辑器，再执行同步。否则编辑器中已加载的资产可能不会刷新，后续保存还可能覆盖同步结果。\n\n{processText}",
+                "关闭后同步",
+                "取消",
+                "继续同步"));
             return result switch
             {
-                ContentDialogResult.Primary => true,
-                ContentDialogResult.Secondary => false,
+                DialogResultKind.Primary => true,
+                DialogResultKind.Secondary => false,
                 _ => null
             };
         }
@@ -16184,25 +10298,19 @@ namespace GalExcleTools
             UnrealSyncResult result,
             UnrealSyncChangePlan changePlan)
         {
-            var dialog = new ContentDialog
-            {
-                Title = result.ExitCode == 0 ? "虚幻同步完成" : "虚幻同步已结束",
-                Content = result.ExitCode == 0
+            var dialogResult = await _dialogService.ShowAsync(new DialogRequest(
+                result.ExitCode == 0 ? "虚幻同步完成" : "虚幻同步已结束",
+                result.ExitCode == 0
                     ? $"本次同步处理 {changePlan.TotalChangedItems} 项。现在可以直接打开虚幻项目检查结果。"
                     : $"Unreal Editor 返回退出码 {result.ExitCode}。可以打开项目或查看日志继续确认。",
-                PrimaryButtonText = "打开虚幻项目",
-                SecondaryButtonText = "打开日志目录",
-                CloseButtonText = "知道了",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = Content.XamlRoot
-            };
-
-            var dialogResult = await dialog.ShowAsync();
-            if (dialogResult == ContentDialogResult.Primary)
+                "打开虚幻项目",
+                "知道了",
+                "打开日志目录"));
+            if (dialogResult == DialogResultKind.Primary)
             {
                 OpenUnrealProject(context);
             }
-            else if (dialogResult == ContentDialogResult.Secondary)
+            else if (dialogResult == DialogResultKind.Secondary)
             {
                 OpenUnrealLogFolder(context);
             }
@@ -16287,11 +10395,6 @@ namespace GalExcleTools
             }
         }
 
-        private static string GetUnrealBackupFolder(UnrealSyncContext context)
-        {
-            return Path.Combine(context.Project.Path, ToolsFolderName, UnrealBackupsFolderName);
-        }
-
         private static string CreateCleanUnrealProjectBackup(UnrealSyncContext context)
         {
             var unrealProjectRoot = Path.GetDirectoryName(context.UnrealProjectPath)
@@ -16326,46 +10429,6 @@ namespace GalExcleTools
             return backupPath;
         }
 
-        private static string GetUnrealSyncStatePath(UnrealSyncContext context)
-        {
-            return Path.Combine(context.Project.Path, ToolsFolderName, "unreal-sync-state.json");
-        }
-
-        private UnrealSyncState ReadUnrealSyncState(UnrealSyncContext context)
-        {
-            var path = GetUnrealSyncStatePath(context);
-            if (!File.Exists(path))
-            {
-                return new UnrealSyncState();
-            }
-
-            try
-            {
-                return JsonSerializer.Deserialize<UnrealSyncState>(File.ReadAllText(path)) ?? new UnrealSyncState();
-            }
-            catch
-            {
-                return new UnrealSyncState();
-            }
-        }
-
-        private void WriteUnrealSyncState(UnrealSyncContext context, UnrealSyncChangePlan changePlan)
-        {
-            var statePath = GetUnrealSyncStatePath(context);
-            Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
-            var state = ReadUnrealSyncState(context);
-            state.LastSyncedAt = DateTimeOffset.Now;
-            state.LustrationHash = changePlan.LustrationHash;
-            state.AssetIndexTablesHash = changePlan.AssetIndexTablesHash;
-            File.WriteAllText(statePath, JsonSerializer.Serialize(state, _jsonOptions), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        }
-
-        private static string ComputeSha256Hex(string value)
-        {
-            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
-            return Convert.ToHexString(bytes);
-        }
-
         private UnrealSyncValidation ValidateUnrealSync(bool useUiValues)
         {
             var enginePath = useUiValues ? UnrealEnginePathTextBox.Text.Trim() : _appSettings.UnrealEnginePath ?? string.Empty;
@@ -16379,7 +10442,7 @@ namespace GalExcleTools
             var warnings = new List<string>();
             var errors = new List<string>();
 
-            var editorPath = ResolveUnrealEditorExecutable(enginePath);
+            var editorPath = UnrealSyncService.ResolveEditorExecutable(enginePath);
             if (editorPath is null)
             {
                 errors.Add("请选择有效的 UnrealEditor.exe 或 UnrealEditor-Cmd.exe。");
@@ -16446,7 +10509,7 @@ namespace GalExcleTools
                 {
                     targetAssetRoot = ToUnrealAssetPath(contentRootPath, contentFolderPath);
                     planItems.Add($"目标内容路径：{targetAssetRoot}");
-                    var missingFolders = ExpectedUnrealNarrativeFolders
+                    var missingFolders = UnrealSyncService.ExpectedNarrativeFolders
                         .Where(folder => !Directory.Exists(Path.Combine(contentFolderPath, folder)))
                         .ToList();
                     if (missingFolders.Count > 0)
@@ -16489,16 +10552,16 @@ namespace GalExcleTools
 
         private List<string> CreateUnrealSyncPlanItems(ProjectInfo project, AssetLibraryInfo assetLibrary, string contentFolderPath)
         {
-            var backgroundCount = GetBackgroundImagePaths(GetBackgroundFolderPath(assetLibrary)).Count;
-            var musicCount = GetAudioFilePaths(GetMusicFolderPath(assetLibrary)).Count;
-            var sceneCount = GetAudioFilePaths(GetAmbientSoundFolderPath(assetLibrary)).Count;
-            var soundEffectCount = GetAudioFilePaths(GetSoundEffectFolderPath(assetLibrary)).Count;
+            var backgroundCount = BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(assetLibrary)).Count;
+            var musicCount = AudioAssetService.GetFilePaths(GetMusicFolderPath(assetLibrary)).Count;
+            var sceneCount = AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(assetLibrary)).Count;
+            var soundEffectCount = AudioAssetService.GetFilePaths(GetSoundEffectFolderPath(assetLibrary)).Count;
             var csvCount = GetProjectStoryCsvPaths(project).Count;
             var characterLayerCount = GetProjectCharacterLayerImportPaths(assetLibrary).Count;
             var lustrationRowCount = GetCharactersForAssetLibrary(assetLibrary).Count;
-            var existingBackgroundCount = CountUnrealAssets(Path.Combine(contentFolderPath, "BackGround"));
-            var existingMusicCount = CountUnrealAssets(Path.Combine(contentFolderPath, "BGM"));
-            var existingSceneCount = CountUnrealAssets(Path.Combine(contentFolderPath, "Scene_Effect"));
+            var existingBackgroundCount = UnrealSyncService.CountAssets(Path.Combine(contentFolderPath, "BackGround"));
+            var existingMusicCount = UnrealSyncService.CountAssets(Path.Combine(contentFolderPath, "BGM"));
+            var existingSceneCount = UnrealSyncService.CountAssets(Path.Combine(contentFolderPath, "Scene_Effect"));
 
             return
             [
@@ -16522,1029 +10585,43 @@ namespace GalExcleTools
             UnrealSyncChangePlan changePlan,
             IProgress<UnrealSyncProgressUpdate>? progress = null)
         {
-            var savedFolder = Path.Combine(Path.GetDirectoryName(context.UnrealProjectPath)!, "Saved", "GalExcleTools");
-            Directory.CreateDirectory(savedFolder);
-            var manifestPath = Path.Combine(savedFolder, "gal-sync-manifest.json");
-            var scriptPath = Path.Combine(savedFolder, "gal_sync_import.py");
-
-            progress?.Report(new UnrealSyncProgressUpdate("正在写入同步清单...", 40));
-            WriteUnrealSyncManifest(context, changePlan, manifestPath);
-            progress?.Report(new UnrealSyncProgressUpdate("正在写入 Unreal Python 脚本...", 48));
-            WriteUnrealSyncPythonScript(scriptPath, manifestPath);
-
-            var processStartInfo = new ProcessStartInfo
-            {
-                FileName = context.EditorPath,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-            processStartInfo.ArgumentList.Add(context.UnrealProjectPath);
-            processStartInfo.ArgumentList.Add($"-ExecutePythonScript={scriptPath}");
-            processStartInfo.ArgumentList.Add("-unattended");
-            processStartInfo.ArgumentList.Add("-nop4");
-            processStartInfo.ArgumentList.Add("-nosplash");
-
-            progress?.Report(new UnrealSyncProgressUpdate("正在启动 Unreal Editor 命令进程...", 55));
-            using var process = Process.Start(processStartInfo) ?? throw new InvalidOperationException("无法启动 Unreal Editor。");
-            var outputTask = process.StandardOutput.ReadToEndAsync();
-            var errorTask = process.StandardError.ReadToEndAsync();
-            progress?.Report(new UnrealSyncProgressUpdate("Unreal 正在导入变动资源并保存资产...", 70));
-            if (!process.WaitForExit(30 * 60 * 1000))
-            {
-                process.Kill(entireProcessTree: true);
-                throw new TimeoutException("Unreal Editor 同步超过 30 分钟，已终止进程。");
-            }
-
-            progress?.Report(new UnrealSyncProgressUpdate("正在收集 Unreal 同步结果...", 95));
-            var output = outputTask.Result + errorTask.Result + ReadLatestUnrealSyncLogSnippet(context);
-            return new UnrealSyncResult(process.ExitCode, manifestPath, scriptPath, output);
-        }
-
-        private static string ReadLatestUnrealSyncLogSnippet(UnrealSyncContext context)
-        {
-            try
-            {
-                var logsFolder = Path.Combine(Path.GetDirectoryName(context.UnrealProjectPath)!, "Saved", "Logs");
-                if (!Directory.Exists(logsFolder))
-                {
-                    return string.Empty;
-                }
-
-                var latestLogPath = Directory
-                    .EnumerateFiles(logsFolder, "*.log", SearchOption.TopDirectoryOnly)
-                    .OrderByDescending(File.GetLastWriteTimeUtc)
-                    .FirstOrDefault();
-                if (latestLogPath is null)
-                {
-                    return string.Empty;
-                }
-
-                var lines = File
-                    .ReadLines(latestLogPath, Encoding.UTF8)
-                    .Where(line =>
-                        line.Contains("GalExcleTools", StringComparison.OrdinalIgnoreCase) ||
-                        line.Contains("LogCSVImportFactory", StringComparison.OrdinalIgnoreCase))
-                    .TakeLast(200)
-                    .ToList();
-                return lines.Count == 0
-                    ? string.Empty
-                    : $"\n[Unreal 日志确认：{latestLogPath}]\n{string.Join('\n', lines)}";
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        private void WriteUnrealSyncManifest(UnrealSyncContext context, UnrealSyncChangePlan changePlan, string manifestPath)
-        {
             var filters = File.Exists(GetCharacterFilterIndexPath(context.AssetLibrary))
-                ? ReadCharacterFilters(context.AssetLibrary)
+                ? _characterFilterService.Read(context.AssetLibrary)
                 : [];
-            var manifest = new
-            {
-                GeneratedAt = DateTimeOffset.Now,
-                ToolProject = new
-                {
-                    context.Project.Name,
-                    context.Project.Code,
-                    context.Project.Path
-                },
-                UnrealProjectPath = context.UnrealProjectPath,
-                TargetRoot = context.TargetAssetRoot,
-                LustrationInfo = new
-                {
-                    DataAsset = $"{context.TargetAssetRoot}/Lustration/DA_LustrationInfor.DA_LustrationInfor",
-                    MapProperty = "Infor",
-                    ShouldUpdate = changePlan.LustrationChanged,
-                    Rows = changePlan.LustrationChanged ? changePlan.LustrationRows : []
-                },
-                StoryTables = changePlan.StoryTables,
-                AssetIndexTables = changePlan.AssetIndexTables,
-                Imports = changePlan.ImportGroups,
-                Filters = filters
-            };
-
-            File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, _jsonOptions), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            return _unrealSyncService.Run(context, changePlan, filters, progress);
         }
 
         private List<UnrealStoryTableSyncEntry> BuildStoryTableSyncEntries(UnrealSyncContext context)
         {
-            var chaptersFolderPath = GetChaptersFolderPath(context.Project);
-            if (!Directory.Exists(chaptersFolderPath))
-            {
-                return [];
-            }
-
-            var result = new List<UnrealStoryTableSyncEntry>();
-            foreach (var chapter in Directory.EnumerateDirectories(chaptersFolderPath).Select(ReadChapterInfo))
-            {
-                var chapterCsvs = GetChapterStoryCsvPathsForUnrealSync(context.Project, chapter);
-                foreach (var entry in chapterCsvs)
-                {
-                    var assetName = entry.AssetName;
-                    var tableFolder = BuildUnrealStoryTableFolder(context, chapter, entry.IsSectionCsv);
-                    result.Add(new UnrealStoryTableSyncEntry(
-                        entry.CsvPath,
-                        $"{tableFolder}/{assetName}.{assetName}",
-                        "/Script/GALLibrary.StoryStruct",
-                        BuildLegacyUnrealStoryTableAssets(context, chapter, entry.CsvPath, tableFolder, assetName)));
-                }
-            }
-
-            return result
-                .OrderBy(entry => entry.TableAsset, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-
-        private List<UnrealAssetIndexTableSyncEntry> BuildUnrealAssetIndexTableSyncEntries(UnrealSyncContext context)
-        {
-            var cacheFolder = Path.Combine(context.Project.Path, ToolsFolderName, UnrealAssetIndexTablesFolderName);
-            Directory.CreateDirectory(cacheFolder);
-
-            return
-            [
-                CreateUnrealAssetIndexTableSyncEntry(
-                    cacheFolder,
-                    "BGIndexMap",
-                    $"{context.TargetAssetRoot}/ExcelTexts/BGIndexMap.BGIndexMap",
-                    "/Script/GALLibrary.Texture2DTable",
-                    "Texture2D",
-                    GetBackgroundImagePaths(GetBackgroundFolderPath(context.AssetLibrary))
-                        .Select(path => BuildUnrealTextureReference($"{context.TargetAssetRoot}/BackGround", path))
-                        .ToList()),
-                CreateUnrealAssetIndexTableSyncEntry(
-                    cacheFolder,
-                    "BGMap",
-                    $"{context.TargetAssetRoot}/ExcelTexts/BGMap.BGMap",
-                    "/Script/GALLibrary.WaveTable",
-                    "Wave",
-                    GetAudioFilePaths(GetMusicFolderPath(context.AssetLibrary))
-                        .Select(path => BuildUnrealSoundWaveReference($"{context.TargetAssetRoot}/BGM", path))
-                        .ToList()),
-                CreateUnrealAssetIndexTableSyncEntry(
-                    cacheFolder,
-                    "SceneIndexMap",
-                    $"{context.TargetAssetRoot}/ExcelTexts/SceneIndexMap.SceneIndexMap",
-                    "/Script/GALLibrary.WaveTable",
-                    "Wave",
-                    GetAudioFilePaths(GetAmbientSoundFolderPath(context.AssetLibrary))
-                        .Select(path => BuildUnrealSoundWaveReference($"{context.TargetAssetRoot}/Scene_Effect", path))
-                        .ToList()),
-                CreateUnrealAssetIndexTableSyncEntry(
-                    cacheFolder,
-                    "ExsIndexMap",
-                    $"{context.TargetAssetRoot}/ExcelTexts/ExsIndexMap.ExsIndexMap",
-                    "/Script/GALLibrary.WaveTable",
-                    "Wave",
-                    GetAudioFilePaths(GetSoundEffectFolderPath(context.AssetLibrary))
-                        .Select(path => BuildUnrealSoundWaveReference($"{context.TargetAssetRoot}/Scene_Effect", path))
-                        .ToList())
-            ];
-        }
-
-        private static UnrealAssetIndexTableSyncEntry CreateUnrealAssetIndexTableSyncEntry(
-            string cacheFolder,
-            string tableName,
-            string tableAsset,
-            string rowStruct,
-            string valueColumnName,
-            IReadOnlyList<string> assetReferences)
-        {
-            var csvPath = Path.Combine(cacheFolder, $"{tableName}.csv");
-            WriteUnrealAssetIndexTableCsv(csvPath, valueColumnName, assetReferences);
-            var hashSource = $"{tableAsset}|{rowStruct}|{valueColumnName}|{string.Join('\n', assetReferences)}";
-            return new UnrealAssetIndexTableSyncEntry(csvPath, tableAsset, rowStruct, ComputeSha256Hex(hashSource));
-        }
-
-        private static void WriteUnrealAssetIndexTableCsv(string csvPath, string valueColumnName, IReadOnlyList<string> assetReferences)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(csvPath)!);
-            var builder = new StringBuilder();
-            builder.AppendLine(string.Join(",", [EscapeCsvField("---"), EscapeCsvField(valueColumnName)]));
-            for (var i = 0; i < assetReferences.Count; i++)
-            {
-                builder.AppendLine(string.Join(",",
-                [
-                    EscapeCsvField(i.ToString(CultureInfo.InvariantCulture)),
-                    EscapeCsvField(assetReferences[i])
-                ]));
-            }
-
-            File.WriteAllText(csvPath, builder.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        }
-
-        private static string ComputeUnrealAssetIndexTablesHash(IReadOnlyList<UnrealAssetIndexTableSyncEntry> entries)
-        {
-            return ComputeSha256Hex("asset-index-tables-v1|" + string.Join(
-                "\n",
-                entries
-                    .OrderBy(entry => entry.TableAsset, StringComparer.OrdinalIgnoreCase)
-                    .Select(entry => $"{entry.TableAsset}|{entry.SourceHash}")));
-        }
-
-        private List<StoryTableCsvEntry> GetChapterStoryCsvPathsForUnrealSync(ProjectInfo project, ChapterInfo chapter)
-        {
-            CleanupUnrealStorySectionCache(project, chapter);
-            var sectionFiles = GetLocalStorySectionCsvPaths(chapter)
-                .OrderBy(item => item.Section)
-                .ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (sectionFiles.Count == 0)
-            {
-                return [];
-            }
-
-            var activeSections = new List<StorySectionCsvFile>();
-            foreach (var sectionFile in sectionFiles)
-            {
-                var rows = ReadStoryRows(sectionFile.Path);
-                if (!rows.Any(StoryRowHasContent))
-                {
-                    if (sectionFile.Section > 1 && File.Exists(sectionFile.Path))
-                    {
-                        File.Delete(sectionFile.Path);
-                    }
-
-                    continue;
-                }
-
-                activeSections.Add(sectionFile);
-            }
-
-            if (activeSections.Count == 0)
-            {
-                return [];
-            }
-
-            var hasMultipleSections = activeSections.Count > 1 || activeSections.Any(item => item.Section > 1);
-            return activeSections
-                .Select(item => new StoryTableCsvEntry(
-                    item.Path,
-                    hasMultipleSections ? BuildSectionCsvFileBaseName(chapter.Code, item.Section) : BuildSectionCsvBaseName(chapter.Code),
-                    hasMultipleSections))
-                .ToList();
-        }
-
-        private static string GetUnrealStorySectionCacheFolder(ProjectInfo project, ChapterInfo chapter)
-        {
-            return Path.Combine(
-                project.Path,
-                ToolsFolderName,
-                UnrealStorySectionCacheFolderName,
-                RemoveChapterSectionSuffix(chapter.Code));
-        }
-
-        private static void CleanupUnrealStorySectionCache(ProjectInfo project, ChapterInfo chapter)
-        {
-            var folder = GetUnrealStorySectionCacheFolder(project, chapter);
-            if (!Directory.Exists(folder))
-            {
-                return;
-            }
-
-            foreach (var csvPath in Directory.EnumerateFiles(folder, "*.csv", SearchOption.TopDirectoryOnly))
-            {
-                File.Delete(csvPath);
-            }
-        }
-
-        private static void CleanupVisibleStorySectionCsvFiles(ChapterInfo chapter)
-        {
-            if (!Directory.Exists(chapter.Path))
-            {
-                return;
-            }
-
-            var mainCsvPath = GetChapterStoryCsvPath(chapter);
-            var baseName = BuildSectionCsvBaseName(chapter.Code);
-            var sectionBaseName = BuildSectionCsvChapterBaseName(chapter.Code);
-            var stalePaths = Directory
-                .EnumerateFiles(chapter.Path, $"{baseName}_小节*.csv", SearchOption.TopDirectoryOnly)
-                .Concat(Directory.EnumerateFiles(chapter.Path, $"{sectionBaseName}_*.csv", SearchOption.TopDirectoryOnly))
-                .Concat(Directory.EnumerateFiles(chapter.Path, $"{sectionBaseName}-*.csv", SearchOption.TopDirectoryOnly))
-                .Where(path => !PathsEqual(path, mainCsvPath))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            foreach (var csvPath in stalePaths)
-            {
-                File.Delete(csvPath);
-            }
-        }
-
-        private static Dictionary<string, int> ReadStorySectionMap(ChapterInfo chapter)
-        {
-            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var state = ReadJson<StorySectionState>(GetStorySectionsPath(chapter));
-            if (state?.Rows is null)
-            {
-                return result;
-            }
-
-            foreach (var pair in state.Rows)
-            {
-                if (!string.IsNullOrWhiteSpace(pair.Key))
-                {
-                    result[pair.Key] = Math.Max(1, pair.Value);
-                }
-            }
-
-            return result;
-        }
-
-        private static List<int> GetSynchronizedStorySections(
-            IReadOnlyList<StoryRow> rows,
-            IReadOnlyDictionary<string, int> rowSections)
-        {
-            var result = new List<int>();
-            var previousSection = 1;
-            foreach (var row in rows)
-            {
-                var rowName = row.Get("Name");
-                if (rowSections.TryGetValue(rowName, out var section))
-                {
-                    previousSection = Math.Max(1, section);
-                }
-
-                result.Add(previousSection);
-            }
-
-            return result;
-        }
-
-        private static string BuildUnrealStoryTableFolder(UnrealSyncContext context, ChapterInfo chapter, bool hasMultipleSections)
-        {
-            var categoryFolder = GetUnrealChapterCategoryFolder(chapter.Type);
-            var folder = $"{context.TargetAssetRoot}/ExcelTexts/{categoryFolder}";
-            return hasMultipleSections
-                ? $"{folder}/{SanitizeUnrealAssetName(RemoveChapterSectionSuffix(chapter.Code))}"
-                : folder;
-        }
-
-        private static List<string> BuildLegacyUnrealStoryTableAssets(
-            UnrealSyncContext context,
-            ChapterInfo chapter,
-            string csvPath,
-            string targetFolder,
-            string targetAssetName)
-        {
-            var categoryFolder = GetUnrealChapterCategoryFolder(chapter.Type);
-            var rootFolder = $"{context.TargetAssetRoot}/ExcelTexts/{categoryFolder}";
-            var previousFolder = $"{rootFolder}/{SanitizeUnrealAssetName(chapter.Code)}";
-            var previousUnderscoreFolder = $"{rootFolder}/{SanitizeUnrealAssetName(chapter.Code.Replace('-', '_'))}";
-            var legacyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                SanitizeUnrealAssetName(Path.GetFileNameWithoutExtension(csvPath)),
-                SanitizeUnrealAssetName(Path.GetFileNameWithoutExtension(csvPath).Replace('-', '_')),
-                $"{BuildSectionCsvBaseName(chapter.Code)}_小节{TryParseStorySectionFromFileName(chapter, csvPath) ?? 1}"
-            };
-            foreach (var legacyUnderscoreName in legacyNames.Select(name => name.Replace('-', '_')).ToList())
-            {
-                legacyNames.Add(legacyUnderscoreName);
-            }
-
-            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var folder in new[] { rootFolder, previousFolder, previousUnderscoreFolder, targetFolder })
-            {
-                foreach (var name in legacyNames)
-                {
-                    var objectPath = $"{folder}/{name}.{name}";
-                    if (!string.Equals(objectPath, $"{targetFolder}/{targetAssetName}.{targetAssetName}", StringComparison.OrdinalIgnoreCase))
-                    {
-                        result.Add(objectPath);
-                    }
-                }
-            }
-
-            return result.ToList();
-        }
-
-        private static int? TryParseStorySectionFromFileName(ChapterInfo chapter, string csvPath)
-        {
-            var fileName = Path.GetFileNameWithoutExtension(csvPath);
-            var currentPrefix = BuildSectionCsvChapterBaseName(chapter.Code);
-            var currentMatch = Regex.Match(fileName, $"^{Regex.Escape(currentPrefix)}[-_](?<index>\\d+)$", RegexOptions.IgnoreCase);
-            if (currentMatch.Success)
-            {
-                return ParseInt(currentMatch.Groups["index"].Value) + 1;
-            }
-
-            var oldPrefix = BuildSectionCsvBaseName(chapter.Code);
-            var oldMatch = Regex.Match(fileName, $"^{Regex.Escape(oldPrefix)}_小节(?<index>\\d+)$", RegexOptions.IgnoreCase);
-            if (oldMatch.Success)
-            {
-                return Math.Max(1, ParseInt(oldMatch.Groups["index"].Value));
-            }
-
-            var anyOldSectionSuffix = Regex.Match(fileName, @"_小节(?<index>\d+)$", RegexOptions.IgnoreCase);
-            return anyOldSectionSuffix.Success ? Math.Max(1, ParseInt(anyOldSectionSuffix.Groups["index"].Value)) : null;
-        }
-
-        private static string GetUnrealChapterCategoryFolder(string chapterType)
-        {
-            return chapterType switch
-            {
-                ChapterKind.MainThread => "MainStory",
-                ChapterKind.Interlude => "Interlude",
-                ChapterKind.Simulation => "Simulation",
-                ChapterKind.EventActivity => "EventActivity",
-                ChapterKind.WorldDialog => "WorldDialog",
-                ChapterKind.Minecraft => "Minecraft",
-                _ => "Other"
-            };
+            return _unrealSyncService.BuildStoryTableSyncEntries(context, _projectWorkspaceService.GetChapters(context.Project));
         }
 
         private UnrealSyncChangePlan BuildUnrealSyncChangePlan(UnrealSyncContext context, bool forceFullSync = false)
         {
-            var importGroups = BuildUnrealImportGroups(context)
-                .Select(group => new UnrealSyncImportGroup(
-                    group.Destination,
-                    forceFullSync
-                        ? group.Files.ToList()
-                        : group.Files
-                            .Where(path => SourceFileNeedsUnrealImport(context, group.Destination, path))
-                            .ToList()))
-                .Where(group => group.Files.Count > 0)
-                .ToList();
-
+            var characters = GetCharactersForAssetLibrary(context.AssetLibrary);
             var allStoryTables = BuildStoryTableSyncEntries(context);
-            var storyTables = forceFullSync
-                ? allStoryTables
-                : allStoryTables
-                    .Where(entry => SourceFileNeedsUnrealAssetUpdate(context, entry.CsvPath, entry.TableAsset))
-                    .ToList();
+            var assetIndexTableCacheFolder = Path.Combine(context.Project.Path, ToolsFolderName, UnrealAssetIndexTablesFolderName);
 
-            var syncState = ReadUnrealSyncState(context);
-            var allAssetIndexTables = BuildUnrealAssetIndexTableSyncEntries(context);
-            var assetIndexTablesHash = ComputeUnrealAssetIndexTablesHash(allAssetIndexTables);
-            var assetIndexTablesChanged =
-                forceFullSync ||
-                !string.Equals(syncState.AssetIndexTablesHash, assetIndexTablesHash, StringComparison.OrdinalIgnoreCase) ||
-                allAssetIndexTables.Any(entry => !File.Exists(UnrealAssetObjectPathToFilePath(context, entry.TableAsset)));
-            var assetIndexTables = assetIndexTablesChanged ? allAssetIndexTables : [];
-
-            var lustrationRows = BuildUnrealLustrationSyncEntries(context);
-            var lustrationHash = ComputeSha256Hex("lustration-dataasset-v3-preserve-vfx|" + JsonSerializer.Serialize(lustrationRows, _jsonOptions));
-            var lustrationAssetPath = $"{context.TargetAssetRoot}/Lustration/DA_LustrationInfor.DA_LustrationInfor";
-            var lustrationAssetFilePath = UnrealAssetObjectPathToFilePath(context, lustrationAssetPath);
-            var lustrationChanged =
-                forceFullSync ||
-                !File.Exists(lustrationAssetFilePath) ||
-                !string.Equals(syncState.LustrationHash, lustrationHash, StringComparison.OrdinalIgnoreCase);
-
-            var importCount = importGroups.Sum(group => group.Files.Count);
-            var storyTableCount = storyTables.Count;
-            var assetIndexTableCount = assetIndexTables.Count;
-            var totalChanged = importCount + storyTableCount + assetIndexTableCount + (lustrationChanged ? 1 : 0);
-            var planItems = new List<string>
-            {
-                forceFullSync ? "全部重新同步：已忽略时间戳和同步缓存" : "同步模式：仅同步检测到的变动",
-                $"变动素材文件：{importCount} 个",
-                $"变动剧情 CSV/DataTable：{storyTableCount} 个",
-                assetIndexTablesChanged
-                    ? $"素材索引表：需要更新 {assetIndexTableCount} 张 DataTable"
-                    : "素材索引表：无变动",
-                lustrationChanged
-                    ? $"立绘数据资产：需要更新 {lustrationRows.Count} 个角色映射"
-                    : "立绘数据资产：无变动"
-            };
-
-            foreach (var group in importGroups)
-            {
-                planItems.Add($"{group.Destination}：{group.Files.Count} 个文件待导入");
-            }
-
-            if (storyTableCount > 0)
-            {
-                planItems.Add($"ExcelTexts：{storyTableCount} 个剧情表待填充");
-            }
-
-            if (assetIndexTableCount > 0)
-            {
-                planItems.Add($"ExcelTexts：{assetIndexTableCount} 张素材索引表待填充");
-            }
-
-            var summary = totalChanged == 0
-                ? "没有检测到需要同步的变动。"
-                : forceFullSync
-                    ? $"已准备全部重新同步，共 {totalChanged} 项。"
-                    : $"检测到 {totalChanged} 项同步变动；本次只会同步这些变动项。";
-
-            return new UnrealSyncChangePlan(
-                importGroups,
-                storyTables,
-                assetIndexTables,
-                lustrationChanged,
-                lustrationRows,
-                lustrationHash,
-                assetIndexTablesHash,
-                totalChanged,
-                summary,
-                planItems);
+            return _unrealSyncService.BuildChangePlan(
+                context,
+                forceFullSync,
+                characters,
+                BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(context.AssetLibrary)),
+                AudioAssetService.GetFilePaths(GetMusicFolderPath(context.AssetLibrary)),
+                AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(context.AssetLibrary)),
+                AudioAssetService.GetFilePaths(GetSoundEffectFolderPath(context.AssetLibrary)),
+                allStoryTables,
+                assetIndexTableCacheFolder);
         }
-
-        private List<UnrealLustrationSyncEntry> BuildUnrealLustrationSyncEntries(UnrealSyncContext context)
-        {
-            return GetCharactersForAssetLibrary(context.AssetLibrary)
-                .Select(character =>
-                {
-                    var clothRefs = GetCharacterLayerImagePaths(Path.Combine(character.Path, "DN_Cloth"))
-                        .Select(path => BuildUnrealAssetObjectPath($"{context.TargetAssetRoot}/Lustration/{character.Code}/DN_Cloths", path))
-                        .ToList();
-                    var faceRefs = GetCharacterLayerImagePaths(Path.Combine(character.Path, "FC_Face"))
-                        .Select(path => BuildUnrealAssetObjectPath($"{context.TargetAssetRoot}/Lustration/{character.Code}/FC_Face", path))
-                        .ToList();
-                    var adornRefs = new List<string?> { null };
-                    adornRefs.AddRange(GetCharacterLayerImagePaths(Path.Combine(character.Path, "AD_Adorn"))
-                        .Select(path => (string?)BuildUnrealAssetObjectPath($"{context.TargetAssetRoot}/Lustration/{character.Code}/AD_Adorn", path)));
-                    var color = ParseColor(character.ColorHex, Windows.UI.Color.FromArgb(255, 217, 232, 255));
-
-                    return new UnrealLustrationSyncEntry(
-                        character.Code,
-                        character.Name,
-                        new UnrealLinearColor(color.R / 255d, color.G / 255d, color.B / 255d, color.A / 255d),
-                        clothRefs,
-                        faceRefs,
-                        adornRefs);
-                })
-                .ToList();
-        }
-
-        private List<UnrealSyncImportGroup> BuildUnrealImportGroups(UnrealSyncContext context)
-        {
-            var groups = new List<UnrealSyncImportGroup>();
-            AddUnrealImportGroup(groups, $"{context.TargetAssetRoot}/BackGround", GetBackgroundImagePaths(GetBackgroundFolderPath(context.AssetLibrary)));
-            AddUnrealImportGroup(groups, $"{context.TargetAssetRoot}/BGM", GetAudioFilePaths(GetMusicFolderPath(context.AssetLibrary)));
-            AddUnrealImportGroup(groups, $"{context.TargetAssetRoot}/Scene_Effect", GetAudioFilePaths(GetAmbientSoundFolderPath(context.AssetLibrary)).Concat(GetAudioFilePaths(GetSoundEffectFolderPath(context.AssetLibrary))).ToList());
-
-            foreach (var character in GetCharactersForAssetLibrary(context.AssetLibrary))
-            {
-                AddUnrealImportGroup(groups, $"{context.TargetAssetRoot}/Lustration/{character.Code}/DN_Cloths", GetCharacterLayerImagePaths(Path.Combine(character.Path, "DN_Cloth")));
-                AddUnrealImportGroup(groups, $"{context.TargetAssetRoot}/Lustration/{character.Code}/FC_Face", GetCharacterLayerImagePaths(Path.Combine(character.Path, "FC_Face")));
-                AddUnrealImportGroup(groups, $"{context.TargetAssetRoot}/Lustration/{character.Code}/AD_Adorn", GetCharacterLayerImagePaths(Path.Combine(character.Path, "AD_Adorn")));
-            }
-
-            return groups;
-        }
-
-        private void WriteLustrationInfoCsv(UnrealSyncContext context, string csvPath)
-        {
-            var rows = new List<string>
-            {
-                string.Join(",", ["", "Name", "Color", "Cloth", "Face", "Adorn"])
-            };
-
-            foreach (var character in GetCharactersForAssetLibrary(context.AssetLibrary))
-            {
-                var clothRefs = GetCharacterLayerImagePaths(Path.Combine(character.Path, "DN_Cloth"))
-                    .Select(path => BuildUnrealTextureReference($"{context.TargetAssetRoot}/Lustration/{character.Code}/DN_Cloths", path))
-                    .ToList();
-                var faceRefs = GetCharacterLayerImagePaths(Path.Combine(character.Path, "FC_Face"))
-                    .Select(path => BuildUnrealTextureReference($"{context.TargetAssetRoot}/Lustration/{character.Code}/FC_Face", path))
-                    .ToList();
-                var adornRefs = new List<string> { "None" };
-                adornRefs.AddRange(GetCharacterLayerImagePaths(Path.Combine(character.Path, "AD_Adorn"))
-                    .Select(path => BuildUnrealTextureReference($"{context.TargetAssetRoot}/Lustration/{character.Code}/AD_Adorn", path)));
-
-                rows.Add(string.Join(",",
-                [
-                    EscapeCsv(character.Code),
-                    EscapeCsv(character.Name),
-                    EscapeCsv(ToUnrealLinearColorLiteral(character.ColorHex)),
-                    EscapeCsv(ToUnrealArrayLiteral(clothRefs)),
-                    EscapeCsv(ToUnrealArrayLiteral(faceRefs)),
-                    EscapeCsv(ToUnrealArrayLiteral(adornRefs))
-                ]));
-            }
-
-            File.WriteAllLines(csvPath, rows, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        }
-
-        private static string BuildUnrealTextureReference(string destinationPath, string sourcePath)
-        {
-            var assetName = SanitizeUnrealAssetName(Path.GetFileNameWithoutExtension(sourcePath));
-            return $"Texture2D'{destinationPath}/{assetName}.{assetName}'";
-        }
-
-        private static string BuildUnrealSoundWaveReference(string destinationPath, string sourcePath)
-        {
-            var assetName = SanitizeUnrealAssetName(Path.GetFileNameWithoutExtension(sourcePath));
-            return $"SoundWave'{destinationPath}/{assetName}.{assetName}'";
-        }
-
-        private static string BuildUnrealAssetObjectPath(string destinationPath, string sourcePath)
-        {
-            var assetName = SanitizeUnrealAssetName(Path.GetFileNameWithoutExtension(sourcePath));
-            return $"{destinationPath}/{assetName}.{assetName}";
-        }
-
-        private static bool SourceFileNeedsUnrealImport(UnrealSyncContext context, string destinationPath, string sourcePath)
-        {
-            var objectPath = BuildUnrealAssetObjectPath(destinationPath, sourcePath);
-            return SourceFileNeedsUnrealAssetUpdate(context, sourcePath, objectPath);
-        }
-
-        private static bool SourceFileNeedsUnrealAssetUpdate(UnrealSyncContext context, string sourcePath, string objectPath)
-        {
-            if (!File.Exists(sourcePath))
-            {
-                return false;
-            }
-
-            var assetFilePath = UnrealAssetObjectPathToFilePath(context, objectPath);
-            if (!File.Exists(assetFilePath))
-            {
-                return true;
-            }
-
-            return File.GetLastWriteTimeUtc(sourcePath) > File.GetLastWriteTimeUtc(assetFilePath).AddSeconds(1);
-        }
-
-        private static string UnrealAssetObjectPathToFilePath(UnrealSyncContext context, string objectPath)
-        {
-            var packagePath = objectPath.Split('.')[0].Trim('/');
-            var targetRoot = context.TargetAssetRoot.Trim('/');
-            var relativePath = packagePath.StartsWith(targetRoot, StringComparison.OrdinalIgnoreCase)
-                ? packagePath[targetRoot.Length..].Trim('/')
-                : packagePath;
-
-            return Path.Combine(
-                context.TargetContentFolderPath,
-                relativePath.Replace('/', Path.DirectorySeparatorChar) + ".uasset");
-        }
-
-        private static string ToUnrealArrayLiteral(IReadOnlyList<string> values)
-        {
-            return values.Count == 0 ? "()" : $"({string.Join(",", values)})";
-        }
-
-        private static string ToUnrealLinearColorLiteral(string colorHex)
-        {
-            var fallback = Windows.UI.Color.FromArgb(255, 217, 232, 255);
-            var color = ParseColor(colorHex, fallback);
-            return FormattableString.Invariant(
-                $"(R={color.R / 255d:0.######},G={color.G / 255d:0.######},B={color.B / 255d:0.######},A={color.A / 255d:0.######})");
-        }
-
-        private static string SanitizeUnrealAssetName(string value)
-        {
-            var sanitized = Regex.Replace(value.Trim(), "\\s+", "_");
-            sanitized = Regex.Replace(sanitized, "[^\\p{L}\\p{N}_\\-（）()]+", "_");
-            return string.IsNullOrWhiteSpace(sanitized) ? "Asset" : sanitized;
-        }
-
-        private static string EscapeCsv(string value)
-        {
-            if (value.Contains('"') || value.Contains(',') || value.Contains('\r') || value.Contains('\n'))
-            {
-                return $"\"{value.Replace("\"", "\"\"")}\"";
-            }
-
-            return value;
-        }
-
-        private static void AddUnrealImportGroup(List<UnrealSyncImportGroup> groups, string destination, IReadOnlyCollection<string> files)
-        {
-            if (files.Count == 0)
-            {
-                return;
-            }
-
-            groups.Add(new UnrealSyncImportGroup(destination, files.ToList()));
-        }
-
-        private static void WriteUnrealSyncPythonScript(string scriptPath, string manifestPath)
-        {
-            var normalizedManifestPath = manifestPath.Replace("\\", "/");
-            var script = $$"""
-                import json
-                import os
-                import unreal
-
-                manifest_path = r"{{normalizedManifestPath}}"
-                with open(manifest_path, "r", encoding="utf-8-sig") as manifest_file:
-                    manifest = json.load(manifest_file)
-
-                target_root = manifest.get("TargetRoot", "/Game")
-                imports = manifest.get("Imports", [])
-                tasks = []
-
-                for group in imports:
-                    destination = group.get("Destination")
-                    files = group.get("Files", [])
-                    if not destination:
-                        continue
-                    unreal.EditorAssetLibrary.make_directory(destination)
-                    for filename in files:
-                        if not filename or not os.path.exists(filename):
-                            unreal.log_warning("GalExcleTools missing source file: {}".format(filename))
-                            continue
-                        task = unreal.AssetImportTask()
-                        task.set_editor_property("filename", filename)
-                        task.set_editor_property("destination_path", destination)
-                        task.set_editor_property("automated", True)
-                        task.set_editor_property("replace_existing", True)
-                        try:
-                            task.set_editor_property("save", True)
-                        except Exception:
-                            pass
-                        tasks.append(task)
-
-                if tasks:
-                    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
-                    imported_paths = []
-                    for task in tasks:
-                        try:
-                            imported_paths.extend(task.get_editor_property("imported_object_paths") or [])
-                        except Exception:
-                            pass
-                    for imported_path in imported_paths:
-                        try:
-                            unreal.EditorAssetLibrary.save_asset(imported_path, only_if_is_dirty=False)
-                        except Exception as exc:
-                            unreal.log_warning("GalExcleTools failed to save imported asset {}: {}".format(imported_path, exc))
-
-                def set_first_editor_property(obj, property_names, value):
-                    for property_name in property_names:
-                        try:
-                            obj.set_editor_property(property_name, value)
-                            return True
-                        except Exception:
-                            pass
-                    return False
-
-                def get_first_editor_property(obj, property_names):
-                    if not obj:
-                        return None
-                    for property_name in property_names:
-                        try:
-                            return obj.get_editor_property(property_name)
-                        except Exception:
-                            pass
-                    return None
-
-                def get_map_value_by_string_key(source_map, key):
-                    if not source_map:
-                        return None
-                    string_key = str(key)
-                    try:
-                        value = source_map.get(string_key)
-                        if value is not None:
-                            return value
-                    except Exception:
-                        pass
-                    try:
-                        return source_map[string_key]
-                    except Exception:
-                        pass
-                    try:
-                        for existing_key, existing_value in source_map.items():
-                            if str(existing_key) == string_key:
-                                return existing_value
-                    except Exception:
-                        pass
-                    return None
-
-                def load_asset_or_none(asset_path):
-                    if not asset_path:
-                        return None
-                    try:
-                        return unreal.EditorAssetLibrary.load_asset(asset_path)
-                    except Exception as exc:
-                        unreal.log_warning("GalExcleTools failed to load asset reference {}: {}".format(asset_path, exc))
-                        return None
-
-                def load_asset_array(asset_paths):
-                    result = []
-                    for asset_path in asset_paths or []:
-                        result.append(load_asset_or_none(asset_path))
-                    return result
-
-                def split_asset_object_path(asset_object_path):
-                    package_path = asset_object_path.split(".")[0]
-                    asset_name = package_path.rsplit("/", 1)[-1]
-                    destination_path = package_path.rsplit("/", 1)[0]
-                    return destination_path, asset_name
-
-                def load_row_struct(row_struct_path):
-                    if not row_struct_path:
-                        return None
-                    try:
-                        row_struct = unreal.load_object(None, row_struct_path)
-                        if row_struct:
-                            unreal.log("GalExcleTools story row struct ready: {}".format(row_struct_path))
-                        else:
-                            unreal.log_warning("GalExcleTools story row struct missing: {}".format(row_struct_path))
-                        return row_struct
-                    except Exception as exc:
-                        unreal.log_warning("GalExcleTools failed to load story row struct {}: {}".format(row_struct_path, exc))
-                        return None
-
-                def create_data_table_asset(table_asset_path, row_struct):
-                    if not row_struct:
-                        return None
-                    destination_path, asset_name = split_asset_object_path(table_asset_path)
-                    unreal.EditorAssetLibrary.make_directory(destination_path)
-                    try:
-                        factory = unreal.DataTableFactory()
-                        if not set_first_editor_property(factory, ["struct", "row_struct", "Struct", "RowStruct"], row_struct):
-                            unreal.log_warning("GalExcleTools could not assign row struct before creating data table: {}".format(table_asset_path))
-                        data_table = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
-                            asset_name,
-                            destination_path,
-                            unreal.DataTable,
-                            factory)
-                        if data_table:
-                            unreal.log("GalExcleTools created story data table: {}".format(table_asset_path))
-                        return data_table
-                    except Exception as exc:
-                        unreal.log_warning("GalExcleTools failed to create story data table {}: {}".format(table_asset_path, exc))
-                        return None
-
-                def ensure_story_data_table(table_asset_path, row_struct_path):
-                    data_table = unreal.EditorAssetLibrary.load_asset(table_asset_path)
-                    if data_table:
-                        return data_table, load_row_struct(row_struct_path)
-                    row_struct = load_row_struct(row_struct_path)
-                    data_table = create_data_table_asset(table_asset_path, row_struct)
-                    return data_table, row_struct
-
-                story_tables = manifest.get("StoryTables", [])
-                for story_table in story_tables:
-                    table_asset_path = story_table.get("TableAsset")
-                    csv_path = story_table.get("CsvPath")
-                    row_struct_path = story_table.get("RowStruct")
-                    if not table_asset_path or not csv_path:
-                        continue
-                    for legacy_asset_path in story_table.get("LegacyTableAssets", []) or []:
-                        if legacy_asset_path and legacy_asset_path != table_asset_path and unreal.EditorAssetLibrary.does_asset_exist(legacy_asset_path):
-                            if unreal.EditorAssetLibrary.delete_asset(legacy_asset_path):
-                                unreal.log("GalExcleTools deleted legacy story data table: {}".format(legacy_asset_path))
-                            else:
-                                unreal.log_warning("GalExcleTools failed to delete legacy story data table: {}".format(legacy_asset_path))
-                    data_table, row_struct = ensure_story_data_table(table_asset_path, row_struct_path)
-                    if data_table:
-                        try:
-                            ok = unreal.DataTableFunctionLibrary.fill_data_table_from_csv_file(data_table, csv_path, row_struct)
-                        except TypeError:
-                            ok = unreal.DataTableFunctionLibrary.fill_data_table_from_csv_file(data_table, csv_path)
-                        if ok:
-                            unreal.EditorAssetLibrary.save_asset(table_asset_path, only_if_is_dirty=False)
-                            unreal.log("GalExcleTools updated story data table: {}".format(table_asset_path))
-                        else:
-                            unreal.log_warning("GalExcleTools failed to update story data table: {}".format(table_asset_path))
-                    else:
-                        unreal.log_warning("GalExcleTools could not create or load story data table: {}".format(table_asset_path))
-
-                asset_index_tables = manifest.get("AssetIndexTables", [])
-                for index_table in asset_index_tables:
-                    table_asset_path = index_table.get("TableAsset")
-                    csv_path = index_table.get("CsvPath")
-                    row_struct_path = index_table.get("RowStruct")
-                    if not table_asset_path or not csv_path:
-                        continue
-                    data_table, row_struct = ensure_story_data_table(table_asset_path, row_struct_path)
-                    if data_table:
-                        try:
-                            ok = unreal.DataTableFunctionLibrary.fill_data_table_from_csv_file(data_table, csv_path, row_struct)
-                        except TypeError:
-                            ok = unreal.DataTableFunctionLibrary.fill_data_table_from_csv_file(data_table, csv_path)
-                        if ok:
-                            unreal.EditorAssetLibrary.save_asset(table_asset_path, only_if_is_dirty=False)
-                            unreal.log("GalExcleTools updated asset index data table: {}".format(table_asset_path))
-                        else:
-                            unreal.log_warning("GalExcleTools failed to update asset index data table: {}".format(table_asset_path))
-                    else:
-                        unreal.log_warning("GalExcleTools could not create or load asset index data table: {}".format(table_asset_path))
-
-                def build_lustration_struct(row, existing_item=None):
-                    # Keep Unreal-side Vfx data intact. The tool owns imported texture
-                    # layers, but VFX materials are configured manually in the data asset.
-                    item = existing_item if existing_item is not None else unreal.LustrationStruct()
-                    color = row.get("Color") or {}
-                    linear_color = unreal.LinearColor(
-                        float(color.get("R", 0.0)),
-                        float(color.get("G", 0.0)),
-                        float(color.get("B", 0.0)),
-                        float(color.get("A", 1.0)))
-                    set_first_editor_property(item, ["Name", "name"], row.get("Name", ""))
-                    set_first_editor_property(item, ["Color", "color"], linear_color)
-                    set_first_editor_property(item, ["Cloth", "cloth"], load_asset_array(row.get("Cloth", [])))
-                    set_first_editor_property(item, ["Face", "face"], load_asset_array(row.get("Face", [])))
-                    set_first_editor_property(item, ["Adorn", "adorn"], load_asset_array(row.get("Adorn", [])))
-                    return item
-
-                lustration_info = manifest.get("LustrationInfo", {})
-                data_asset_path = lustration_info.get("DataAsset")
-                map_property = lustration_info.get("MapProperty", "Infor")
-                lustration_rows = lustration_info.get("Rows", [])
-                should_update_lustration = lustration_info.get("ShouldUpdate", bool(lustration_rows))
-                if data_asset_path and should_update_lustration:
-                    data_asset = unreal.EditorAssetLibrary.load_asset(data_asset_path)
-                    if data_asset:
-                        existing_lustration_map = get_first_editor_property(data_asset, [map_property, map_property.lower(), "Infor", "infor"]) or {}
-                        lustration_map = {}
-                        for row in lustration_rows:
-                            key = row.get("Key")
-                            if not key:
-                                continue
-                            existing_item = get_map_value_by_string_key(existing_lustration_map, key)
-                            lustration_map[str(key)] = build_lustration_struct(row, existing_item)
-                        try:
-                            data_asset.modify()
-                        except Exception:
-                            pass
-                        if set_first_editor_property(data_asset, [map_property, map_property.lower(), "Infor", "infor"], lustration_map):
-                            unreal.EditorAssetLibrary.save_asset(data_asset_path, only_if_is_dirty=False)
-                            unreal.log("GalExcleTools updated lustration data asset: {} rows={}".format(data_asset_path, len(lustration_map)))
-                        else:
-                            unreal.log_warning("GalExcleTools could not set lustration map property '{}' on {}".format(map_property, data_asset_path))
-                    else:
-                        unreal.log_warning("GalExcleTools could not load lustration data asset: {}".format(data_asset_path))
-
-                unreal.log("GalExcleTools sync finished. Imported task count: {}".format(len(tasks)))
-                """;
-
-            File.WriteAllText(scriptPath, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        }
-
-        private static string? ResolveUnrealEditorExecutable(string enginePath)
-        {
-            if (string.IsNullOrWhiteSpace(enginePath))
-            {
-                return null;
-            }
-
-            if (File.Exists(enginePath))
-            {
-                var fileName = Path.GetFileName(enginePath);
-                if (fileName.Equals("UnrealEditor-Cmd.exe", StringComparison.OrdinalIgnoreCase))
-                {
-                    return enginePath;
-                }
-
-                if (fileName.Equals("UnrealEditor.exe", StringComparison.OrdinalIgnoreCase))
-                {
-                    var cmdPath = Path.Combine(Path.GetDirectoryName(enginePath)!, "UnrealEditor-Cmd.exe");
-                    return File.Exists(cmdPath) ? cmdPath : enginePath;
-                }
-
-                return null;
-            }
-
-            var binPath = Path.Combine(enginePath, "Engine", "Binaries", "Win64");
-            var cmdCandidate = Path.Combine(binPath, "UnrealEditor-Cmd.exe");
-            if (File.Exists(cmdCandidate))
-            {
-                return cmdCandidate;
-            }
-
-            var editorCandidate = Path.Combine(binPath, "UnrealEditor.exe");
-            return File.Exists(editorCandidate) ? editorCandidate : null;
-        }
-
-        private static readonly string[] ExpectedUnrealNarrativeFolders =
-        [
-            "BackGround",
-            "BGM",
-            "ExcelTexts",
-            "Lustration",
-            "Scene_Effect"
-        ];
 
         private List<string> GetProjectStoryCsvPaths(ProjectInfo project)
         {
-            var chaptersFolderPath = GetChaptersFolderPath(project);
-            if (!Directory.Exists(chaptersFolderPath))
-            {
-                return [];
-            }
-
-            return Directory
-                .EnumerateDirectories(chaptersFolderPath)
-                .Select(ReadChapterInfo)
-                .SelectMany(chapter => GetChapterStoryCsvPathsForUnrealSync(project, chapter).Select(entry => entry.CsvPath))
-                .Where(File.Exists)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            return _unrealSyncService.GetProjectStoryCsvPaths(project, _projectWorkspaceService.GetChapters(project));
         }
 
         private List<CharacterInfo> GetCharactersForAssetLibrary(AssetLibraryInfo assetLibrary)
         {
-            var characterFolderPath = GetCharacterFolderPath(assetLibrary);
-            if (!Directory.Exists(characterFolderPath))
-            {
-                return [];
-            }
-
-            return Directory
-                .EnumerateDirectories(characterFolderPath)
-                .Select(ReadCharacterInfo)
-                .OrderBy(character => character.Code, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            return _characterWorkspaceService.GetCharactersByCode(assetLibrary);
         }
 
         private List<string> GetProjectCharacterLayerImportPaths(AssetLibraryInfo assetLibrary)
@@ -17552,175 +10629,34 @@ namespace GalExcleTools
             var result = new List<string>();
             foreach (var character in GetCharactersForAssetLibrary(assetLibrary))
             {
-                result.AddRange(GetCharacterLayerImagePaths(Path.Combine(character.Path, "DN_Cloth")));
-                result.AddRange(GetCharacterLayerImagePaths(Path.Combine(character.Path, "FC_Face")));
-                result.AddRange(GetCharacterLayerImagePaths(Path.Combine(character.Path, "AD_Adorn")));
+                result.AddRange(UnrealSyncService.GetCharacterLayerImportPaths(character, CharacterLayerKind.Cloth));
+                result.AddRange(UnrealSyncService.GetCharacterLayerImportPaths(character, CharacterLayerKind.Face));
+                result.AddRange(UnrealSyncService.GetCharacterLayerImportPaths(character, CharacterLayerKind.Adorn));
             }
 
             return result;
         }
 
-        private static int CountUnrealAssets(string folderPath)
-        {
-            return Directory.Exists(folderPath)
-                ? Directory.EnumerateFiles(folderPath, "*.uasset", SearchOption.TopDirectoryOnly).Count()
-                : 0;
-        }
-
-        private static bool IsPathInsideDirectoryOrEqual(string path, string directoryPath)
-        {
-            return PathsEqual(path, directoryPath) || IsPathInsideDirectory(path, directoryPath);
-        }
-
-        private static string ToUnrealAssetPath(string contentRootPath, string contentFolderPath)
-        {
-            var relativePath = Path.GetRelativePath(contentRootPath, contentFolderPath)
-                .Replace('\\', '/')
-                .Trim('/');
-            return string.IsNullOrWhiteSpace(relativePath) || relativePath == "."
-                ? "/Game"
-                : $"/Game/{relativePath}";
-        }
-
-        private static string TrimLongText(string text, int maxLength)
-        {
-            if (text.Length <= maxLength)
-            {
-                return text;
-            }
-
-            return text[..maxLength] + "...";
-        }
-
         private async void ShowProjectRootHelpButton_Click(object sender, RoutedEventArgs e)
         {
-            var helpContent = new ScrollViewer
-            {
-                Width = 440,
-                MaxHeight = 420,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                HorizontalScrollMode = ScrollMode.Disabled,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollMode = ScrollMode.Auto,
-                Content = CreateProjectRootHelpContent()
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = "整体项目位置说明",
-                Content = helpContent,
-                CloseButtonText = "关闭",
-                XamlRoot = Content.XamlRoot
-            };
-
-            await dialog.ShowAsync();
+            await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                "整体项目位置说明",
+                DialogContentFactory.CreateProjectRootHelpContent(),
+                string.Empty,
+                "关闭",
+                DefaultButton: ContentDialogButton.Close,
+                PrimarySound: DialogSoundIntent.None));
         }
 
         private async void ShowLogHelpButton_Click(object sender, RoutedEventArgs e)
         {
-            var helpContent = new ScrollViewer
-            {
-                Width = 440,
-                MaxHeight = 420,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                HorizontalScrollMode = ScrollMode.Disabled,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollMode = ScrollMode.Auto,
-                Content = CreateLogHelpContent()
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = "辅助显示说明",
-                Content = helpContent,
-                CloseButtonText = "关闭",
-                XamlRoot = Content.XamlRoot
-            };
-
-            await dialog.ShowAsync();
-        }
-
-        private static StackPanel CreateProjectRootHelpContent()
-        {
-            var panel = new StackPanel
-            {
-                Spacing = 12,
-                Width = 420,
-                HorizontalAlignment = HorizontalAlignment.Left
-            };
-
-            panel.Children.Add(CreateHelpHeading("整体项目位置"));
-            panel.Children.Add(CreateHelpParagraph("这里设置的是所有 GalExcleTools 项目的总存放目录。程序启动时会检查这个目录，不存在就自动创建。"));
-            panel.Children.Add(CreateHelpHeading("选择位置"));
-            panel.Children.Add(CreateHelpParagraph("点击“选择位置”时，你选择的是父目录。程序会自动在该目录下追加 GalExcelProject 文件夹名。"));
-            panel.Children.Add(CreateHelpCodeBlock("""
-                示例：
-                选择：E:\VNWork
-                实际使用：E:\VNWork\GalExcelProject
-                """));
-            panel.Children.Add(CreateHelpHeading("迁移规则"));
-            panel.Children.Add(CreateHelpParagraph("如果你更换了目录，程序会把旧目录里的所有文件复制到新目录，逐个校验文件大小和 SHA-256 内容哈希。全部确认无误后，才会保存新路径并删除旧目录。"));
-            panel.Children.Add(CreateHelpHeading("安全限制"));
-            panel.Children.Add(CreateHelpParagraph("新目录不能放在旧目录里面。这样可以避免迁移后删除旧目录时，把新目录也一起删除。"));
-
-            return panel;
-        }
-
-        private static StackPanel CreateLogHelpContent()
-        {
-            var panel = new StackPanel
-            {
-                Spacing = 12,
-                Width = 420,
-                HorizontalAlignment = HorizontalAlignment.Left
-            };
-
-            panel.Children.Add(CreateHelpHeading("辅助显示"));
-            panel.Children.Add(CreateHelpParagraph("这里集中控制不影响项目文件内容的辅助界面。工作区路径用于查看当前文件位置；底部输出框用于记录程序触发、进度、用户操作、提示和错误。"));
-            panel.Children.Add(CreateHelpHeading("用户操作"));
-            panel.Children.Add(CreateHelpParagraph("用户操作会记录创建项目、创建素材库、导入素材、排序、备注、切换目录等动作。故事编辑器的数据编辑会额外记录可撤回操作，方便用 Ctrl+Z 或撤回按钮回到上一步。"));
-            panel.Children.Add(CreateHelpHeading("提示和错误"));
-            panel.Children.Add(CreateHelpParagraph("提示用于标记潜在风险或不规范操作；错误会带上失败原因。关闭对应开关后，底部输出框会过滤该类型。"));
-
-            return panel;
-        }
-
-        private static TextBlock CreateHelpHeading(string text)
-        {
-            return new TextBlock
-            {
-                Text = text,
-                FontSize = 18,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-            };
-        }
-
-        private static TextBlock CreateHelpParagraph(string text)
-        {
-            return new TextBlock
-            {
-                Text = text,
-                TextWrapping = TextWrapping.Wrap,
-                Width = 420,
-                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
-            };
-        }
-
-        private static Border CreateHelpCodeBlock(string text)
-        {
-            return new Border
-            {
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(12),
-                Background = Application.Current.Resources["LayerFillColorAltBrush"] as Brush,
-                Child = new TextBlock
-                {
-                    Text = text,
-                    FontFamily = new FontFamily("Consolas"),
-                    Width = 396,
-                    TextWrapping = TextWrapping.Wrap
-                }
-            };
+            await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                "辅助显示说明",
+                DialogContentFactory.CreateLogHelpContent(),
+                string.Empty,
+                "关闭",
+                DefaultButton: ContentDialogButton.Close,
+                PrimarySound: DialogSoundIntent.None));
         }
 
         private void ShowWorkbenchPage()
@@ -17742,10 +10678,11 @@ namespace GalExcleTools
             SettingsPage.Visibility = Visibility.Collapsed;
             if (!ReferenceEquals(ShellNavigation.SelectedItem, WorkbenchNavItem))
             {
-                ShellNavigation.SelectedItem = WorkbenchNavItem;
+                SelectShellNavigationItem(WorkbenchNavItem);
             }
             LoadProjects();
             RefreshWorkbenchUnrealSyncTip();
+            PlayPageEntrance(WorkbenchPage);
         }
 
         private void ShowAssetLibraryPage()
@@ -17766,9 +10703,10 @@ namespace GalExcleTools
             SettingsPage.Visibility = Visibility.Collapsed;
             if (!ReferenceEquals(ShellNavigation.SelectedItem, AssetLibraryNavItem))
             {
-                ShellNavigation.SelectedItem = AssetLibraryNavItem;
+                SelectShellNavigationItem(AssetLibraryNavItem);
             }
             LoadAssetLibraries();
+            PlayPageEntrance(AssetLibraryPage);
         }
 
         private void ShowAssetLibraryDetailPage(AssetLibraryInfo assetLibrary)
@@ -17791,7 +10729,7 @@ namespace GalExcleTools
             SettingsPage.Visibility = Visibility.Collapsed;
             if (!ReferenceEquals(ShellNavigation.SelectedItem, AssetLibraryNavItem))
             {
-                ShellNavigation.SelectedItem = AssetLibraryNavItem;
+                SelectShellNavigationItem(AssetLibraryNavItem);
             }
             LoadBackgroundImages(assetLibrary);
             LoadMusicFiles(assetLibrary);
@@ -17800,6 +10738,7 @@ namespace GalExcleTools
             LoadFunctions(assetLibrary);
             LoadCharacters(assetLibrary);
             LoadCharacterFilters(assetLibrary);
+            PlayPageEntrance(AssetLibraryDetailPage);
         }
 
         private void ShowCreateProjectPage()
@@ -17817,6 +10756,7 @@ namespace GalExcleTools
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
+            PlayPageEntrance(CreateProjectPage);
 
             if (ProjectAssetLibraryComboBox.Items.Count == 0)
             {
@@ -17838,6 +10778,7 @@ namespace GalExcleTools
             CreateAssetLibraryPage.Visibility = Visibility.Visible;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
+            PlayPageEntrance(CreateAssetLibraryPage);
         }
 
         private void ShowUnrealSyncPage()
@@ -17860,10 +10801,11 @@ namespace GalExcleTools
             SettingsPage.Visibility = Visibility.Collapsed;
             if (!ReferenceEquals(ShellNavigation.SelectedItem, UnrealSyncNavItem))
             {
-                ShellNavigation.SelectedItem = UnrealSyncNavItem;
+                SelectShellNavigationItem(UnrealSyncNavItem);
             }
 
             RefreshUnrealSyncStatus();
+            PlayPageEntrance(UnrealSyncPage);
         }
 
         private void ShowSettingsPage()
@@ -17882,154 +10824,76 @@ namespace GalExcleTools
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Visible;
+            PlayPageEntrance(SettingsPage);
         }
 
-        private sealed record ProjectInfo(string Name, string Code, string FolderName, string Path, string? ThumbnailPath, string AssetLibraryName, string? AssetLibraryFolderName, DateTime LastEditedAt);
-
-        private sealed record ChapterInfo(string Name, string Code, string Type, string Path, DateTime LastEditedAt, int LastEditedRowIndex);
-
-        private sealed record ChapterEditorInput(string Name, string Code, string Type);
-
-        private sealed record FolderBackupEntry(string Path, DateTime CreatedAt, long SizeBytes, string Note, string DisplayName);
-
-        private sealed record FolderBackupProgress(
-            string Message,
-            double Percent,
-            int CompletedFiles,
-            int TotalFiles,
-            long CompletedBytes,
-            long TotalBytes,
-            string? CurrentRelativePath);
-
-        private sealed record AssetIndexSyncProgress(
-            string Message,
-            double Percent,
-            int CompletedCsvFiles,
-            int TotalCsvFiles,
-            int ChangeCount,
-            int WarningCount,
-            string? CurrentCsvName);
-
-        private sealed record AssetIndexSyncResult(
-            string Title,
-            int ScannedCsvCount,
-            int ChangedCsvCount,
-            int ChangeCount,
-            int WarningCount,
-            IReadOnlyList<string> ChangedCsvPaths,
-            IReadOnlyList<AssetIndexChange> Changes,
-            IReadOnlyList<AssetIndexWarning> Warnings);
-
-        private sealed record AssetIndexChange(
-            string ProjectName,
-            string ChapterName,
-            string ChapterCode,
-            string CsvName,
-            string RowName,
-            int RowNumber,
-            string ColumnName,
-            string OldValue,
-            string NewValue,
-            string OldValueLabel,
-            string NewValueLabel);
-
-        private sealed record AssetIndexWarning(
-            string ProjectName,
-            string ChapterName,
-            string ChapterCode,
-            string CsvName,
-            string RowName,
-            int RowNumber,
-            string ColumnName,
-            string Message);
-
-        private sealed record RelatedStoryCsvFile(string ProjectName, string ChapterName, string ChapterCode, string CsvPath);
-
-        private sealed record StoryIndexRowContext(
-            RelatedStoryCsvFile CsvFile,
-            StoryRow Row,
-            int RowIndex,
-            List<AssetIndexChange> Changes,
-            List<AssetIndexWarning> Warnings)
+        private void SelectShellNavigationItem(NavigationViewItem item)
         {
-            public AssetIndexChange CreateChange(string columnName, string oldValue, string newValue, string oldValueLabel, string newValueLabel)
+            _isChangingShellSelectionInternally = true;
+            try
             {
-                return new AssetIndexChange(
-                    CsvFile.ProjectName,
-                    CsvFile.ChapterName,
-                    CsvFile.ChapterCode,
-                    Path.GetFileName(CsvFile.CsvPath),
-                    Row.Get("Name"),
-                    RowIndex + 1,
-                    columnName,
-                    oldValue,
-                    newValue,
-                    oldValueLabel,
-                    newValueLabel);
+                ShellNavigation.SelectedItem = item;
             }
-
-            public AssetIndexWarning CreateWarning(string columnName, string message)
+            finally
             {
-                return new AssetIndexWarning(
-                    CsvFile.ProjectName,
-                    CsvFile.ChapterName,
-                    CsvFile.ChapterCode,
-                    Path.GetFileName(CsvFile.CsvPath),
-                    Row.Get("Name"),
-                    RowIndex + 1,
-                    columnName,
-                    message);
+                _isChangingShellSelectionInternally = false;
             }
         }
 
-        private sealed record ChapterRepairProgress(
-            string Message,
-            double Percent,
-            int CompletedCsvFiles,
-            int TotalCsvFiles,
-            int IssueCount,
-            int FixedCount,
-            string? CurrentCsvName);
-
-        private sealed record ChapterRepairResult(
-            string ProjectName,
-            string ChapterName,
-            string ChapterCode,
-            int ScannedCsvCount,
-            int IssueCount,
-            int FixedCount,
-            IReadOnlyList<string> ChangedCsvPaths,
-            IReadOnlyList<ChapterRepairIssue> Issues)
+        private static void PlayPageEntrance(FrameworkElement page)
         {
-            public int AutoFixableCount => Issues.Count(issue => issue.CanAutoFix);
+            if (page.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+
+            page.Transitions = null;
+            page.Resources["PageEntranceStoryboard"] = null;
+
+            if (page.RenderTransform is not TranslateTransform transform)
+            {
+                transform = new TranslateTransform();
+                page.RenderTransform = transform;
+            }
+
+            transform.X = PageEntranceOffsetX;
+            transform.Y = 0;
+            page.Opacity = 0;
+
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var slideAnimation = new DoubleAnimation
+            {
+                From = PageEntranceOffsetX,
+                To = 0,
+                Duration = PageEntranceDuration,
+                EasingFunction = easing
+            };
+            Storyboard.SetTarget(slideAnimation, transform);
+            Storyboard.SetTargetProperty(slideAnimation, nameof(TranslateTransform.X));
+
+            var fadeAnimation = new DoubleAnimation
+            {
+                From = 0.82,
+                To = 1,
+                Duration = PageEntranceDuration,
+                EasingFunction = easing
+            };
+            Storyboard.SetTarget(fadeAnimation, page);
+            Storyboard.SetTargetProperty(fadeAnimation, nameof(UIElement.Opacity));
+
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(slideAnimation);
+            storyboard.Children.Add(fadeAnimation);
+            storyboard.Completed += (_, _) =>
+            {
+                transform.X = 0;
+                transform.Y = 0;
+                page.Opacity = 1;
+                page.Resources.Remove("PageEntranceStoryboard");
+            };
+            page.Resources["PageEntranceStoryboard"] = storyboard;
+            storyboard.Begin();
         }
-
-        private sealed record ChapterRepairIssue(
-            string ProjectName,
-            string ChapterName,
-            string ChapterCode,
-            string CsvName,
-            string RowName,
-            int RowNumber,
-            string ColumnName,
-            string Message,
-            bool CanAutoFix);
-
-        private sealed record ChapterRepairAssetContext(
-            int BackgroundCount,
-            int BgmCount,
-            int SceneCount,
-            int FilterCount,
-            IReadOnlyDictionary<string, string> CharacterAliases,
-            IReadOnlyDictionary<string, CharacterRepairAssetCounts> CharacterAssets);
-
-        private sealed record CharacterRepairAssetCounts(int ClothCount, int FaceCount, int AdornCount);
-
-        private sealed record ChapterTypeOption(string Kind, string DisplayName);
-
-        private sealed record StoryAssetChoice(int Index, string Name);
-
-        private sealed record StoryObjectChoice(string Key, string DisplayName, object Value, IReadOnlyList<string>? PreviewPaths = null);
 
         private sealed record UnrealSyncValidation(
             InfoBarSeverity Severity,
@@ -18040,340 +10904,14 @@ namespace GalExcleTools
             UnrealSyncContext? Context,
             IReadOnlyList<string> PlanItems);
 
-        private sealed record UnrealSyncContext(
-            string EditorPath,
-            string UnrealProjectPath,
-            string TargetContentFolderPath,
-            string TargetAssetRoot,
-            ProjectInfo Project,
-            AssetLibraryInfo AssetLibrary);
+        private static readonly string[] StoryCsvColumns = StoryCsvService.Columns;
 
-        private sealed record UnrealSyncProgressUpdate(string Message, double Percent);
+        private static readonly HashSet<string> StoryNumericColumns = StoryCsvService.NumericColumns;
 
-        private sealed record UnrealProjectBinding(string? EnginePath, string? ProjectPath, string? ContentFolderPath)
-        {
-            public bool IsComplete =>
-                !string.IsNullOrWhiteSpace(EnginePath) &&
-                !string.IsNullOrWhiteSpace(ProjectPath) &&
-                !string.IsNullOrWhiteSpace(ContentFolderPath);
-        }
 
-        private sealed record UnrealSyncChangePlan(
-            List<UnrealSyncImportGroup> ImportGroups,
-            List<UnrealStoryTableSyncEntry> StoryTables,
-            List<UnrealAssetIndexTableSyncEntry> AssetIndexTables,
-            bool LustrationChanged,
-            List<UnrealLustrationSyncEntry> LustrationRows,
-            string LustrationHash,
-            string AssetIndexTablesHash,
-            int TotalChangedItems,
-            string Summary,
-            List<string> PlanItems)
-        {
-            public bool HasChanges => TotalChangedItems > 0;
-        }
-
-        private sealed record UnrealSyncImportGroup(string Destination, List<string> Files);
-
-        private sealed record StoryTableCsvEntry(string CsvPath, string AssetName, bool IsSectionCsv);
-
-        private sealed record StorySectionCsvFile(string Path, int Section);
-
-        private sealed record StoryCharacterSlotClipboard(string Character, string Body, string Face, string Adorn, string Vfx);
-
-        private sealed record StoryAssetClipboard(string FieldName, string Value);
-
-        private sealed record StoryEditorUndoState(
-            List<StoryRow> Rows,
-            Dictionary<string, int> Sections,
-            int RowIndex,
-            string Description,
-            StoryChoiceNoteState? ChoiceNotes);
-
-        private sealed record UnrealStoryTableSyncEntry(
-            string CsvPath,
-            string TableAsset,
-            string RowStruct,
-            List<string> LegacyTableAssets);
-
-        private sealed record UnrealAssetIndexTableSyncEntry(
-            string CsvPath,
-            string TableAsset,
-            string RowStruct,
-            string SourceHash);
-
-        private sealed record UnrealLinearColor(double R, double G, double B, double A);
-
-        private sealed record UnrealLustrationSyncEntry(
-            string Key,
-            string Name,
-            UnrealLinearColor Color,
-            List<string> Cloth,
-            List<string> Face,
-            List<string?> Adorn);
-
-        private sealed record UnrealSyncResult(int ExitCode, string ManifestPath, string ScriptPath, string Output);
-
-        private sealed class UnrealSyncState
-        {
-            public DateTimeOffset LastSyncedAt { get; set; }
-
-            public string? LustrationHash { get; set; }
-
-            public string? AssetIndexTablesHash { get; set; }
-        }
-
-        private sealed class StoryRow
-        {
-            private readonly Dictionary<string, string> _cells = new(StringComparer.Ordinal);
-
-            public string Get(string column)
-            {
-                return _cells.TryGetValue(column, out var value) ? value : string.Empty;
-            }
-
-            public void Set(string column, string value)
-            {
-                _cells[column] = value;
-            }
-
-            public StoryRow Clone()
-            {
-                var clone = new StoryRow();
-                foreach (var pair in _cells)
-                {
-                    clone.Set(pair.Key, pair.Value);
-                }
-
-                return clone;
-            }
-        }
-
-        private sealed class StorySectionState
-        {
-            public Dictionary<string, int> Rows { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-        }
-
-        private sealed class StoryChoiceNoteState
-        {
-            public Dictionary<string, List<string>> Choices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-        }
-
-        private sealed record StoryCsvCompatibility(bool IsCompatible, IReadOnlyList<string> MissingColumns, IReadOnlyList<string> ExtraColumns);
-
-        private static readonly string[] StoryCsvColumns =
-        [
-            "Name",
-            "Tesxt",
-            "Custom",
-            "BGindex",
-            "BGM",
-            "Scene",
-            "TalkChar",
-            "TalkBody",
-            "TalkFace",
-            "TalkAdorn",
-            "TalkVfx",
-            "Chara1",
-            "Body1",
-            "Face1",
-            "Adorn1",
-            "Vfx1",
-            "Chara2",
-            "Body2",
-            "Face2",
-            "Adorn2",
-            "Vfx2",
-            "Chara3",
-            "Body3",
-            "Face3",
-            "Adorn3",
-            "Vfx3",
-            "Chara4",
-            "Body4",
-            "Face4",
-            "Adorn4",
-            "Vfx4",
-            "Chara5",
-            "Body5",
-            "Face5",
-            "Adorn5",
-            "Vfx5"
-        ];
-
-        private static readonly HashSet<string> StoryNumericColumns =
-            new(StoryCsvColumns.Where(column =>
-                column is "BGindex" or "BGM" or "Scene" or
-                    "TalkBody" or "TalkFace" or "TalkAdorn" or "TalkVfx" ||
-                Regex.IsMatch(column, "^(Body|Face|Adorn|Vfx)\\d+$")), StringComparer.Ordinal);
-
-        private static readonly ChapterTypeOption[] ChapterTypeOptions =
-        [
-            new(ChapterKind.MainThread, "主线剧情 / Main Thread"),
-            new(ChapterKind.Interlude, "间章 / Interlude"),
-            new(ChapterKind.Simulation, "养成 / Simulation"),
-            new(ChapterKind.EventActivity, "活动关 / Event Activity"),
-            new(ChapterKind.WorldDialog, "世界对话 / World Dialog"),
-            new(ChapterKind.Minecraft, "我的世界 NPC 对话 / Minecraft")
-        ];
-
-        private static class ChapterKind
-        {
-            public const string MainThread = "MainThread";
-            public const string Interlude = "Interlude";
-            public const string Simulation = "Simulation";
-            public const string EventActivity = "EventActivity";
-            public const string WorldDialog = "WorldDialog";
-            public const string Minecraft = "Minecraft";
-        }
-
-        private sealed record AssetLibraryInfo(string Name, string FolderName, string Path, string? ThumbnailPath, DateTime LastEditedAt);
-
-        private sealed record BackgroundImageEntry(string Path, string Remark);
-
-        private sealed record BackgroundImageRename(BackgroundImageEntry Entry, string TargetPath);
-
-        private enum AudioAssetKind
-        {
-            Music,
-            Ambient,
-            SoundEffect
-        }
-
-        private sealed class FunctionIndex
-        {
-            public List<FunctionEntry> Entries { get; set; } = [];
-        }
-
-        private sealed record FunctionEntry(string Id, string Name, string Indicator, string Category, List<string> ChoiceNotes);
-
-        private sealed record FunctionEditorInput(string Name, string Indicator, string Category, List<string> ChoiceNotes);
-
-        private sealed class CharacterFilterIndex
-        {
-            public List<CharacterFilterEntry> Entries { get; set; } = [];
-        }
-
-        private sealed record CharacterFilterEntry(string Id, string Remark);
-
-        private sealed record MusicEntry(string Path, string Remark);
-
-        private sealed record MusicRename(MusicEntry Entry, string TargetPath);
-
-        private sealed record CharacterInfo(string Name, string Code, string ColorHex, string Path);
-
-        private sealed record CharacterEditorInput(string Name, string Code, string ColorHex);
-
-        private sealed record CharacterLayerEntry(string Path, string Remark, string Scope);
-
-        private sealed record CharacterLayerRename(CharacterLayerEntry Entry, string TargetPath);
-
-        private sealed class CharacterLayerScopeMeta
-        {
-            public Dictionary<string, CharacterLayerScopeEntry> Entries { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-        }
-
-        private sealed class CharacterLayerScopeEntry
-        {
-            public bool UseAllCostumes { get; set; } = true;
-
-            public List<string> CostumeHashes { get; set; } = [];
-        }
-
-        private sealed record MigrationResult(int FileCount, int DirectoryCount);
-
-        private enum CharacterLayerKind
-        {
-            Cloth,
-            Face,
-            Adorn,
-            Vfx
-        }
-
-        private enum LogKind
-        {
-            Info,
-            User,
-            Warning,
-            Error
-        }
-
-        private sealed class AppSettings
-        {
-            public string? ProjectRootPath { get; set; }
-
-            public bool ShowWorkspacePath { get; set; } = true;
-
-            public bool LogEnabled { get; set; } = true;
-
-            public bool LogUserOperations { get; set; } = true;
-
-            public bool LogWarnings { get; set; } = true;
-
-            public bool LogErrors { get; set; } = true;
-
-            public double AssetLibraryScrollSpeedMultiplier { get; set; } = 1.5;
-
-            public double StoryTextFontSize { get; set; } = 20;
-
-            public bool ShowFullStoryChapterLength { get; set; }
-
-            public string? UnrealEnginePath { get; set; }
-
-            public string? UnrealProjectPath { get; set; }
-
-            public string? UnrealContentFolderPath { get; set; }
-
-            public string? UnrealToolProjectFolderName { get; set; }
-        }
-
-        private sealed class CharacterMeta
-        {
-            public string? Name { get; set; }
-
-            public string? Code { get; set; }
-
-            public string? ColorHex { get; set; }
-        }
-
-        private sealed class ProjectMeta
-        {
-            public string? ProjectName { get; set; }
-            public string? ProjectCode { get; set; }
-            public string? ThumbnailFileName { get; set; }
-            public string? AssetLibraryName { get; set; }
-            public string? AssetLibraryFolderName { get; set; }
-            public string? UnrealEnginePath { get; set; }
-            public string? UnrealProjectPath { get; set; }
-            public string? UnrealContentFolderPath { get; set; }
-            public DateTime LastEditedAt { get; set; }
-        }
-
-        private sealed class ChapterMeta
-        {
-            public string? ChapterName { get; set; }
-
-            public string? ChapterCode { get; set; }
-
-            public string? ChapterType { get; set; }
-
-            public DateTime LastEditedAt { get; set; }
-
-            public int LastEditedRowIndex { get; set; }
-        }
-
-        private sealed class FolderBackupMeta
-        {
-            public DateTime CreatedAt { get; set; }
-
-            public string? Note { get; set; }
-        }
-
-        private sealed class AssetLibraryMeta
-        {
-            public string? AssetLibraryName { get; set; }
-            public string? ThumbnailFileName { get; set; }
-            public DateTime LastEditedAt { get; set; }
-        }
     }
 }
+
+
+
+

@@ -9,12 +9,15 @@ This file records the current implementation shape and the rules that should sta
 - The app is file-first. Project, asset library, chapter, function, filter, and sync data are stored as folders, JSON sidecars, CSV files, and imported source files under the workspace root.
 - The UI is currently screen-driven rather than MVVM-driven. When adding features, prefer reusing existing helpers and state fields instead of creating a parallel mini-framework.
 - UI design core: keep visible buttons sparse, avoid clutter, keep layout geometry and visual style consistent, prefer smooth transitions/animations where practical, and lean on keyboard shortcuts plus hover tips for secondary actions.
-- App version text uses semantic versioning: `major.feature.patch`. Current UI label is `1.2.0`; patch fixes increment the last number, grouped user-facing features increment the middle number, and breaking redesigns increment the first.
+- App version text uses semantic versioning: `major.feature.patch`. Current UI label is `2.0.0`; patch fixes increment the last number, grouped user-facing features increment the middle number, and breaking redesigns increment the first.
+- Release packaging uses `Scripts/Package-App.ps1`, which publishes the unpackaged WinUI app as self-contained output and lays it out as a versioned folder named like `TFAC剧情箱-轮椅版V2.0.0`, containing the program folder plus a root shortcut. It does not create an extra compressed or installer `.exe`.
 
 ## Main Feature Areas
 
 - **Workbench and projects**: load cards from workspace folders, create/edit/delete projects, bind one asset library, and open chapter cards.
-- **Workbench backups**: project, asset-library, and chapter right-click backup/restore store zip snapshots under `Tools/ProjectBackups`, `Tools/AssetLibraryBackups`, and `Tools/ChapterBackups`, keep only the latest 3 backups per item, show detailed progress while zipping, save a short remark beside each zip, and restore must preserve the matching backup folder while replacing item content.
+- Project folders are named with the `项目-` prefix and asset library folders with the `素材库-` prefix; display names in metadata stay unprefixed.
+- Long-running work should report through the global bottom progress bar. It slides up from the bottom, shows the current stage, elapsed time, percentage, and useful detail such as file counts, bytes, current CSV, or target path. Avoid adding new progress `ContentDialog` instances for backup/export, restore, import, index sync, chapter repair, migration, or Unreal sync.
+- **Workbench backups/imports**: project, asset-library, and chapter right-click backup/restore store zip snapshots under `Tools/ProjectBackups`, `Tools/AssetLibraryBackups`, and `Tools/ChapterBackups`, keep only the latest 3 backups per item, show detailed progress while zipping, save a short remark beside each zip, and restore must preserve the matching backup folder while replacing item content. Project and asset-library cards expose right-click export to a user-chosen `.zip`; the project and asset-library workbench pages accept dropped exported `.zip` files and import them as uniquely named folders.
 - **Chapter and story editor**: edit `FStoryStruct` CSV rows, manage sections, preview background/character layers, play BGM/environment sound, and write story functions into `Custom`.
 - **Asset library**: manage backgrounds, BGM, environment sounds, sound effects, functions, character filters, and layered character art.
 - **Character detail page**: previews layered `DN_Cloth -> FC_Face -> AD_Adorn -> VFX`, edits character metadata, imports/sorts layer files, and stores face/adorn costume scopes.
@@ -36,6 +39,42 @@ The story editor must not create new one-off `InfoBar` patterns.
 - Hovered story character slots and basic story asset controls support internal clipboards: `Ctrl+C` copies the hovered slot/asset data, and `Ctrl+V` pastes it into the currently hovered compatible target. This must not use or overwrite the OS clipboard. Hover tooltips should simply say `F12打开快捷键提示`, and `F12` opens the shortcut help dialog.
 - Do not put transient tips into normal layout columns if they can resize the stage, text box, or background canvas.
 - Before finishing any tip-related change, search for `InfoBar`, `ShowStoryStatus`, `ShowStoryFunctionTriggeredStatus`, and `???` to make sure no duplicate style or garbled text was introduced.
+
+## Dialog, Shortcut, and Reusable UI Rule
+
+Common dialog behavior is part of the app style and should be reused instead of reimplemented per feature.
+
+- Confirmation dialogs should treat `Enter` as confirm.
+- Confirmation, remark, and simple edit dialogs should treat `Esc` as cancel.
+- Right-clicking inside lightweight edit/remark dialogs should cancel/close the dialog when there is no more specific right-click action.
+- Dialog primary and close button labels should stay consistent: use `确定` / `取消` for normal edits, and use explicit destructive wording only when the action is dangerous.
+- Delete/replace/restore operations should present a confirmation before touching files. Long-running execution after confirmation should use the global bottom progress bar, not a progress `ContentDialog`.
+- Avoid one-off `ContentDialog` construction when the shape already exists. Prefer shared helpers for simple text input, confirm/cancel prompts, backup-remark prompts, cancel-current-operation prompts, and shortcut-help dialogs.
+- Keyboard shortcuts should be discoverable through hover tips or the shared `F12` shortcut help, not repeated as visible instructional text inside normal pages.
+- Existing interaction conventions should remain stable: `Esc` exits viewer pages, `Left/Right`, `A/D`, or numpad `4/6` switch images where a viewer supports previous/next, and story-editor internal clipboards use `Ctrl+C` / `Ctrl+V` without touching the OS clipboard.
+- Reusable visual pieces should be centralized before new features duplicate them: bottom progress bar, collapsible section style, code block style, asset grid styles, transient tips, confirm dialogs, text input dialogs, and card/tile factories.
+- Help/tips icons should use the shared compact help icon button style instead of raw `?` text buttons. Keep the icon subtle, rounded, and paired with a clear hover tooltip.
+- Buttons that are not self-explanatory from their visible text or icon should have `ToolTipService.ToolTip`. Icon-only buttons must always have a tooltip.
+
+## Theme and UI Sound Rule
+
+Theme and sound are planned shared shell features, not page-local hacks.
+
+- Add night mode as an app-wide theme switch. It should use WinUI theme resources and `ElementTheme`/app settings rather than hard-coded per-page colors.
+- Theme choice should be persisted in app settings and applied at startup before pages render.
+- Existing theme-resource colors should be preserved during refactors; avoid introducing new hard-coded light-only backgrounds.
+- Page transition sounds should be optional and app-wide. They should not play from individual page methods directly once a shared shell service exists.
+- Planned sound assets:
+  - Enter page: `D:\INput（进入一个界面）.wav`
+  - Exit page: `D:\OUTput（退出一个界面）.wav`
+  - List/card selection: `D:\ListSel（列表选择）.wav`
+- Sound mapping is semantic and should be shared everywhere:
+  - Positive/forward actions use `D:\INput（进入一个界面）.wav`: confirm, add, create, open, enter a page, apply a selection, import after confirmation, start a workflow.
+  - Negative/backward actions use `D:\OUTput（退出一个界面）.wav`: cancel, close, back, exit a viewer/page, dismiss a dialog, delete confirmation completion, undo-like retreat actions.
+  - Parallel-choice selection uses `D:\ListSel（列表选择）.wav`: selecting a card/list/tile/tab/segmented option, choosing among peer options, moving focus between selectable choices.
+- All interactive controls should eventually play one of the shared UI sounds when sound is enabled. Icon buttons, text buttons, cards, list choices, expander headers, dialog buttons, and viewer commands should go through the shared sound service instead of local playback.
+- List selection sound should be lightweight and should not spam during drag reorder, pointer hover, scroll, or rapid keyboard repeat.
+- Provide a settings toggle before enabling UI sounds by default.
 
 ## Encoding Rule
 

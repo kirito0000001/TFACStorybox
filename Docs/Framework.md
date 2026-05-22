@@ -149,7 +149,6 @@ ProjectName/
   Tools/
     project.meta.json
     thumbnail.png
-  Excel/
   project.galexcle.json
   Storylines/
     Main/
@@ -182,7 +181,6 @@ ProjectName/
   Tools/
     project.meta.json
     thumbnail.<ext> (optional)
-  Excel/
   Chapters/
 ```
 
@@ -193,7 +191,6 @@ AssetLibraryName/
   Tools/
     asset-library.meta.json
     thumbnail.<ext> (optional)
-  Excel/
   背景图/
   立绘/
   音乐/
@@ -378,6 +375,7 @@ MVVM can be added once the screens stabilize. The first useful milestone is a si
 - The application icon is generated from `D:\Icon.jpg` into `Assets\AppIcon.ico`.
 - `Assets\**\*` is copied to build and publish output so `ms-appx:///Assets/...` resources still resolve in unpackaged builds.
 - Current publish target folder: `D:\DabaoV`.
+- Use `Scripts\Package-App.ps1` for repeatable release packaging. By default it publishes Release `win-x64` self-contained output to a versioned folder under `D:\DabaoV`, named like `TFAC剧情箱-轮椅版V2.0.0`, with the program folder and root shortcut ready to run directly.
 
 ## Unreal Sync Desk
 
