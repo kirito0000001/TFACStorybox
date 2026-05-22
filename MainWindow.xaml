@@ -265,7 +265,7 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Spacing="4">
                                             <TextBlock Text="章节" Style="{StaticResource SectionTitleStyle}" />
-                                            <TextBlock Text="章节卡代表一个故事章节。当前先记录中文显示名称和英文代号，后续会挂接剧情表格。" Style="{StaticResource SubtleTextStyle}" />
+                                            <TextBlock Text="每一卡代表一个章节，包含相连的数个小节，创建时需要选择关联的素材库。" Style="{StaticResource SubtleTextStyle}" />
                                         </StackPanel>
                                         <Button Grid.Column="1" Content="新建章节" Click="AddChapterButton_Click" />
                                     </Grid>
@@ -574,17 +574,20 @@
                                         Content="+"
                                         Command="{Binding AddSectionCommand}" />
                                 </Grid>
-                                <Grid ColumnSpacing="8">
+                                <Grid ColumnSpacing="8" RowSpacing="8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
                                     <Button Content="上一句" Command="{Binding PreviousRowCommand}" />
-                                    <Button x:Name="InsertStoryRowHereButton" Grid.Column="1" Content="原地新建" Command="{Binding InsertRowCommand}" />
-                                    <Button Grid.Column="2" Content="下一句" Command="{Binding NextRowCommand}" />
+                                    <Button Grid.Column="1" Content="下一句" Command="{Binding NextRowCommand}" />
+                                    <Button x:Name="InsertStoryRowHereButton" Grid.Row="1" Content="原地新增" Command="{Binding InsertRowCommand}" />
+                                    <Button Grid.Row="1" Grid.Column="1" Content="删除此句" Command="{Binding DeleteRowCommand}" />
                                 </Grid>
-                                <Button Content="删除此句" Command="{Binding DeleteRowCommand}" />
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -1805,25 +1808,24 @@ public:
                     Visibility="Collapsed"
                     VerticalScrollBarVisibility="Auto"
                     HorizontalScrollBarVisibility="Disabled">
-                    <Grid Padding="0" ColumnSpacing="18">
+                    <Grid
+                        MaxWidth="1280"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Top"
+                        ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="320" />
+                        <ColumnDefinition Width="300" />
                     </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
 
-                    <StackPanel Spacing="6">
-                        <TextBlock Text="整体设置" Style="{StaticResource PageTitleStyle}" />
-                        <TextBlock Text="这些设置影响所有项目。程序启动时会先检查整体项目位置，不存在则自动创建。" Style="{StaticResource SubtleTextStyle}" />
-                    </StackPanel>
+                    <StackPanel Grid.Column="0" Spacing="10">
+                        <StackPanel Spacing="4" Margin="0,0,0,2">
+                            <TextBlock Text="整体设置" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="这些设置影响所有项目。程序启动时会先检查整体项目位置，不存在则自动创建。" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
 
-                    <Border Grid.Row="1" Margin="0,20,0,0" HorizontalAlignment="Stretch" Style="{StaticResource PanelBorderStyle}">
-                        <StackPanel Padding="18" Spacing="14">
+                    <Border HorizontalAlignment="Stretch" Style="{StaticResource PanelBorderStyle}">
+                        <StackPanel Padding="16" Spacing="12">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <TextBlock Text="整体项目位置" Style="{StaticResource SectionTitleStyle}" />
                                 <Button
@@ -1857,7 +1859,7 @@ public:
                         </StackPanel>
                     </Border>
 
-                    <Expander Grid.Row="2" Margin="0,14,0,0">
+                    <Expander>
                         <Expander.Header>
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <TextBlock Text="辅助显示" Style="{StaticResource SectionTitleStyle}" />
@@ -1952,7 +1954,7 @@ public:
                         </StackPanel>
                     </Expander>
 
-                    <Expander Grid.Row="3" Margin="0,14,0,0">
+                    <Expander>
                         <Expander.Header>
                             <TextBlock Text="素材库显示" Style="{StaticResource SectionTitleStyle}" />
                         </Expander.Header>
@@ -1995,10 +1997,11 @@ public:
                             </Grid>
                         </StackPanel>
                     </Expander>
+                    </StackPanel>
 
-                    <Border Grid.Column="1" Grid.Row="0" Grid.RowSpan="4" Style="{StaticResource PanelBorderStyle}">
-                        <StackPanel Padding="20" Spacing="18">
-                            <Border Width="96" Height="96" CornerRadius="18" HorizontalAlignment="Left">
+                    <Border Grid.Column="1" VerticalAlignment="Top" Style="{StaticResource PanelBorderStyle}">
+                        <StackPanel Padding="16" Spacing="12">
+                            <Border Width="86" Height="86" CornerRadius="16" HorizontalAlignment="Left">
                                 <Image Source="ms-appx:///Assets/AppIcon.png" Stretch="UniformToFill" />
                             </Border>
                             <StackPanel Spacing="4">
@@ -2066,7 +2069,7 @@ public:
             HorizontalAlignment="Stretch"
             VerticalAlignment="Bottom"
             Canvas.ZIndex="100"
-            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            Background="#E6FFFFFF"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="8"

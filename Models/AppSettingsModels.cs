@@ -16,7 +16,7 @@ internal sealed class AppSettings
 
     public bool LogErrors { get; set; } = true;
 
-    public bool UiSoundEnabled { get; set; } = true;
+    public bool UiSoundEnabled { get; set; }
 
     public double AssetLibraryScrollSpeedMultiplier { get; set; } = 1.5;
 

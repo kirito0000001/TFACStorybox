@@ -198,6 +198,8 @@ namespace GalExcleTools
         private bool _isGlobalProgressVisible;
         private double _globalProgressLastPercent;
         private CancellationTokenSource? _globalProgressCancellation;
+        private CancellationTokenSource? _assetLibraryLoadCancellation;
+        private CancellationTokenSource? _characterDetailLoadCancellation;
         private bool _isWindowActive = true;
         private bool _refreshBackgroundImagesAfterDelay;
         private bool _isStoryDebugModeEnabled
@@ -266,6 +268,8 @@ namespace GalExcleTools
             _globalProgressElapsedTimer.Tick += GlobalProgressElapsedTimer_Tick;
             _storyBgmPlayer.IsLoopingEnabled = true;
             _storyScenePlayer.IsLoopingEnabled = true;
+            RegisterAssetLibraryExpanderLazyLoading();
+            RegisterCharacterDetailExpanderLazyLoading();
 
             _appSettings = _appSettingsService.Load();
             _uiSoundService.IsEnabled = _appSettings.UiSoundEnabled;
@@ -574,11 +578,106 @@ namespace GalExcleTools
 
             if (_refreshBackgroundImagesAfterDelay && _currentAssetLibrary is not null)
             {
-                LoadBackgroundImages(_currentAssetLibrary);
+                RefreshAssetLibraryDetailSections(_currentAssetLibrary);
             }
 
             _refreshBackgroundImagesAfterDelay = false;
             AppendLog(LogKind.Info, "延迟刷新完成。");
+        }
+
+        private CancellationToken ResetAssetLibraryLoadCancellation()
+        {
+            _assetLibraryLoadCancellation?.Cancel();
+            _assetLibraryLoadCancellation?.Dispose();
+            _assetLibraryLoadCancellation = new CancellationTokenSource();
+            return _assetLibraryLoadCancellation.Token;
+        }
+
+        private CancellationToken GetAssetLibraryLoadToken()
+        {
+            return _assetLibraryLoadCancellation?.Token ?? ResetAssetLibraryLoadCancellation();
+        }
+
+        private CancellationToken ResetCharacterDetailLoadCancellation()
+        {
+            _characterDetailLoadCancellation?.Cancel();
+            _characterDetailLoadCancellation?.Dispose();
+            _characterDetailLoadCancellation = new CancellationTokenSource();
+            return _characterDetailLoadCancellation.Token;
+        }
+
+        private CancellationToken GetCharacterDetailLoadToken()
+        {
+            return _characterDetailLoadCancellation?.Token ?? ResetCharacterDetailLoadCancellation();
+        }
+
+        private async Task AddGridViewItemsInBatchesAsync<T>(
+            GridView gridView,
+            IReadOnlyList<T> items,
+            Func<T, GridViewItem> createItem,
+            CancellationToken cancellationToken,
+            int batchSize = 12)
+        {
+            for (var index = 0; index < items.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                gridView.Items.Add(createItem(items[index]));
+
+                if ((index + 1) % batchSize == 0)
+                {
+                    await Task.Yield();
+                }
+            }
+        }
+
+        private void RunAssetLibraryLoad(Task task)
+        {
+            _ = ObserveAssetLibraryLoadAsync(task);
+        }
+
+        private async Task ObserveAssetLibraryLoadAsync(Task task)
+        {
+            try
+            {
+                await task;
+            }
+            catch (OperationCanceledException)
+            {
+                // A newer asset-library load replaced this one.
+            }
+            catch (Exception ex)
+            {
+                AppendLog(LogKind.Error, "素材库内容加载失败。", ex);
+                if (AssetLibraryDetailStatusText is not null)
+                {
+                    AssetLibraryDetailStatusText.Text = $"素材库内容加载失败：{ex.Message}";
+                }
+            }
+        }
+
+        private void RunCharacterDetailLoad(Task task)
+        {
+            _ = ObserveCharacterDetailLoadAsync(task);
+        }
+
+        private async Task ObserveCharacterDetailLoadAsync(Task task)
+        {
+            try
+            {
+                await task;
+            }
+            catch (OperationCanceledException)
+            {
+                // A newer character-detail load replaced this one.
+            }
+            catch (Exception ex)
+            {
+                AppendLog(LogKind.Error, "角色分层内容加载失败。", ex);
+                CharacterDetailInfoBar.Severity = InfoBarSeverity.Error;
+                CharacterDetailInfoBar.Title = "角色分层加载失败";
+                CharacterDetailInfoBar.Message = ex.Message;
+                CharacterDetailInfoBar.IsOpen = true;
+            }
         }
 
         private void LoadAllCards()
@@ -4394,8 +4493,7 @@ namespace GalExcleTools
             return new Border
             {
                 HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(0, 0, 0, compact ? 6 : 12),
+                VerticalAlignment = VerticalAlignment.Center,
                 Padding = new Thickness(8, 4, 8, 4),
                 CornerRadius = new CornerRadius(4),
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(148, 0, 0, 0)),
@@ -5052,6 +5150,17 @@ namespace GalExcleTools
                 AudioAssetKind.Ambient => AmbientSoundGridView,
                 AudioAssetKind.SoundEffect => SoundEffectGridView,
                 _ => MusicGridView
+            };
+        }
+
+        private bool IsAudioExpanderExpanded(AudioAssetKind kind)
+        {
+            return kind switch
+            {
+                AudioAssetKind.Music => MusicExpander.IsExpanded,
+                AudioAssetKind.Ambient => AmbientSoundExpander.IsExpanded,
+                AudioAssetKind.SoundEffect => SoundEffectExpander.IsExpanded,
+                _ => false
             };
         }
 
@@ -6411,7 +6520,124 @@ namespace GalExcleTools
             await ReloadBackgroundImagesAsync(assetLibrary);
         }
 
-        private async Task ReloadBackgroundImagesAsync(AssetLibraryInfo assetLibrary)
+        private void RegisterAssetLibraryExpanderLazyLoading()
+        {
+            BackgroundImagesExpander.Expanding += BackgroundImagesExpander_Expanded;
+            MusicExpander.Expanding += MusicExpander_Expanded;
+            AmbientSoundExpander.Expanding += AmbientSoundExpander_Expanded;
+            SoundEffectExpander.Expanding += SoundEffectExpander_Expanded;
+            CharactersExpander.Expanding += CharactersExpander_Expanded;
+            FunctionExpander.Expanding += FunctionExpander_Expanded;
+            CharacterFilterExpander.Expanding += CharacterFilterExpander_Expanded;
+        }
+
+        private void RegisterCharacterDetailExpanderLazyLoading()
+        {
+            CharacterClothExpander.Expanding += CharacterClothExpander_Expanding;
+            CharacterFaceExpander.Expanding += CharacterFaceExpander_Expanding;
+            CharacterAdornExpander.Expanding += CharacterAdornExpander_Expanding;
+            CharacterVfxExpander.Expanding += CharacterVfxExpander_Expanding;
+        }
+
+        private void RefreshAssetLibraryDetailSections(AssetLibraryInfo assetLibrary)
+        {
+            var cancellationToken = GetAssetLibraryLoadToken();
+            RunAssetLibraryLoad(RefreshBackgroundImageCardsAsync(assetLibrary, cancellationToken));
+            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Music, cancellationToken));
+            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Ambient, cancellationToken));
+            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.SoundEffect, cancellationToken));
+            RunAssetLibraryLoad(LoadFunctionsAsync(assetLibrary, cancellationToken));
+            RunAssetLibraryLoad(LoadCharactersAsync(assetLibrary, cancellationToken));
+            RunAssetLibraryLoad(LoadCharacterFiltersAsync(assetLibrary, cancellationToken));
+        }
+
+        private void BackgroundImagesExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            if (_currentAssetLibrary is not null)
+            {
+                RunAssetLibraryLoad(ReloadBackgroundImagesAsync(_currentAssetLibrary, true));
+            }
+        }
+
+        private void MusicExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            if (_currentAssetLibrary is not null)
+            {
+                RunAssetLibraryLoad(ReloadAudioFilesAsync(_currentAssetLibrary, AudioAssetKind.Music, true));
+            }
+        }
+
+        private void AmbientSoundExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            if (_currentAssetLibrary is not null)
+            {
+                RunAssetLibraryLoad(ReloadAudioFilesAsync(_currentAssetLibrary, AudioAssetKind.Ambient, true));
+            }
+        }
+
+        private void SoundEffectExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            if (_currentAssetLibrary is not null)
+            {
+                RunAssetLibraryLoad(ReloadAudioFilesAsync(_currentAssetLibrary, AudioAssetKind.SoundEffect, true));
+            }
+        }
+
+        private void CharactersExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            if (_currentAssetLibrary is not null)
+            {
+                RunAssetLibraryLoad(LoadCharactersAsync(_currentAssetLibrary, GetAssetLibraryLoadToken(), true));
+            }
+        }
+
+        private void FunctionExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            if (_currentAssetLibrary is not null)
+            {
+                RunAssetLibraryLoad(LoadFunctionsAsync(_currentAssetLibrary, GetAssetLibraryLoadToken(), true));
+            }
+        }
+
+        private void CharacterFilterExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            if (_currentAssetLibrary is not null)
+            {
+                RunAssetLibraryLoad(LoadCharacterFiltersAsync(_currentAssetLibrary, GetAssetLibraryLoadToken(), true));
+            }
+        }
+
+        private void CharacterClothExpander_Expanding(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            LoadCharacterDetailLayerOnExpand(CharacterLayerKind.Cloth);
+        }
+
+        private void CharacterFaceExpander_Expanding(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            LoadCharacterDetailLayerOnExpand(CharacterLayerKind.Face);
+        }
+
+        private void CharacterAdornExpander_Expanding(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            LoadCharacterDetailLayerOnExpand(CharacterLayerKind.Adorn);
+        }
+
+        private void CharacterVfxExpander_Expanding(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            LoadCharacterDetailLayerOnExpand(CharacterLayerKind.Vfx);
+        }
+
+        private void LoadCharacterDetailLayerOnExpand(CharacterLayerKind layerKind)
+        {
+            if (_currentCharacter is null)
+            {
+                return;
+            }
+
+            RunCharacterDetailLoad(LoadCharacterDetailLayerAsync(_currentCharacter, layerKind, GetCharacterDetailLoadToken(), true));
+        }
+
+        private async Task ReloadBackgroundImagesAsync(AssetLibraryInfo assetLibrary, bool forcePopulateCards = false)
         {
             var backgroundFolderPath = GetBackgroundFolderPath(assetLibrary);
             Directory.CreateDirectory(backgroundFolderPath);
@@ -6429,7 +6655,7 @@ namespace GalExcleTools
                 }
             }
 
-            RefreshBackgroundImageCards(assetLibrary);
+            await RefreshBackgroundImageCardsAsync(assetLibrary, GetAssetLibraryLoadToken(), forcePopulateCards);
         }
 
         private async void LoadMusicFiles(AssetLibraryInfo assetLibrary)
@@ -6452,7 +6678,7 @@ namespace GalExcleTools
             await ReloadAudioFilesAsync(assetLibrary, AudioAssetKind.SoundEffect);
         }
 
-        private async Task ReloadAudioFilesAsync(AssetLibraryInfo assetLibrary, AudioAssetKind kind)
+        private async Task ReloadAudioFilesAsync(AssetLibraryInfo assetLibrary, AudioAssetKind kind, bool forcePopulateCards = false)
         {
             var musicFolderPath = GetAudioFolderPath(assetLibrary, kind);
             Directory.CreateDirectory(musicFolderPath);
@@ -6470,23 +6696,33 @@ namespace GalExcleTools
                 }
             }
 
-            RefreshAudioCards(assetLibrary, kind);
+            await RefreshAudioCardsAsync(assetLibrary, kind, GetAssetLibraryLoadToken(), forcePopulateCards);
         }
 
-        private void RefreshBackgroundImageCards(AssetLibraryInfo assetLibrary)
+        private async Task RefreshBackgroundImageCardsAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
             var backgroundFolderPath = GetBackgroundFolderPath(assetLibrary);
             var imagePaths = BackgroundImageService.GetFilePaths(backgroundFolderPath);
 
             BackgroundImagesGridView.Items.Clear();
-            foreach (var imagePath in imagePaths)
-            {
-                BackgroundImagesGridView.Items.Add(CreateBackgroundImageCard(imagePath));
-            }
-
             BackgroundImagesExpander.Header = $"背景图 [数量：{imagePaths.Count}]";
             AssetLibraryDetailStatusText.Text = $"背景图：{imagePaths.Count} 个文件 | {backgroundFolderPath}";
+            if (forcePopulateCards || BackgroundImagesExpander.IsExpanded)
+            {
+                await AddGridViewItemsInBatchesAsync(
+                    BackgroundImagesGridView,
+                    imagePaths,
+                    CreateBackgroundImageCard,
+                    cancellationToken,
+                    batchSize: 8);
+            }
+
             AppendLog(LogKind.Info, $"已加载背景图：{imagePaths.Count} 个文件。");
+        }
+
+        private void RefreshBackgroundImageCards(AssetLibraryInfo assetLibrary)
+        {
+            RunAssetLibraryLoad(RefreshBackgroundImageCardsAsync(assetLibrary, GetAssetLibraryLoadToken()));
         }
 
         private GridViewItem CreateBackgroundImageCard(string imagePath)
@@ -6511,18 +6747,13 @@ namespace GalExcleTools
             RefreshAudioCards(assetLibrary, AudioAssetKind.Music);
         }
 
-        private void RefreshAudioCards(AssetLibraryInfo assetLibrary, AudioAssetKind kind)
+        private async Task RefreshAudioCardsAsync(AssetLibraryInfo assetLibrary, AudioAssetKind kind, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
             var musicFolderPath = GetAudioFolderPath(assetLibrary, kind);
             var musicPaths = AudioAssetService.GetFilePaths(musicFolderPath);
             var gridView = GetAudioGridView(kind);
 
             gridView.Items.Clear();
-            foreach (var musicPath in musicPaths)
-            {
-                gridView.Items.Add(CreateAudioCard(kind, musicPath));
-            }
-
             switch (kind)
             {
                 case AudioAssetKind.Music:
@@ -6535,36 +6766,69 @@ namespace GalExcleTools
                     SoundEffectExpander.Header = $"特殊音效 [数量：{musicPaths.Count}]";
                     break;
             }
+
+            if (forcePopulateCards || IsAudioExpanderExpanded(kind))
+            {
+                await AddGridViewItemsInBatchesAsync(
+                    gridView,
+                    musicPaths,
+                    path => CreateAudioCard(kind, path),
+                    cancellationToken);
+            }
+
             AppendLog(LogKind.Info, $"已加载{AudioAssetService.GetDisplayName(kind)}：{musicPaths.Count} 个文件。");
         }
 
-        private void LoadCharacters(AssetLibraryInfo assetLibrary)
+        private void RefreshAudioCards(AssetLibraryInfo assetLibrary, AudioAssetKind kind)
+        {
+            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, kind, GetAssetLibraryLoadToken()));
+        }
+
+        private async Task LoadCharactersAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
             var characters = _characterWorkspaceService.GetCharactersByName(assetLibrary);
 
             CharacterGridView.Items.Clear();
-            foreach (var character in characters)
+            CharactersExpander.Header = $"立绘 [数量：{characters.Count}]";
+            if (forcePopulateCards || CharactersExpander.IsExpanded)
             {
-                CharacterGridView.Items.Add(CreateCharacterCard(character));
+                await AddGridViewItemsInBatchesAsync(
+                    CharacterGridView,
+                    characters,
+                    CreateCharacterCard,
+                    cancellationToken);
+                CharacterGridView.Items.Add(CreateAddCharacterCard());
             }
 
-            CharacterGridView.Items.Add(CreateAddCharacterCard());
-            CharactersExpander.Header = $"立绘 [数量：{characters.Count}]";
             AppendLog(LogKind.Info, $"已加载角色卡：{characters.Count} 个。");
+        }
+
+        private void LoadCharacters(AssetLibraryInfo assetLibrary)
+        {
+            RunAssetLibraryLoad(LoadCharactersAsync(assetLibrary, GetAssetLibraryLoadToken()));
+        }
+
+        private async Task LoadFunctionsAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
+        {
+            var functions = StoryFunctionService.ReadFunctions(assetLibrary, _jsonOptions);
+            FunctionGridView.Items.Clear();
+            FunctionExpander.Header = $"函数 [数量：{functions.Count}]";
+            if (forcePopulateCards || FunctionExpander.IsExpanded)
+            {
+                await AddGridViewItemsInBatchesAsync(
+                    FunctionGridView,
+                    functions,
+                    CreateFunctionCard,
+                    cancellationToken);
+                FunctionGridView.Items.Add(CreateAddFunctionCard());
+            }
+
+            AppendLog(LogKind.Info, $"已加载函数卡：{functions.Count} 个。");
         }
 
         private void LoadFunctions(AssetLibraryInfo assetLibrary)
         {
-            var functions = StoryFunctionService.ReadFunctions(assetLibrary, _jsonOptions);
-            FunctionGridView.Items.Clear();
-            foreach (var function in functions)
-            {
-                FunctionGridView.Items.Add(CreateFunctionCard(function));
-            }
-
-            FunctionGridView.Items.Add(CreateAddFunctionCard());
-            FunctionExpander.Header = $"函数 [数量：{functions.Count}]";
-            AppendLog(LogKind.Info, $"已加载函数卡：{functions.Count} 个。");
+            RunAssetLibraryLoad(LoadFunctionsAsync(assetLibrary, GetAssetLibraryLoadToken()));
         }
 
         private async void AddFunctionButton_Click(object sender, RoutedEventArgs e)
@@ -6676,18 +6940,25 @@ namespace GalExcleTools
                 : chapterCode.Trim();
         }
 
-        private void LoadCharacterFilters(AssetLibraryInfo assetLibrary)
+        private async Task LoadCharacterFiltersAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
             var storedFilters = _characterFilterService.ReadStored(assetLibrary);
             var filters = CharacterFilterService.Normalize(storedFilters);
             CharacterFilterGridView.Items.Clear();
-            foreach (var indexedFilter in filters.Select((filter, index) => new { filter, index }))
+            CharacterFilterExpander.Header = $"角色滤镜 [数量：{filters.Count}]";
+            if (forcePopulateCards || CharacterFilterExpander.IsExpanded)
             {
-                CharacterFilterGridView.Items.Add(CreateCharacterFilterCard(indexedFilter.filter, indexedFilter.index));
+                var indexedFilters = filters
+                    .Select((filter, index) => (filter, index))
+                    .ToList();
+                await AddGridViewItemsInBatchesAsync(
+                    CharacterFilterGridView,
+                    indexedFilters,
+                    item => CreateCharacterFilterCard(item.filter, item.index),
+                    cancellationToken);
+                CharacterFilterGridView.Items.Add(CreateAddCharacterFilterCard());
             }
 
-            CharacterFilterGridView.Items.Add(CreateAddCharacterFilterCard());
-            CharacterFilterExpander.Header = $"角色滤镜 [数量：{filters.Count}]";
             AppendLog(LogKind.Info, $"已加载角色滤镜：{filters.Count} 个。");
             if (!_isRepairingCharacterFilters &&
                 !_isReorderingCharacterFilters &&
@@ -6695,6 +6966,11 @@ namespace GalExcleTools
             {
                 _ = RepairStoredCharacterFiltersAsync(assetLibrary, storedFilters, filters);
             }
+        }
+
+        private void LoadCharacterFilters(AssetLibraryInfo assetLibrary)
+        {
+            RunAssetLibraryLoad(LoadCharacterFiltersAsync(assetLibrary, GetAssetLibraryLoadToken()));
         }
 
         private async Task RepairStoredCharacterFiltersAsync(
@@ -9009,11 +9285,12 @@ namespace GalExcleTools
         private void ShowCharacterDetailPage(CharacterInfo character)
         {
             _currentCharacter = character;
+            var cancellationToken = ResetCharacterDetailLoadCancellation();
             CharacterDetailTabTitleText.Text = $"{character.Name} / {character.Code}";
             CharacterNameTextBox.Text = character.Name;
             CharacterCodeTextBox.Text = character.Code;
             CharacterColorTextBox.Text = character.ColorHex;
-            LoadCharacterDetailLayers(character);
+            RunCharacterDetailLoad(LoadCharacterDetailLayersAsync(character, cancellationToken));
             WorkbenchPage.Visibility = Visibility.Collapsed;
             ProjectDetailPage.Visibility = Visibility.Collapsed;
             AssetLibraryPage.Visibility = Visibility.Collapsed;
@@ -9029,7 +9306,7 @@ namespace GalExcleTools
             AppendLog(LogKind.User, $"打开角色详情：{character.Name}");
         }
 
-        private void LoadCharacterDetailLayers(CharacterInfo character)
+        private async Task LoadCharacterDetailLayersAsync(CharacterInfo character, CancellationToken cancellationToken)
         {
             _characterWorkspaceService.EnsureCharacterSubfolders(character.Path);
 
@@ -9055,11 +9332,16 @@ namespace GalExcleTools
             _selectedCharacterAdornPath = ResolveSelectedCharacterLayerPath(_selectedCharacterAdornPath, adornPaths);
             _selectedCharacterVfxPath = ResolveSelectedCharacterLayerPath(_selectedCharacterVfxPath, vfxPaths);
 
-            LoadCharacterImageLayer(CharacterClothGridView, clothFolderPath, CharacterLayerKind.Cloth);
-            LoadCharacterImageLayer(CharacterFaceGridView, faceFolderPath, CharacterLayerKind.Face);
-            LoadCharacterImageLayer(CharacterAdornGridView, adornFolderPath, CharacterLayerKind.Adorn);
-            LoadCharacterVfxLayer(vfxFolderPath);
-            _ = UpdateCharacterLayerPreviewAsync();
+            await LoadCharacterDetailLayerAsync(character, CharacterLayerKind.Cloth, cancellationToken);
+            await LoadCharacterDetailLayerAsync(character, CharacterLayerKind.Face, cancellationToken);
+            await LoadCharacterDetailLayerAsync(character, CharacterLayerKind.Adorn, cancellationToken);
+            await LoadCharacterDetailLayerAsync(character, CharacterLayerKind.Vfx, cancellationToken);
+            await UpdateCharacterLayerPreviewAsync();
+        }
+
+        private void LoadCharacterDetailLayers(CharacterInfo character)
+        {
+            RunCharacterDetailLoad(LoadCharacterDetailLayersAsync(character, GetCharacterDetailLoadToken()));
         }
 
         private static string? ResolveSelectedCharacterLayerPath(string? selectedPath, IReadOnlyList<string> paths)
@@ -9107,7 +9389,7 @@ namespace GalExcleTools
                 return;
             }
 
-            LoadCharacterDetailLayers(_currentCharacter);
+            RunCharacterDetailLoad(LoadCharacterDetailLayersAsync(_currentCharacter, GetCharacterDetailLoadToken()));
             _ = RestoreCharacterDetailScrollAsync(horizontalOffset, verticalOffset);
         }
 
@@ -9128,18 +9410,50 @@ namespace GalExcleTools
             CharacterDetailScrollViewer.ChangeView(horizontalOffset, verticalOffset, null, true);
         }
 
-        private void LoadCharacterImageLayer(GridView gridView, string folderPath, CharacterLayerKind layerKind)
+        private async Task LoadCharacterDetailLayerAsync(
+            CharacterInfo character,
+            CharacterLayerKind layerKind,
+            CancellationToken cancellationToken,
+            bool forcePopulateCards = false)
+        {
+            var folderPath = CharacterLayerAssetService.GetCharacterFolderPath(character, layerKind);
+            if (layerKind == CharacterLayerKind.Vfx)
+            {
+                await LoadCharacterVfxLayerAsync(folderPath, cancellationToken, forcePopulateCards);
+            }
+            else
+            {
+                await LoadCharacterImageLayerAsync(GetCharacterLayerGridView(layerKind), folderPath, layerKind, cancellationToken, forcePopulateCards);
+            }
+        }
+
+        private async Task LoadCharacterImageLayerAsync(
+            GridView gridView,
+            string folderPath,
+            CharacterLayerKind layerKind,
+            CancellationToken cancellationToken,
+            bool forcePopulateCards = false)
         {
             Directory.CreateDirectory(folderPath);
             gridView.Items.Clear();
 
             var imagePaths = CharacterLayerAssetService.GetImagePaths(folderPath);
-            foreach (var imagePath in imagePaths)
+            if (forcePopulateCards || IsCharacterLayerExpanderExpanded(layerKind))
             {
-                gridView.Items.Add(CreateCharacterImageLayerCard(imagePath, layerKind));
+                await AddGridViewItemsInBatchesAsync(
+                    gridView,
+                    imagePaths,
+                    imagePath => CreateCharacterImageLayerCard(imagePath, layerKind),
+                    cancellationToken,
+                    batchSize: 8);
             }
 
             UpdateCharacterLayerExpanderHeader(layerKind, imagePaths.Count);
+        }
+
+        private void LoadCharacterImageLayer(GridView gridView, string folderPath, CharacterLayerKind layerKind)
+        {
+            RunCharacterDetailLoad(LoadCharacterImageLayerAsync(gridView, folderPath, layerKind, GetCharacterDetailLoadToken()));
         }
 
         private void UpdateCharacterLayerExpanderHeader(CharacterLayerKind layerKind, int count)
@@ -9159,6 +9473,30 @@ namespace GalExcleTools
                     CharacterVfxExpander.Header = $"VFX 滤镜 [数量：{count}]";
                     break;
             }
+        }
+
+        private GridView GetCharacterLayerGridView(CharacterLayerKind layerKind)
+        {
+            return layerKind switch
+            {
+                CharacterLayerKind.Cloth => CharacterClothGridView,
+                CharacterLayerKind.Face => CharacterFaceGridView,
+                CharacterLayerKind.Adorn => CharacterAdornGridView,
+                CharacterLayerKind.Vfx => CharacterVfxGridView,
+                _ => CharacterClothGridView
+            };
+        }
+
+        private bool IsCharacterLayerExpanderExpanded(CharacterLayerKind layerKind)
+        {
+            return layerKind switch
+            {
+                CharacterLayerKind.Cloth => CharacterClothExpander.IsExpanded,
+                CharacterLayerKind.Face => CharacterFaceExpander.IsExpanded,
+                CharacterLayerKind.Adorn => CharacterAdornExpander.IsExpanded,
+                CharacterLayerKind.Vfx => CharacterVfxExpander.IsExpanded,
+                _ => false
+            };
         }
 
         private GridViewItem CreateCharacterImageLayerCard(string imagePath, CharacterLayerKind layerKind)
@@ -9229,7 +9567,7 @@ namespace GalExcleTools
                 marginBottom: 16);
         }
 
-        private void LoadCharacterVfxLayer(string folderPath)
+        private async Task LoadCharacterVfxLayerAsync(string folderPath, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
             Directory.CreateDirectory(folderPath);
             CharacterVfxGridView.Items.Clear();
@@ -9239,12 +9577,21 @@ namespace GalExcleTools
                 .OrderBy(Path.GetFileName)
                 .ToList();
 
-            foreach (var vfxPath in vfxPaths)
+            if (forcePopulateCards || CharacterVfxExpander.IsExpanded)
             {
-                CharacterVfxGridView.Items.Add(CreateCharacterVfxIndexCard(vfxPath));
+                await AddGridViewItemsInBatchesAsync(
+                    CharacterVfxGridView,
+                    vfxPaths,
+                    CreateCharacterVfxIndexCard,
+                    cancellationToken);
             }
 
             UpdateCharacterLayerExpanderHeader(CharacterLayerKind.Vfx, vfxPaths.Count);
+        }
+
+        private void LoadCharacterVfxLayer(string folderPath)
+        {
+            RunCharacterDetailLoad(LoadCharacterVfxLayerAsync(folderPath, GetCharacterDetailLoadToken()));
         }
 
         private GridViewItem CreateCharacterVfxIndexCard(string vfxPath)
@@ -9985,10 +10332,50 @@ namespace GalExcleTools
             RefreshUnrealSyncStatus();
         }
 
-        private void CheckUnrealSyncButton_Click(object sender, RoutedEventArgs e)
+        private async void CheckUnrealSyncButton_Click(object sender, RoutedEventArgs e)
         {
-            RefreshUnrealSyncStatus();
-            AppendLog(LogKind.User, "已重新检测虚幻同步台关联状态。");
+            SaveUnrealSyncSettingsFromUi();
+            var validation = ValidateUnrealSync(useUiValues: true);
+            ApplyUnrealSyncValidation(validation);
+            if (!validation.CanSync || validation.Context is null)
+            {
+                AppendLog(LogKind.User, "已重新检测虚幻同步台关联状态。");
+                return;
+            }
+
+            var checkButton = sender as Button;
+            if (checkButton is not null)
+            {
+                checkButton.IsEnabled = false;
+            }
+            SetUnrealSyncProgress(true, "正在检测虚幻同步差异... 5%", false, 5);
+            UnrealSyncSummaryText.Text = "正在比较工具箱源文件与虚幻项目内的 .uasset 时间戳。";
+            try
+            {
+                var changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context));
+                ApplyUnrealSyncChangePlan(changePlan);
+                AppendUnrealSyncDiffDetails(changePlan);
+                SetUnrealSyncStatus(
+                    changePlan.HasChanges ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                    changePlan.HasChanges ? "检测到同步差异" : "没有同步差异",
+                    changePlan.HasChanges ? "差异文件已列在下方。" : "工具箱项目、素材库和虚幻目标目录已经一致。");
+                SetUnrealSyncProgress(false, string.Empty);
+                AppendLog(LogKind.User, $"已重新检测虚幻同步差异：{changePlan.TotalChangedItems} 项。");
+            }
+            catch (Exception ex)
+            {
+                SetUnrealSyncProgress(false, string.Empty);
+                SetUnrealSyncStatus(InfoBarSeverity.Error, "检测差异失败", ex.Message);
+                UnrealSyncSummaryText.Text = $"检测差异失败：{ex.Message}";
+                AppendLog(LogKind.Error, "重新检测虚幻同步差异失败。", ex);
+            }
+            finally
+            {
+                if (checkButton is not null)
+                {
+                    checkButton.IsEnabled = true;
+                }
+            }
         }
 
         private void RunFullUnrealSyncButton_Click(object sender, RoutedEventArgs e)
@@ -10241,16 +10628,65 @@ namespace GalExcleTools
             UnrealSyncPlanItemsControl.Items.Clear();
             foreach (var item in changePlan.PlanItems)
             {
-                UnrealSyncPlanItemsControl.Items.Add(new TextBlock
-                {
-                    Text = $"• {item}",
-                    TextWrapping = TextWrapping.Wrap,
-                    Margin = new Thickness(0, 0, 0, 4),
-                    Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
-                });
+                AddUnrealSyncPlanText($"• {item}");
             }
 
             UnrealSyncSummaryText.Text = changePlan.Summary;
+        }
+
+        private void AppendUnrealSyncDiffDetails(UnrealSyncChangePlan changePlan)
+        {
+            if (!changePlan.HasChanges)
+            {
+                return;
+            }
+
+            foreach (var group in changePlan.ImportGroups)
+            {
+                AddUnrealSyncPlanText($"[{group.Destination}] 待导入文件", topMargin: 8);
+                foreach (var path in group.Files)
+                {
+                    AddUnrealSyncPlanText($"  - {Path.GetFileName(path)}");
+                }
+            }
+
+            if (changePlan.StoryTables.Count > 0)
+            {
+                AddUnrealSyncPlanText("[ExcelTexts] 待更新剧情表", topMargin: 8);
+                foreach (var entry in changePlan.StoryTables)
+                {
+                    AddUnrealSyncPlanText($"  - {Path.GetFileName(entry.CsvPath)} -> {entry.TableAsset}");
+                }
+            }
+
+            if (changePlan.AssetIndexTables.Count > 0)
+            {
+                AddUnrealSyncPlanText("[ExcelTexts] 待更新素材索引表", topMargin: 8);
+                foreach (var entry in changePlan.AssetIndexTables)
+                {
+                    AddUnrealSyncPlanText($"  - {Path.GetFileName(entry.CsvPath)} -> {entry.TableAsset}");
+                }
+            }
+
+            if (changePlan.LustrationChanged)
+            {
+                AddUnrealSyncPlanText("[Lustration] 待更新立绘数据资产", topMargin: 8);
+                foreach (var row in changePlan.LustrationRows)
+                {
+                    AddUnrealSyncPlanText($"  - {row.Key} / {row.Name}");
+                }
+            }
+        }
+
+        private void AddUnrealSyncPlanText(string text, double topMargin = 0)
+        {
+            UnrealSyncPlanItemsControl.Items.Add(new TextBlock
+            {
+                Text = text,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, topMargin, 0, 4),
+                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
+            });
         }
 
         private async Task<bool?> ShowUnrealBackupDialogAsync(UnrealSyncContext context)
@@ -10712,6 +11148,7 @@ namespace GalExcleTools
         private void ShowAssetLibraryDetailPage(AssetLibraryInfo assetLibrary)
         {
             StopStoryEditorAudio();
+            var cancellationToken = ResetAssetLibraryLoadCancellation();
             _currentAssetLibrary = assetLibrary;
             EnsureAssetLibraryCategoryFolders(assetLibrary.Path);
             AssetLibraryDetailTitleText.Text = assetLibrary.Name;
@@ -10731,13 +11168,13 @@ namespace GalExcleTools
             {
                 SelectShellNavigationItem(AssetLibraryNavItem);
             }
-            LoadBackgroundImages(assetLibrary);
-            LoadMusicFiles(assetLibrary);
-            LoadAmbientSoundFiles(assetLibrary);
-            LoadSoundEffectFiles(assetLibrary);
-            LoadFunctions(assetLibrary);
-            LoadCharacters(assetLibrary);
-            LoadCharacterFilters(assetLibrary);
+            RunAssetLibraryLoad(RefreshBackgroundImageCardsAsync(assetLibrary, cancellationToken));
+            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Music, cancellationToken));
+            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Ambient, cancellationToken));
+            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.SoundEffect, cancellationToken));
+            RunAssetLibraryLoad(LoadFunctionsAsync(assetLibrary, cancellationToken));
+            RunAssetLibraryLoad(LoadCharactersAsync(assetLibrary, cancellationToken));
+            RunAssetLibraryLoad(LoadCharacterFiltersAsync(assetLibrary, cancellationToken));
             PlayPageEntrance(AssetLibraryDetailPage);
         }
 

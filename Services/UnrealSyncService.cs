@@ -700,19 +700,19 @@ internal sealed class UnrealSyncService
 
     public static string BuildTextureReference(string destinationPath, string sourcePath)
     {
-        var assetName = SanitizeUnrealAssetName(Path.GetFileNameWithoutExtension(sourcePath));
+        var assetName = Path.GetFileNameWithoutExtension(sourcePath);
         return $"Texture2D'{destinationPath}/{assetName}.{assetName}'";
     }
 
     public static string BuildSoundWaveReference(string destinationPath, string sourcePath)
     {
-        var assetName = SanitizeUnrealAssetName(Path.GetFileNameWithoutExtension(sourcePath));
+        var assetName = Path.GetFileNameWithoutExtension(sourcePath);
         return $"SoundWave'{destinationPath}/{assetName}.{assetName}'";
     }
 
     public static string BuildAssetObjectPath(string destinationPath, string sourcePath)
     {
-        var assetName = SanitizeUnrealAssetName(Path.GetFileNameWithoutExtension(sourcePath));
+        var assetName = Path.GetFileNameWithoutExtension(sourcePath);
         return $"{destinationPath}/{assetName}.{assetName}";
     }
 
@@ -813,23 +813,48 @@ internal sealed class UnrealSyncService
     private static bool SourceFileNeedsImport(UnrealSyncContext context, string destinationPath, string sourcePath)
     {
         var objectPath = BuildAssetObjectPath(destinationPath, sourcePath);
-        return SourceFileNeedsAssetUpdate(context, sourcePath, objectPath);
+        var assetFilePath = AssetObjectPathToFilePath(context, objectPath);
+        var alternativeAssetFilePath = BuildImportedAssetFilePath(context, destinationPath, sourcePath);
+        return SourceFileNeedsAnyAssetUpdate(context, sourcePath, assetFilePath, alternativeAssetFilePath);
     }
 
     private static bool SourceFileNeedsAssetUpdate(UnrealSyncContext context, string sourcePath, string objectPath)
+    {
+        return SourceFileNeedsAnyAssetUpdate(context, sourcePath, AssetObjectPathToFilePath(context, objectPath));
+    }
+
+    private static bool SourceFileNeedsAnyAssetUpdate(UnrealSyncContext context, string sourcePath, params string[] assetFilePaths)
     {
         if (!File.Exists(sourcePath))
         {
             return false;
         }
 
-        var assetFilePath = AssetObjectPathToFilePath(context, objectPath);
-        if (!File.Exists(assetFilePath))
+        var existingAssetPath = assetFilePaths.FirstOrDefault(File.Exists);
+        if (existingAssetPath is null)
         {
             return true;
         }
 
-        return File.GetLastWriteTimeUtc(sourcePath) > File.GetLastWriteTimeUtc(assetFilePath).AddSeconds(1);
+        return File.GetLastWriteTimeUtc(sourcePath) > File.GetLastWriteTimeUtc(existingAssetPath).AddSeconds(1);
+    }
+
+    private static string BuildImportedAssetFilePath(UnrealSyncContext context, string destinationPath, string sourcePath)
+    {
+        var targetRoot = context.TargetAssetRoot.Trim('/');
+        var relativeDestination = destinationPath.Trim('/').StartsWith(targetRoot, StringComparison.OrdinalIgnoreCase)
+            ? destinationPath.Trim('/')[targetRoot.Length..].Trim('/')
+            : destinationPath.Trim('/');
+        var assetName = NormalizeImportedAssetName(Path.GetFileNameWithoutExtension(sourcePath));
+        return Path.Combine(
+            context.TargetContentFolderPath,
+            relativeDestination.Replace('/', Path.DirectorySeparatorChar),
+            assetName + ".uasset");
+    }
+
+    private static string NormalizeImportedAssetName(string assetName)
+    {
+        return assetName.Replace(' ', '_');
     }
 
     private static string BuildStoryTableFolder(UnrealSyncContext context, ChapterInfo chapter, bool hasMultipleSections)
