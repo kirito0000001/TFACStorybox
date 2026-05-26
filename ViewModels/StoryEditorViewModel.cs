@@ -29,6 +29,7 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private string _currentFunctionText = "当前函数：无";
     private string _assetStatusText = string.Empty;
     private bool _hasCurrentFunction;
+    private bool _hasMultipleCurrentFunctions;
     private bool _hasCurrentChoices;
 
     public StoryEditorViewModel()
@@ -238,13 +239,37 @@ internal sealed class StoryEditorViewModel : ObservableObject
     public bool HasCurrentFunction
     {
         get => _hasCurrentFunction;
-        set => SetProperty(ref _hasCurrentFunction, value);
+        set
+        {
+            if (SetProperty(ref _hasCurrentFunction, value))
+            {
+                ClearFunctionCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool HasMultipleCurrentFunctions
+    {
+        get => _hasMultipleCurrentFunctions;
+        set
+        {
+            if (SetProperty(ref _hasMultipleCurrentFunctions, value))
+            {
+                RemoveFunctionCommand.NotifyCanExecuteChanged();
+            }
+        }
     }
 
     public bool HasCurrentChoices
     {
         get => _hasCurrentChoices;
-        set => SetProperty(ref _hasCurrentChoices, value);
+        set
+        {
+            if (SetProperty(ref _hasCurrentChoices, value))
+            {
+                ViewChoicesCommand.NotifyCanExecuteChanged();
+            }
+        }
     }
 
     public void RefreshCollectionState()
@@ -291,7 +316,7 @@ internal sealed class StoryEditorViewModel : ObservableObject
         ChangeSceneCommand = new AsyncRelayCommand(changeScene, () => Rows.Count > 0 && CsvPath is not null);
         ChooseFunctionCommand = new AsyncRelayCommand(chooseFunction, () => Rows.Count > 0 && CsvPath is not null);
         ViewChoicesCommand = new AsyncRelayCommand(viewChoices, () => Rows.Count > 0 && HasCurrentChoices);
-        RemoveFunctionCommand = new AsyncRelayCommand(removeFunction, () => Rows.Count > 0 && HasCurrentFunction);
+        RemoveFunctionCommand = new AsyncRelayCommand(removeFunction, () => Rows.Count > 0 && HasMultipleCurrentFunctions);
         ClearFunctionCommand = new RelayCommand(clearFunction, () => Rows.Count > 0 && HasCurrentFunction);
         ClearCurrentRowCommand = new RelayCommand(clearCurrentRow, () => Rows.Count > 0 && CsvPath is not null);
         OnPropertyChanged(nameof(UndoCommand));

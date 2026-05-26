@@ -8,6 +8,7 @@ internal sealed record AssetLibraryInfo(
     string FolderName,
     string Path,
     string? ThumbnailPath,
+    bool IsPortraitPreviewEnabled,
     DateTime LastEditedAt);
 
 internal sealed record BackgroundImageEntry(string Path, string Remark);
@@ -75,6 +76,16 @@ internal sealed class CharacterLayerScopeMeta
     public Dictionary<string, CharacterLayerScopeEntry> Entries { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
+internal sealed class CharacterPortraitPreviewMeta
+{
+    public Dictionary<string, CharacterPortraitPreviewEntry> Entries { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+internal sealed class CharacterPortraitPreviewEntry
+{
+    public string? PreviewFileName { get; set; }
+}
+
 internal sealed class CharacterLayerScopeEntry
 {
     public bool UseAllCostumes { get; set; } = true;
@@ -96,6 +107,8 @@ internal sealed class AssetLibraryMeta
     public string? AssetLibraryName { get; set; }
 
     public string? ThumbnailFileName { get; set; }
+
+    public bool IsPortraitPreviewEnabled { get; set; }
 
     public DateTime LastEditedAt { get; set; }
 }

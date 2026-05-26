@@ -44,6 +44,16 @@ internal static class WorkspacePathUtility
         return Path.Combine(chapter.Path, StoryChoiceNotesFileName);
     }
 
+    public static string GetProjectVoiceFolderPath(ProjectInfo project)
+    {
+        return Path.Combine(project.Path, "Voice");
+    }
+
+    public static string GetProjectChapterVoiceFolderPath(ProjectInfo project, string chapterCode)
+    {
+        return Path.Combine(GetProjectVoiceFolderPath(project), TextUtility.SanitizeCharacterFolderName(chapterCode));
+    }
+
     public static string GetCharacterFaceScopeMetaPath(string faceFolderPath)
     {
         return Path.Combine(faceFolderPath, "face-scope.meta.json");
@@ -52,6 +62,16 @@ internal static class WorkspacePathUtility
     public static string GetCharacterAdornScopeMetaPath(string adornFolderPath)
     {
         return Path.Combine(adornFolderPath, "adorn-scope.meta.json");
+    }
+
+    public static string GetCharacterPortraitPreviewFolderPath(CharacterInfo character)
+    {
+        return Path.Combine(character.Path, "Log_Preview");
+    }
+
+    public static string GetCharacterPortraitPreviewMetaPath(CharacterInfo character)
+    {
+        return Path.Combine(GetCharacterPortraitPreviewFolderPath(character), "portrait-preview.meta.json");
     }
 
     public static string GetBackgroundFolderPath(AssetLibraryInfo assetLibrary)

@@ -87,3 +87,27 @@ internal sealed record StoryCsvCompatibility(
 internal sealed record StoryTableCsvEntry(string CsvPath, string AssetName, bool IsSectionCsv);
 
 internal sealed record StorySectionCsvFile(string Path, int Section);
+
+internal sealed record ProjectTextRow(
+    string Id,
+    string ChapterCode,
+    string ChapterName,
+    int Section,
+    string RowName,
+    string Text);
+
+internal sealed class ProjectVoiceMapState
+{
+    public Dictionary<string, string> Voices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+internal sealed class ProjectLocalizationState
+{
+    public Dictionary<string, Dictionary<string, string>> Languages { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+internal enum ProjectTextToolMode
+{
+    Voice,
+    Localization
+}

@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using static GalExcleTools.Services.ColorUtility;
 using static GalExcleTools.Services.FileSystemUtility;
 using static GalExcleTools.Services.TextUtility;
@@ -22,7 +23,8 @@ internal sealed class UnrealSyncService
         "BGM",
         "ExcelTexts",
         "Lustration",
-        "Scene_Effect"
+        "Scene_Effect",
+        "Voice"
     ];
 
     private readonly JsonSerializerOptions _jsonOptions;
@@ -76,24 +78,77 @@ internal sealed class UnrealSyncService
             .ToList();
     }
 
+    public List<UnrealLustrationSyncEntry> BuildPortraitSyncEntries(
+        UnrealSyncContext context,
+        IReadOnlyList<CharacterInfo> characters,
+        Func<CharacterInfo, IReadOnlyDictionary<string, string>> getPortraitPreviewPathsByLayerFileName)
+    {
+        return characters
+            .Select(character =>
+            {
+                var previewPaths = getPortraitPreviewPathsByLayerFileName(character);
+                var destination = GetPortraitPreviewDestinationPath(context, character);
+                var clothRefs = GetCharacterLayerImportPaths(character, CharacterLayerKind.Cloth)
+                    .Select(path => BuildPortraitPreviewAssetReference(destination, previewPaths, path))
+                    .Where(reference => reference is not null)
+                    .Cast<string>()
+                    .ToList();
+                var faceRefs = GetCharacterLayerImportPaths(character, CharacterLayerKind.Face)
+                    .Select(path => BuildPortraitPreviewAssetReference(destination, previewPaths, path))
+                    .Where(reference => reference is not null)
+                    .Cast<string>()
+                    .ToList();
+                var adornRefs = new List<string?> { null };
+                adornRefs.AddRange(GetCharacterLayerImportPaths(character, CharacterLayerKind.Adorn)
+                    .Select(path => BuildPortraitPreviewAssetReference(destination, previewPaths, path)));
+                var color = ParseColor(character.ColorHex, Windows.UI.Color.FromArgb(255, 217, 232, 255));
+
+                return new UnrealLustrationSyncEntry(
+                    character.Code,
+                    character.Name,
+                    new UnrealLinearColor(color.R / 255d, color.G / 255d, color.B / 255d, color.A / 255d),
+                    clothRefs,
+                    faceRefs,
+                    adornRefs);
+            })
+            .ToList();
+    }
+
     public List<UnrealSyncImportGroup> BuildImportGroups(
         UnrealSyncContext context,
         IReadOnlyList<CharacterInfo> characters,
         IReadOnlyCollection<string> backgroundPaths,
         IReadOnlyCollection<string> musicPaths,
         IReadOnlyCollection<string> ambientPaths,
-        IReadOnlyCollection<string> soundEffectPaths)
+        IReadOnlyCollection<string> soundEffectPaths,
+        IReadOnlyCollection<string> voicePaths)
     {
         var groups = new List<UnrealSyncImportGroup>();
         AddImportGroup(groups, $"{context.TargetAssetRoot}/BackGround", backgroundPaths);
         AddImportGroup(groups, $"{context.TargetAssetRoot}/BGM", musicPaths);
         AddImportGroup(groups, $"{context.TargetAssetRoot}/Scene_Effect", ambientPaths.Concat(soundEffectPaths).ToList());
+        AddProjectVoiceImportGroups(groups, context, voicePaths);
 
         foreach (var character in characters)
         {
             AddImportGroup(groups, GetLustrationLayerDestinationPath(context, character, CharacterLayerKind.Cloth), GetCharacterLayerImportPaths(character, CharacterLayerKind.Cloth));
             AddImportGroup(groups, GetLustrationLayerDestinationPath(context, character, CharacterLayerKind.Face), GetCharacterLayerImportPaths(character, CharacterLayerKind.Face));
             AddImportGroup(groups, GetLustrationLayerDestinationPath(context, character, CharacterLayerKind.Adorn), GetCharacterLayerImportPaths(character, CharacterLayerKind.Adorn));
+        }
+
+        return groups;
+    }
+
+    public List<UnrealSyncImportGroup> BuildPortraitPreviewImportGroups(
+        UnrealSyncContext context,
+        IReadOnlyList<CharacterInfo> characters,
+        Func<CharacterInfo, IReadOnlyDictionary<string, string>> getPortraitPreviewPathsByLayerFileName)
+    {
+        var groups = new List<UnrealSyncImportGroup>();
+        foreach (var character in characters)
+        {
+            var previewPaths = getPortraitPreviewPathsByLayerFileName(character).Values.ToList();
+            AddImportGroup(groups, GetPortraitPreviewDestinationPath(context, character), previewPaths);
         }
 
         return groups;
@@ -203,9 +258,17 @@ internal sealed class UnrealSyncService
                 ShouldUpdate = changePlan.LustrationChanged,
                 Rows = changePlan.LustrationChanged ? changePlan.LustrationRows : []
             },
+            PortraitsInfo = new
+            {
+                DataAsset = $"{context.TargetAssetRoot}/Lustration/DA_Portraits.DA_Portraits",
+                MapProperty = "Infor",
+                ShouldUpdate = changePlan.PortraitsChanged,
+                Rows = changePlan.PortraitsChanged ? changePlan.PortraitRows : []
+            },
             StoryTables = changePlan.StoryTables,
             AssetIndexTables = changePlan.AssetIndexTables,
             Imports = changePlan.ImportGroups,
+            Deletes = changePlan.DeleteGroups,
             Filters = filters
         };
 
@@ -226,7 +289,32 @@ internal sealed class UnrealSyncService
 
             target_root = manifest.get("TargetRoot", "/Game")
             imports = manifest.get("Imports", [])
+            deletes = manifest.get("Deletes", [])
             tasks = []
+
+            def delete_asset_if_exists(asset_path):
+                if not asset_path:
+                    return False
+                try:
+                    if not unreal.EditorAssetLibrary.does_asset_exist(asset_path):
+                        return False
+                    if unreal.EditorAssetLibrary.delete_asset(asset_path):
+                        unreal.log("GalExcleTools deleted extra asset: {}".format(asset_path))
+                        return True
+                    unreal.log_warning("GalExcleTools failed to delete extra asset: {}".format(asset_path))
+                except Exception as exc:
+                    unreal.log_warning("GalExcleTools failed to delete extra asset {}: {}".format(asset_path, exc))
+                return False
+
+            deleted_count = 0
+            for group in deletes:
+                destination = group.get("Destination")
+                assets = group.get("Assets", [])
+                if not destination:
+                    continue
+                for asset_path in assets:
+                    if delete_asset_if_exists(asset_path):
+                        deleted_count += 1
 
             for group in imports:
                 destination = group.get("Destination")
@@ -461,7 +549,33 @@ internal sealed class UnrealSyncService
                 else:
                     unreal.log_warning("GalExcleTools could not load lustration data asset: {}".format(data_asset_path))
 
-            unreal.log("GalExcleTools sync finished. Imported task count: {}".format(len(tasks)))
+            portraits_info = manifest.get("PortraitsInfo", {})
+            portraits_data_asset_path = portraits_info.get("DataAsset")
+            portraits_map_property = portraits_info.get("MapProperty", "Infor")
+            portrait_rows = portraits_info.get("Rows", [])
+            should_update_portraits = portraits_info.get("ShouldUpdate", bool(portrait_rows))
+            if portraits_data_asset_path and should_update_portraits:
+                portraits_data_asset = unreal.EditorAssetLibrary.load_asset(portraits_data_asset_path)
+                if portraits_data_asset:
+                    portraits_map = {}
+                    for row in portrait_rows:
+                        key = row.get("Key")
+                        if not key:
+                            continue
+                        portraits_map[str(key)] = build_lustration_struct(row, None)
+                    try:
+                        portraits_data_asset.modify()
+                    except Exception:
+                        pass
+                    if set_first_editor_property(portraits_data_asset, [portraits_map_property, portraits_map_property.lower(), "Infor", "infor"], portraits_map):
+                        unreal.EditorAssetLibrary.save_asset(portraits_data_asset_path, only_if_is_dirty=False)
+                        unreal.log("GalExcleTools updated portrait data asset: {} rows={}".format(portraits_data_asset_path, len(portraits_map)))
+                    else:
+                        unreal.log_warning("GalExcleTools could not set portrait map property '{}' on {}".format(portraits_map_property, portraits_data_asset_path))
+                else:
+                    unreal.log_warning("GalExcleTools could not load portrait data asset: {}".format(portraits_data_asset_path))
+
+            unreal.log("GalExcleTools sync finished. Imported task count: {}, deleted extra asset count: {}".format(len(tasks), deleted_count))
             """;
 
         File.WriteAllText(scriptPath, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -471,8 +585,10 @@ internal sealed class UnrealSyncService
         UnrealSyncContext context,
         UnrealSyncChangePlan changePlan,
         IReadOnlyList<CharacterFilterEntry> filters,
-        IProgress<UnrealSyncProgressUpdate>? progress = null)
+        IProgress<UnrealSyncProgressUpdate>? progress = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var savedFolder = Path.Combine(Path.GetDirectoryName(context.UnrealProjectPath)!, "Saved", "GalExcleTools");
         Directory.CreateDirectory(savedFolder);
         var manifestPath = Path.Combine(savedFolder, "gal-sync-manifest.json");
@@ -480,8 +596,10 @@ internal sealed class UnrealSyncService
 
         progress?.Report(new UnrealSyncProgressUpdate("正在写入同步清单...", 40));
         WriteManifest(context, changePlan, filters, manifestPath);
+        cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new UnrealSyncProgressUpdate("正在写入 Unreal Python 脚本...", 48));
         WritePythonScript(scriptPath, manifestPath);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var processStartInfo = new ProcessStartInfo
         {
@@ -501,13 +619,36 @@ internal sealed class UnrealSyncService
         using var process = Process.Start(processStartInfo) ?? throw new InvalidOperationException("无法启动 Unreal Editor。");
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
-        progress?.Report(new UnrealSyncProgressUpdate("Unreal 正在导入变动资源并保存资产...", 70));
-        if (!process.WaitForExit(30 * 60 * 1000))
+        progress?.Report(new UnrealSyncProgressUpdate("Unreal 已启动，正在加载项目并执行导入脚本...", 60));
+
+        var waitStartedAt = DateTime.UtcNow;
+        var lastProgressReportAt = DateTime.MinValue;
+        while (!process.WaitForExit(1000))
         {
-            process.Kill(entireProcessTree: true);
-            throw new TimeoutException("Unreal Editor 同步超过 30 分钟，已终止进程。");
+            if (cancellationToken.IsCancellationRequested)
+            {
+                KillUnrealSyncProcess(process);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            var elapsed = DateTime.UtcNow - waitStartedAt;
+            if (elapsed >= TimeSpan.FromMinutes(30))
+            {
+                KillUnrealSyncProcess(process);
+                throw new TimeoutException("Unreal Editor 同步超过 30 分钟，已终止进程。");
+            }
+
+            if ((DateTime.UtcNow - lastProgressReportAt).TotalSeconds >= 10)
+            {
+                lastProgressReportAt = DateTime.UtcNow;
+                var percent = Math.Min(90, 60 + elapsed.TotalSeconds / 180d * 25d);
+                progress?.Report(new UnrealSyncProgressUpdate(
+                    "Unreal 正在加载项目、导入资源并保存资产...",
+                    percent));
+            }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new UnrealSyncProgressUpdate("正在收集 Unreal 同步结果...", 95));
         var output = outputTask.Result + errorTask.Result + ReadLatestLogSnippet(context);
         return new UnrealSyncResult(process.ExitCode, manifestPath, scriptPath, output);
@@ -521,8 +662,10 @@ internal sealed class UnrealSyncService
         IReadOnlyCollection<string> musicPaths,
         IReadOnlyCollection<string> ambientPaths,
         IReadOnlyCollection<string> soundEffectPaths,
+        IReadOnlyCollection<string> voicePaths,
         IReadOnlyList<UnrealStoryTableSyncEntry> allStoryTables,
-        string assetIndexTableCacheFolder)
+        string assetIndexTableCacheFolder,
+        Func<CharacterInfo, IReadOnlyDictionary<string, string>> getPortraitPreviewPathsByLayerFileName)
     {
         var importGroups = BuildImportGroups(
                 context,
@@ -530,7 +673,8 @@ internal sealed class UnrealSyncService
                 backgroundPaths,
                 musicPaths,
                 ambientPaths,
-                soundEffectPaths)
+                soundEffectPaths,
+                voicePaths)
             .Select(group => new UnrealSyncImportGroup(
                 group.Destination,
                 forceFullSync
@@ -538,8 +682,35 @@ internal sealed class UnrealSyncService
                     : group.Files
                         .Where(path => SourceFileNeedsImport(context, group.Destination, path))
                         .ToList()))
+            .ToList();
+
+        var portraitPreviewImportGroups = context.AssetLibrary.IsPortraitPreviewEnabled
+            ? BuildPortraitPreviewImportGroups(context, characters, getPortraitPreviewPathsByLayerFileName)
+                .Select(group => new UnrealSyncImportGroup(
+                    group.Destination,
+                    forceFullSync
+                        ? group.Files.ToList()
+                        : group.Files
+                            .Where(path => SourceFileNeedsImport(context, group.Destination, path))
+                            .ToList()))
+                .ToList()
+            : [];
+
+        importGroups = importGroups
+            .Concat(portraitPreviewImportGroups)
             .Where(group => group.Files.Count > 0)
             .ToList();
+
+        var deleteGroups = BuildDeleteGroups(
+            context,
+            characters,
+            backgroundPaths,
+            musicPaths,
+            ambientPaths,
+            soundEffectPaths,
+            voicePaths,
+            allStoryTables,
+            getPortraitPreviewPathsByLayerFileName);
 
         var storyTables = forceFullSync
             ? allStoryTables.ToList()
@@ -571,26 +742,52 @@ internal sealed class UnrealSyncService
             !File.Exists(lustrationAssetFilePath) ||
             !string.Equals(syncState.LustrationHash, lustrationHash, StringComparison.OrdinalIgnoreCase);
 
+        var portraitRows = context.AssetLibrary.IsPortraitPreviewEnabled
+            ? BuildPortraitSyncEntries(context, characters, getPortraitPreviewPathsByLayerFileName)
+            : [];
+        var portraitsHash = context.AssetLibrary.IsPortraitPreviewEnabled
+            ? ComputeSha256Hex("portrait-dataasset-v1|" + JsonSerializer.Serialize(portraitRows, _jsonOptions))
+            : string.Empty;
+        var portraitsAssetPath = $"{context.TargetAssetRoot}/Lustration/DA_Portraits.DA_Portraits";
+        var portraitsAssetFilePath = AssetObjectPathToFilePath(context, portraitsAssetPath);
+        var portraitsChanged =
+            context.AssetLibrary.IsPortraitPreviewEnabled &&
+            (forceFullSync ||
+                !File.Exists(portraitsAssetFilePath) ||
+                !string.Equals(syncState.PortraitsHash, portraitsHash, StringComparison.OrdinalIgnoreCase));
+
         var importCount = importGroups.Sum(group => group.Files.Count);
+        var deleteCount = deleteGroups.Sum(group => group.Assets.Count);
         var storyTableCount = storyTables.Count;
         var assetIndexTableCount = assetIndexTables.Count;
-        var totalChanged = importCount + storyTableCount + assetIndexTableCount + (lustrationChanged ? 1 : 0);
+        var totalChanged = importCount + deleteCount + storyTableCount + assetIndexTableCount + (lustrationChanged ? 1 : 0) + (portraitsChanged ? 1 : 0);
         var planItems = new List<string>
         {
             forceFullSync ? "全部重新同步：已忽略时间戳和同步缓存" : "同步模式：仅同步检测到的变动",
             $"变动素材文件：{importCount} 个",
+            deleteCount > 0
+                ? $"虚幻多余素材：{deleteCount} 个将删除"
+                : "虚幻多余素材：无",
             $"变动剧情 CSV/DataTable：{storyTableCount} 个",
             assetIndexTablesChanged
                 ? $"素材索引表：需要更新 {assetIndexTableCount} 张 DataTable"
                 : "素材索引表：无变动",
             lustrationChanged
                 ? $"立绘数据资产：需要更新 {lustrationRows.Count} 个角色映射"
-                : "立绘数据资产：无变动"
+                : "立绘数据资产：无变动",
+            portraitsChanged
+                ? $"小预览数据资产：需要更新 {portraitRows.Count} 个角色映射"
+                : context.AssetLibrary.IsPortraitPreviewEnabled ? "小预览数据资产：无变动" : "小预览数据资产：未启用"
         };
 
         foreach (var group in importGroups)
         {
             planItems.Add($"{group.Destination}：{group.Files.Count} 个文件待导入");
+        }
+
+        foreach (var group in deleteGroups)
+        {
+            planItems.Add($"{group.Destination}：{group.Assets.Count} 个多余资产待删除");
         }
 
         if (storyTableCount > 0)
@@ -611,11 +808,15 @@ internal sealed class UnrealSyncService
 
         return new UnrealSyncChangePlan(
             importGroups,
+            deleteGroups,
             storyTables,
             assetIndexTables,
             lustrationChanged,
             lustrationRows,
+            portraitsChanged,
+            portraitRows,
             lustrationHash,
+            portraitsHash,
             assetIndexTablesHash,
             totalChanged,
             summary,
@@ -698,6 +899,21 @@ internal sealed class UnrealSyncService
         return $"{context.TargetAssetRoot}/Lustration/{character.Code}/{folderName}";
     }
 
+    public static string GetPortraitPreviewDestinationPath(UnrealSyncContext context, CharacterInfo character)
+    {
+        return $"{context.TargetAssetRoot}/Lustration/{character.Code}/Log_Preview";
+    }
+
+    private static string? BuildPortraitPreviewAssetReference(
+        string destinationPath,
+        IReadOnlyDictionary<string, string> previewPathsByLayerFileName,
+        string layerPath)
+    {
+        return previewPathsByLayerFileName.TryGetValue(Path.GetFileName(layerPath), out var previewPath) && File.Exists(previewPath)
+            ? BuildTextureReference(destinationPath, previewPath)
+            : null;
+    }
+
     public static string BuildTextureReference(string destinationPath, string sourcePath)
     {
         var assetName = Path.GetFileNameWithoutExtension(sourcePath);
@@ -708,6 +924,28 @@ internal sealed class UnrealSyncService
     {
         var assetName = Path.GetFileNameWithoutExtension(sourcePath);
         return $"SoundWave'{destinationPath}/{assetName}.{assetName}'";
+    }
+
+    public static string GetProjectVoiceDestinationPath(UnrealSyncContext context, string voicePath)
+    {
+        var voiceRootPath = GetProjectVoiceFolderPath(context.Project);
+        var relativeFolder = GetProjectVoiceRelativeFolder(voiceRootPath, voicePath);
+        if (string.IsNullOrWhiteSpace(relativeFolder))
+        {
+            return $"{context.TargetAssetRoot}/Voice";
+        }
+
+        var segments = relativeFolder
+            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToArray();
+        if (segments.Length == 0)
+        {
+            return $"{context.TargetAssetRoot}/Voice";
+        }
+
+        segments[0] = SanitizeUnrealAssetName(StoryCsvService.RemoveChapterSectionSuffix(segments[0]));
+        return $"{context.TargetAssetRoot}/Voice/{string.Join("/", segments)}";
     }
 
     public static string BuildAssetObjectPath(string destinationPath, string sourcePath)
@@ -758,6 +996,13 @@ internal sealed class UnrealSyncService
             : 0;
     }
 
+    public static int CountAssetsRecursive(string folderPath)
+    {
+        return Directory.Exists(folderPath)
+            ? Directory.EnumerateFiles(folderPath, "*.uasset", SearchOption.AllDirectories).Count()
+            : 0;
+    }
+
     public static string AssetObjectPathToFilePath(UnrealSyncContext context, string objectPath)
     {
         var packagePath = objectPath.Split('.')[0].Trim('/');
@@ -769,6 +1014,45 @@ internal sealed class UnrealSyncService
         return Path.Combine(
             context.TargetContentFolderPath,
             relativePath.Replace('/', Path.DirectorySeparatorChar) + ".uasset");
+    }
+
+    private static string AssetFolderPathToFilePath(UnrealSyncContext context, string folderPath)
+    {
+        var targetRoot = context.TargetAssetRoot.Trim('/');
+        var relativePath = folderPath.Trim('/').StartsWith(targetRoot, StringComparison.OrdinalIgnoreCase)
+            ? folderPath.Trim('/')[targetRoot.Length..].Trim('/')
+            : folderPath.Trim('/');
+
+        return Path.Combine(context.TargetContentFolderPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+    }
+
+    private static string? BuildAssetObjectPathFromAssetFile(UnrealSyncContext context, string assetFilePath)
+    {
+        var relativePath = Path.GetRelativePath(context.TargetContentFolderPath, assetFilePath);
+        if (relativePath.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativePath))
+        {
+            return null;
+        }
+
+        var packagePath = Path.ChangeExtension(relativePath, null)?.Replace(Path.DirectorySeparatorChar, '/');
+        if (string.IsNullOrWhiteSpace(packagePath))
+        {
+            return null;
+        }
+
+        var assetName = Path.GetFileNameWithoutExtension(assetFilePath);
+        return $"{context.TargetAssetRoot.TrimEnd('/')}/{packagePath}.{assetName}";
+    }
+
+    private static string BuildAssetFolderPathFromFolder(UnrealSyncContext context, string folderPath)
+    {
+        var relativePath = Path.GetRelativePath(context.TargetContentFolderPath, folderPath);
+        if (relativePath.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativePath))
+        {
+            return context.TargetAssetRoot;
+        }
+
+        return $"{context.TargetAssetRoot.TrimEnd('/')}/{relativePath.Replace(Path.DirectorySeparatorChar, '/')}";
     }
 
     public UnrealSyncState ReadState(UnrealSyncContext context)
@@ -796,6 +1080,7 @@ internal sealed class UnrealSyncService
         var state = ReadState(context);
         state.LastSyncedAt = DateTimeOffset.Now;
         state.LustrationHash = changePlan.LustrationHash;
+        state.PortraitsHash = changePlan.PortraitsHash;
         state.AssetIndexTablesHash = changePlan.AssetIndexTablesHash;
         File.WriteAllText(statePath, JsonSerializer.Serialize(state, _jsonOptions), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
@@ -808,6 +1093,275 @@ internal sealed class UnrealSyncService
         }
 
         groups.Add(new UnrealSyncImportGroup(destination, files.OrderBy(Path.GetFileName).ToList()));
+    }
+
+    private static void AddProjectVoiceImportGroups(
+        List<UnrealSyncImportGroup> groups,
+        UnrealSyncContext context,
+        IReadOnlyCollection<string> voicePaths)
+    {
+        foreach (var group in voicePaths
+            .Where(File.Exists)
+            .GroupBy(path => GetProjectVoiceDestinationPath(context, path), StringComparer.OrdinalIgnoreCase))
+        {
+            AddImportGroup(groups, group.Key, group.ToList());
+        }
+    }
+
+    private List<UnrealSyncDeleteGroup> BuildDeleteGroups(
+        UnrealSyncContext context,
+        IReadOnlyList<CharacterInfo> characters,
+        IReadOnlyCollection<string> backgroundPaths,
+        IReadOnlyCollection<string> musicPaths,
+        IReadOnlyCollection<string> ambientPaths,
+        IReadOnlyCollection<string> soundEffectPaths,
+        IReadOnlyCollection<string> voicePaths,
+        IReadOnlyList<UnrealStoryTableSyncEntry> storyTables,
+        Func<CharacterInfo, IReadOnlyDictionary<string, string>> getPortraitPreviewPathsByLayerFileName)
+    {
+        var groups = new List<UnrealSyncDeleteGroup>();
+        AddDeleteGroup(groups, context, $"{context.TargetAssetRoot}/BackGround", backgroundPaths.Select(GetExpectedImportedAssetName));
+        AddDeleteGroup(groups, context, $"{context.TargetAssetRoot}/BGM", musicPaths.Select(GetExpectedImportedAssetName));
+        AddDeleteGroup(groups, context, $"{context.TargetAssetRoot}/Scene_Effect", ambientPaths.Concat(soundEffectPaths).Select(GetExpectedImportedAssetName));
+        AddProjectVoiceDeleteGroups(groups, context, voicePaths);
+
+        var expectedExcelTextAssets = storyTables
+            .Select(entry => entry.TableAsset)
+            .Concat(new[]
+            {
+                $"{context.TargetAssetRoot}/ExcelTexts/BGIndexMap.BGIndexMap",
+                $"{context.TargetAssetRoot}/ExcelTexts/BGMap.BGMap",
+                $"{context.TargetAssetRoot}/ExcelTexts/SceneIndexMap.SceneIndexMap",
+                $"{context.TargetAssetRoot}/ExcelTexts/ExsIndexMap.ExsIndexMap"
+            });
+        AddDeleteGroupByExpectedAssets(groups, context, $"{context.TargetAssetRoot}/ExcelTexts", expectedExcelTextAssets, recursive: true);
+
+        var expectedLustrationRootAssets = new[] { "DA_LustrationInfor" };
+        if (context.AssetLibrary.IsPortraitPreviewEnabled)
+        {
+            expectedLustrationRootAssets = expectedLustrationRootAssets.Append("DA_Portraits").ToArray();
+        }
+
+        AddDeleteGroup(groups, context, $"{context.TargetAssetRoot}/Lustration", expectedLustrationRootAssets);
+        AddLustrationLayerDeleteGroups(groups, context, characters);
+        if (context.AssetLibrary.IsPortraitPreviewEnabled)
+        {
+            AddPortraitPreviewDeleteGroups(groups, context, characters, getPortraitPreviewPathsByLayerFileName);
+        }
+
+        return groups;
+    }
+
+    private static void AddProjectVoiceDeleteGroups(
+        List<UnrealSyncDeleteGroup> groups,
+        UnrealSyncContext context,
+        IReadOnlyCollection<string> voicePaths)
+    {
+        var expectedAssetPaths = voicePaths
+            .Where(File.Exists)
+            .Select(path => BuildAssetObjectPath(GetProjectVoiceDestinationPath(context, path), path));
+        AddDeleteGroupByExpectedAssets(groups, context, $"{context.TargetAssetRoot}/Voice", expectedAssetPaths, recursive: true);
+    }
+
+    private static string GetProjectVoiceRelativeFolder(string voiceRootPath, string voicePath)
+    {
+        if (string.IsNullOrWhiteSpace(voiceRootPath) || !File.Exists(voicePath))
+        {
+            return string.Empty;
+        }
+
+        var relativePath = Path.GetRelativePath(voiceRootPath, voicePath);
+        if (relativePath.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativePath))
+        {
+            return string.Empty;
+        }
+
+        return Path.GetDirectoryName(relativePath) ?? string.Empty;
+    }
+
+    private static void AddLustrationLayerDeleteGroups(
+        List<UnrealSyncDeleteGroup> groups,
+        UnrealSyncContext context,
+        IReadOnlyList<CharacterInfo> characters)
+    {
+        var expectedByDestination = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var character in characters)
+        {
+            AddExpectedLustrationLayerAssets(expectedByDestination, context, character, CharacterLayerKind.Cloth);
+            AddExpectedLustrationLayerAssets(expectedByDestination, context, character, CharacterLayerKind.Face);
+            AddExpectedLustrationLayerAssets(expectedByDestination, context, character, CharacterLayerKind.Adorn);
+        }
+
+        var lustrationFolderPath = AssetFolderPathToFilePath(context, $"{context.TargetAssetRoot}/Lustration");
+        if (!Directory.Exists(lustrationFolderPath))
+        {
+            return;
+        }
+
+        var managedLayerFolders = new HashSet<string>(
+            new[] { "DN_Cloths", CharacterLayerAssetService.GetFolderName(CharacterLayerKind.Face), CharacterLayerAssetService.GetFolderName(CharacterLayerKind.Adorn) },
+            StringComparer.OrdinalIgnoreCase);
+        var extrasByDestination = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var assetFilePath in Directory.EnumerateFiles(lustrationFolderPath, "*.uasset", SearchOption.AllDirectories))
+        {
+            var layerFolderPath = Path.GetDirectoryName(assetFilePath);
+            if (string.IsNullOrWhiteSpace(layerFolderPath) || !managedLayerFolders.Contains(Path.GetFileName(layerFolderPath)))
+            {
+                continue;
+            }
+
+            var destination = BuildAssetFolderPathFromFolder(context, layerFolderPath);
+            var assetName = Path.GetFileNameWithoutExtension(assetFilePath);
+            if (expectedByDestination.TryGetValue(destination, out var expectedNames) && expectedNames.Contains(assetName))
+            {
+                continue;
+            }
+
+            var assetPath = BuildAssetObjectPathFromAssetFile(context, assetFilePath);
+            if (assetPath is null)
+            {
+                continue;
+            }
+
+            if (!extrasByDestination.TryGetValue(destination, out var extras))
+            {
+                extras = [];
+                extrasByDestination[destination] = extras;
+            }
+
+            extras.Add(assetPath);
+        }
+
+        foreach (var (destination, extras) in extrasByDestination)
+        {
+            groups.Add(new UnrealSyncDeleteGroup(
+                destination,
+                extras.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList()));
+        }
+    }
+
+    private static void AddExpectedLustrationLayerAssets(
+        Dictionary<string, HashSet<string>> expectedByDestination,
+        UnrealSyncContext context,
+        CharacterInfo character,
+        CharacterLayerKind layerKind)
+    {
+        var destination = GetLustrationLayerDestinationPath(context, character, layerKind);
+        if (!expectedByDestination.TryGetValue(destination, out var expectedNames))
+        {
+            expectedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            expectedByDestination[destination] = expectedNames;
+        }
+
+        foreach (var assetName in GetCharacterLayerImportPaths(character, layerKind).Select(GetExpectedImportedAssetName))
+        {
+            expectedNames.Add(assetName);
+        }
+    }
+
+    private static void AddPortraitPreviewDeleteGroups(
+        List<UnrealSyncDeleteGroup> groups,
+        UnrealSyncContext context,
+        IReadOnlyList<CharacterInfo> characters,
+        Func<CharacterInfo, IReadOnlyDictionary<string, string>> getPortraitPreviewPathsByLayerFileName)
+    {
+        foreach (var character in characters)
+        {
+            var destination = GetPortraitPreviewDestinationPath(context, character);
+            var expectedAssetNames = getPortraitPreviewPathsByLayerFileName(character)
+                .Values
+                .Select(GetExpectedImportedAssetName);
+            AddDeleteGroup(groups, context, destination, expectedAssetNames);
+        }
+
+        var lustrationFolderPath = AssetFolderPathToFilePath(context, $"{context.TargetAssetRoot}/Lustration");
+        if (!Directory.Exists(lustrationFolderPath))
+        {
+            return;
+        }
+
+        var activeCharacterCodes = characters.Select(character => character.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var logPreviewFolderPath in Directory.EnumerateDirectories(lustrationFolderPath, "Log_Preview", SearchOption.AllDirectories))
+        {
+            var characterFolderName = Directory.GetParent(logPreviewFolderPath)?.Name;
+            if (!string.IsNullOrWhiteSpace(characterFolderName) && activeCharacterCodes.Contains(characterFolderName))
+            {
+                continue;
+            }
+
+            var destination = BuildAssetFolderPathFromFolder(context, logPreviewFolderPath);
+            var extras = Directory
+                .EnumerateFiles(logPreviewFolderPath, "*.uasset", SearchOption.TopDirectoryOnly)
+                .Select(path => BuildAssetObjectPathFromAssetFile(context, path))
+                .Where(assetPath => assetPath is not null)
+                .Cast<string>()
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (extras.Count > 0)
+            {
+                groups.Add(new UnrealSyncDeleteGroup(destination, extras));
+            }
+        }
+    }
+
+    private static void AddDeleteGroup(
+        List<UnrealSyncDeleteGroup> groups,
+        UnrealSyncContext context,
+        string destination,
+        IEnumerable<string> expectedAssetNames,
+        bool recursive = false)
+    {
+        var folderPath = AssetFolderPathToFilePath(context, destination);
+        if (!Directory.Exists(folderPath))
+        {
+            return;
+        }
+
+        var expected = new HashSet<string>(expectedAssetNames.Where(name => !string.IsNullOrWhiteSpace(name)), StringComparer.OrdinalIgnoreCase);
+        var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        var extras = Directory
+            .EnumerateFiles(folderPath, "*.uasset", searchOption)
+            .Select(path => BuildAssetObjectPathFromAssetFile(context, path))
+            .Where(assetPath => assetPath is not null)
+            .Cast<string>()
+            .Where(assetPath => !expected.Contains(GetAssetNameFromObjectPath(assetPath)))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (extras.Count > 0)
+        {
+            groups.Add(new UnrealSyncDeleteGroup(destination, extras));
+        }
+    }
+
+    private static void AddDeleteGroupByExpectedAssets(
+        List<UnrealSyncDeleteGroup> groups,
+        UnrealSyncContext context,
+        string destination,
+        IEnumerable<string> expectedAssetPaths,
+        bool recursive = false)
+    {
+        var folderPath = AssetFolderPathToFilePath(context, destination);
+        if (!Directory.Exists(folderPath))
+        {
+            return;
+        }
+
+        var expected = new HashSet<string>(expectedAssetPaths.Where(path => !string.IsNullOrWhiteSpace(path)), StringComparer.OrdinalIgnoreCase);
+        var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        var extras = Directory
+            .EnumerateFiles(folderPath, "*.uasset", searchOption)
+            .Select(path => BuildAssetObjectPathFromAssetFile(context, path))
+            .Where(assetPath => assetPath is not null)
+            .Cast<string>()
+            .Where(assetPath => !expected.Contains(assetPath))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (extras.Count > 0)
+        {
+            groups.Add(new UnrealSyncDeleteGroup(destination, extras));
+        }
     }
 
     private static bool SourceFileNeedsImport(UnrealSyncContext context, string destinationPath, string sourcePath)
@@ -852,9 +1406,35 @@ internal sealed class UnrealSyncService
             assetName + ".uasset");
     }
 
+    private static string GetExpectedImportedAssetName(string sourcePath)
+    {
+        return NormalizeImportedAssetName(Path.GetFileNameWithoutExtension(sourcePath));
+    }
+
+    private static string GetAssetNameFromObjectPath(string objectPath)
+    {
+        var packagePath = objectPath.Split('.')[0].Trim('/');
+        return packagePath.Split('/').Last();
+    }
+
     private static string NormalizeImportedAssetName(string assetName)
     {
         return assetName.Replace(' ', '_');
+    }
+
+    private static void KillUnrealSyncProcess(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // Best effort: the process may have exited between the check and kill.
+        }
     }
 
     private static string BuildStoryTableFolder(UnrealSyncContext context, ChapterInfo chapter, bool hasMultipleSections)

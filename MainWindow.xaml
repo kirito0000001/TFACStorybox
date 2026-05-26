@@ -89,7 +89,7 @@
                 </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="0">
                     <TextBlock Text="TFAC剧情箱-轮椅版" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="2.0.0" Style="{StaticResource SubtleTextStyle}" />
+                    <TextBlock Text="2.1.0" Style="{StaticResource SubtleTextStyle}" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -283,6 +283,46 @@
                                         SelectionMode="None" />
                                 </StackPanel>
                             </Border>
+
+                            <Border Style="{StaticResource PanelBorderStyle}">
+                                <StackPanel Padding="18" Spacing="12">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="文本语音" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="ProjectVoiceSummaryText" Style="{StaticResource SubtleTextStyle}" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <GridView
+                                        x:Name="ProjectVoiceCardsGridView"
+                                        MaxWidth="980"
+                                        HorizontalAlignment="Left"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelBorderStyle}">
+                                <StackPanel Padding="18" Spacing="12">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="文本本地化" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="ProjectLocalizationSummaryText" Style="{StaticResource SubtleTextStyle}" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <GridView
+                                        x:Name="ProjectLocalizationCardsGridView"
+                                        MaxWidth="980"
+                                        HorizontalAlignment="Left"
+                                        SelectionMode="None" />
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </ScrollViewer>
 
@@ -304,6 +344,47 @@
                                 <Button Content="保存项目设置" Click="SaveProjectInlineSettingsButton_Click" />
                                 <Button Content="更改目标素材库" Click="ProjectDetailChangeAssetLibraryButton_Click" />
                             </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+
+                <Grid
+                    x:Name="ProjectTextToolPage"
+                    Visibility="Collapsed"
+                    RowSpacing="14">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Click="BackToProjectDetailFromTextToolButton_Click"
+                            ToolTipService.ToolTip="返回项目">
+                            <SymbolIcon Symbol="Back" />
+                        </Button>
+                        <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBlock x:Name="ProjectTextToolTitleText" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock x:Name="ProjectTextToolSubtitleText" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
+                        <Button x:Name="ProjectTextToolSwitchLanguageButton" Grid.Column="2" Content="切换语言" Click="SwitchProjectTextToolLanguageButton_Click" />
+                        <Button Grid.Column="3" Content="重新加载" Click="ReloadProjectTextToolButton_Click" />
+                        <Button Grid.Column="4" Content="切换章节" Click="SwitchProjectTextToolChapterButton_Click" />
+                    </Grid>
+
+                    <Border Grid.Row="1" Style="{StaticResource PanelBorderStyle}">
+                        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="ProjectTextToolTablePanel" />
                         </ScrollViewer>
                     </Border>
                 </Grid>
@@ -411,7 +492,7 @@
                                                 <TextBlock x:Name="StoryCurrentFunctionText" Text="{Binding CurrentFunctionText, Mode=OneWay}" Foreground="#555555" TextWrapping="Wrap" />
                                                 <Button Content="添加函数" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChooseFunctionCommand}" />
                                                 <Button x:Name="StoryViewChoicesButton" Content="查看选项" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasCurrentChoices, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding ViewChoicesCommand}" />
-                                                <Button x:Name="StoryRemoveFunctionButton" Content="移除函数" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasCurrentFunction, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding RemoveFunctionCommand}" />
+                                                <Button x:Name="StoryRemoveFunctionButton" Content="移除函数" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasMultipleCurrentFunctions, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding RemoveFunctionCommand}" />
                                                 <Button x:Name="StoryClearFunctionButton" Content="清空函数" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasCurrentFunction, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding ClearFunctionCommand}" />
                                             </StackPanel>
                                         </Expander>
@@ -783,6 +864,17 @@
                         VerticalScrollBarVisibility="Auto"
                         PointerWheelChanged="AssetLibraryDetailScrollViewer_PointerWheelChanged">
                         <StackPanel Spacing="10">
+                            <Expander x:Name="AssetLibraryMetadataExpander" Header="素材库元数据">
+                                <StackPanel Spacing="12">
+                                    <CheckBox
+                                        x:Name="AssetLibraryPortraitPreviewEnabledCheckBox"
+                                        Content="本素材库是否启用小预览"
+                                        Checked="AssetLibraryPortraitPreviewEnabledCheckBox_Changed"
+                                        Unchecked="AssetLibraryPortraitPreviewEnabledCheckBox_Changed" />
+                                    <TextBlock x:Name="AssetLibraryDiskUsageText" Style="{StaticResource SubtleTextStyle}" />
+                                    <TextBlock Text="启用后，服装、表情和装饰图层需要在右键菜单里设置对应小预览；同步时会写入 Narrative/Lustration/DA_Portraits。" Style="{StaticResource SubtleTextStyle}" />
+                                </StackPanel>
+                            </Expander>
                             <Expander x:Name="BackgroundImagesExpander" Header="背景图">
                                 <StackPanel
                                     x:Name="BackgroundImagesDropZone"
@@ -1031,6 +1123,8 @@
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center"
                                             IsTabStop="True"
+                                            Tapped="CharacterPreviewSurface_Tapped"
+                                            PointerPressed="CharacterPreviewSurface_PointerPressed"
                                             PointerEntered="CharacterPreviewSurface_PointerEntered"
                                             PointerExited="CharacterPreviewSurface_PointerExited"
                                             RightTapped="CharacterPreviewSurface_RightTapped"
@@ -1252,6 +1346,27 @@
                                     <CompositeTransform x:Name="BackgroundImageViewerTransform" />
                                 </Image.RenderTransform>
                             </Image>
+                            <Image
+                                x:Name="BackgroundImageViewerFaceImage"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Stretch="Uniform"
+                                RenderTransformOrigin="0.5,0.5"
+                                Visibility="Collapsed" />
+                            <Image
+                                x:Name="BackgroundImageViewerAdornImage"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Stretch="Uniform"
+                                RenderTransformOrigin="0.5,0.5"
+                                Visibility="Collapsed" />
+                            <Image
+                                x:Name="BackgroundImageViewerVfxImage"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Stretch="Uniform"
+                                RenderTransformOrigin="0.5,0.5"
+                                Visibility="Collapsed" />
                         </Grid>
                     </Border>
 
@@ -1262,8 +1377,9 @@
                             VerticalScrollBarVisibility="Disabled"
                             VerticalScrollMode="Disabled">
                             <StackPanel Padding="12" Orientation="Horizontal" Spacing="10">
-                                <Button Content="设置备注" Click="BackgroundImageViewerRemarkButton_Click" />
-                                <Button Content="删除" Click="BackgroundImageViewerDeleteButton_Click" />
+                                <Button x:Name="BackgroundImageViewerRemarkButton" Content="设置备注" Click="BackgroundImageViewerRemarkButton_Click" />
+                                <Button x:Name="BackgroundImageViewerReplaceButton" Content="替换素材" Click="BackgroundImageViewerReplaceButton_Click" />
+                                <Button x:Name="BackgroundImageViewerDeleteButton" Content="删除" Click="BackgroundImageViewerDeleteButton_Click" />
                             </StackPanel>
                         </ScrollViewer>
                     </Border>
@@ -2007,7 +2123,7 @@ public:
                             <StackPanel Spacing="4">
                                 <TextBlock Text="关于" Style="{StaticResource SectionTitleStyle}" FontSize="20" />
                                 <TextBlock Text="TFAC剧情箱-轮椅版" FontWeight="SemiBold" FontSize="18" TextWrapping="Wrap" />
-                                <TextBlock Text="版本 2.0.0" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="版本 2.1.0" Style="{StaticResource SubtleTextStyle}" />
                             </StackPanel>
                             <TextBlock
                                 Text="面向视觉小说项目的剧情表、素材库、章节修复与 Unreal 同步工具。目标是把高频编辑动作做得更轻，把危险同步动作做得更可见。"
@@ -2015,7 +2131,7 @@ public:
                             <StackPanel Spacing="8">
                                 <TextBlock Text="版本命名" Style="{StaticResource SectionTitleStyle}" />
                                 <TextBlock
-                                    Text="采用 主版本.功能版本.修订版本。2.0.0 表示当前已经完成第二轮架构重构；小修复递增到 2.0.1，新功能组递增到 2.1.0。"
+                                    Text="采用 主版本.功能版本.修订版本。2.1.0 表示当前进入小预览功能版本；当天同一批修补合并进同一个版本号。"
                                     Style="{StaticResource SubtleTextStyle}" />
                             </StackPanel>
                             <StackPanel Spacing="8">

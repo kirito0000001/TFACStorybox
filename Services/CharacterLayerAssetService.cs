@@ -100,6 +100,11 @@ internal sealed class CharacterLayerAssetService
         {
             RemapScopeMeta(folderPath, layerKind, renameMap);
         }
+
+        if (layerKind is CharacterLayerKind.Cloth or CharacterLayerKind.Face or CharacterLayerKind.Adorn)
+        {
+            RemapPortraitPreviewMeta(folderPath, layerKind, renameMap);
+        }
     }
 
     public void RenameEntries(
@@ -272,6 +277,260 @@ internal sealed class CharacterLayerAssetService
 
         meta.Entries = updatedEntries;
         WriteScopeMeta(folderPath, layerKind, meta);
+    }
+
+    public CharacterPortraitPreviewMeta ReadPortraitPreviewMeta(CharacterInfo character)
+    {
+        var metaPath = WorkspacePathUtility.GetCharacterPortraitPreviewMetaPath(character);
+        if (!File.Exists(metaPath))
+        {
+            return new CharacterPortraitPreviewMeta();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<CharacterPortraitPreviewMeta>(File.ReadAllText(metaPath)) ?? new CharacterPortraitPreviewMeta();
+        }
+        catch
+        {
+            return new CharacterPortraitPreviewMeta();
+        }
+    }
+
+    public void WritePortraitPreviewMeta(CharacterInfo character, CharacterPortraitPreviewMeta meta)
+    {
+        var folderPath = WorkspacePathUtility.GetCharacterPortraitPreviewFolderPath(character);
+        Directory.CreateDirectory(folderPath);
+        File.WriteAllText(WorkspacePathUtility.GetCharacterPortraitPreviewMetaPath(character), JsonSerializer.Serialize(meta, _jsonOptions));
+    }
+
+    public string? ResolvePortraitPreviewPath(CharacterInfo character, string layerFileName)
+    {
+        var meta = ReadPortraitPreviewMeta(character);
+        return ResolvePortraitPreviewPath(character, meta, layerFileName);
+    }
+
+    public void SetPortraitPreview(CharacterInfo character, string layerFileName, string sourcePath)
+    {
+        if (!IsValidImagePath(sourcePath))
+        {
+            throw new IOException($"Unsupported preview image: {Path.GetFileName(sourcePath)}");
+        }
+
+        var previewFolderPath = WorkspacePathUtility.GetCharacterPortraitPreviewFolderPath(character);
+        Directory.CreateDirectory(previewFolderPath);
+        var layerKey = GetPortraitPreviewLayerKey(layerFileName);
+        if (layerKey is null)
+        {
+            throw new IOException($"Unsupported preview layer: {layerFileName}");
+        }
+
+        var previewFileName = BuildPortraitPreviewFileName(character, layerKey, sourcePath);
+        var previewPath = Path.Combine(previewFolderPath, previewFileName);
+        if (!FileSystemUtility.PathsExactlyEqual(sourcePath, previewPath))
+        {
+            File.Copy(sourcePath, previewPath, overwrite: true);
+        }
+
+        var meta = ReadPortraitPreviewMeta(character);
+        var oldPreviewFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in GetPortraitPreviewMatchingKeys(meta, layerKey, layerFileName))
+        {
+            if (meta.Entries.TryGetValue(key, out var existingEntry) &&
+                !string.IsNullOrWhiteSpace(existingEntry.PreviewFileName) &&
+                !string.Equals(existingEntry.PreviewFileName, previewFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                oldPreviewFileNames.Add(existingEntry.PreviewFileName);
+            }
+
+            meta.Entries.Remove(key);
+        }
+
+        meta.Entries[layerKey] = new CharacterPortraitPreviewEntry { PreviewFileName = previewFileName };
+        foreach (var oldPreviewFileName in oldPreviewFileNames)
+        {
+            DeletePortraitPreviewFileIfUnreferenced(previewFolderPath, meta, oldPreviewFileName);
+        }
+
+        WritePortraitPreviewMeta(character, meta);
+    }
+
+    public void RemovePortraitPreview(CharacterInfo character, string layerFileName)
+    {
+        var previewFolderPath = WorkspacePathUtility.GetCharacterPortraitPreviewFolderPath(character);
+        var meta = ReadPortraitPreviewMeta(character);
+        var layerKey = GetPortraitPreviewLayerKey(layerFileName);
+        var previewFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var removed = false;
+        foreach (var key in GetPortraitPreviewMatchingKeys(meta, layerKey, layerFileName))
+        {
+            if (meta.Entries.TryGetValue(key, out var entry) && !string.IsNullOrWhiteSpace(entry.PreviewFileName))
+            {
+                previewFileNames.Add(entry.PreviewFileName);
+            }
+
+            removed |= meta.Entries.Remove(key);
+        }
+
+        if (!removed)
+        {
+            return;
+        }
+
+        foreach (var previewFileName in previewFileNames)
+        {
+            DeletePortraitPreviewFileIfUnreferenced(previewFolderPath, meta, previewFileName);
+        }
+
+        WritePortraitPreviewMeta(character, meta);
+    }
+
+    public List<string> GetMissingPortraitPreviewLayerNames(CharacterInfo character)
+    {
+        var result = new List<string>();
+        var meta = ReadPortraitPreviewMeta(character);
+        foreach (var layerKind in new[] { CharacterLayerKind.Cloth, CharacterLayerKind.Face, CharacterLayerKind.Adorn })
+        {
+            foreach (var layerPath in GetLayerPaths(character, layerKind))
+            {
+                var fileName = Path.GetFileName(layerPath);
+                if (ResolvePortraitPreviewPath(character, meta, fileName) is null)
+                {
+                    result.Add(fileName);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    public IReadOnlyDictionary<string, string> GetPortraitPreviewPathsByLayerFileName(CharacterInfo character)
+    {
+        var meta = ReadPortraitPreviewMeta(character);
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var layerKind in new[] { CharacterLayerKind.Cloth, CharacterLayerKind.Face, CharacterLayerKind.Adorn })
+        {
+            foreach (var layerPath in GetLayerPaths(character, layerKind))
+            {
+                var fileName = Path.GetFileName(layerPath);
+                var previewPath = ResolvePortraitPreviewPath(character, meta, fileName);
+                if (previewPath is not null)
+                {
+                    result[fileName] = previewPath;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    public void CleanupPortraitPreviewMeta(CharacterInfo character)
+    {
+        var previewFolderPath = WorkspacePathUtility.GetCharacterPortraitPreviewFolderPath(character);
+        Directory.CreateDirectory(previewFolderPath);
+        var validLayersByKey = new[] { CharacterLayerKind.Cloth, CharacterLayerKind.Face, CharacterLayerKind.Adorn }
+            .SelectMany(layerKind => GetLayerPaths(character, layerKind))
+            .Select(Path.GetFileName)
+            .Where(fileName => !string.IsNullOrWhiteSpace(fileName))
+            .Cast<string>()
+            .Select(fileName => new { FileName = fileName, Key = GetPortraitPreviewLayerKey(fileName) })
+            .Where(item => item.Key is not null)
+            .GroupBy(item => item.Key!, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToDictionary(item => item.Key!, item => item.FileName, StringComparer.OrdinalIgnoreCase);
+        var meta = ReadPortraitPreviewMeta(character);
+        var cleanedEntries = new Dictionary<string, CharacterPortraitPreviewEntry>(StringComparer.OrdinalIgnoreCase);
+        var referencedPreviewFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (layerKey, layerFileName) in validLayersByKey)
+        {
+            if (!TryGetPortraitPreviewEntry(meta, layerKey, layerFileName, out var entry) ||
+                string.IsNullOrWhiteSpace(entry.PreviewFileName))
+            {
+                continue;
+            }
+
+            var previewPath = Path.Combine(previewFolderPath, entry.PreviewFileName);
+            if (!File.Exists(previewPath))
+            {
+                continue;
+            }
+
+            cleanedEntries[layerKey] = entry;
+            referencedPreviewFiles.Add(entry.PreviewFileName);
+        }
+
+        var changed = !ArePortraitPreviewEntriesEqual(meta.Entries, cleanedEntries);
+        meta.Entries = cleanedEntries;
+        foreach (var previewPath in GetImagePaths(previewFolderPath))
+        {
+            if (!referencedPreviewFiles.Contains(Path.GetFileName(previewPath)))
+            {
+                File.Delete(previewPath);
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            WritePortraitPreviewMeta(character, meta);
+        }
+    }
+
+    private void RemapPortraitPreviewMeta(
+        string layerFolderPath,
+        CharacterLayerKind layerKind,
+        IReadOnlyDictionary<string, string> renameMap)
+    {
+        if (renameMap.Count == 0)
+        {
+            return;
+        }
+
+        var characterPath = Directory.GetParent(layerFolderPath)?.FullName;
+        if (string.IsNullOrWhiteSpace(characterPath))
+        {
+            return;
+        }
+
+        var character = new CharacterInfo(string.Empty, string.Empty, string.Empty, characterPath);
+        var meta = ReadPortraitPreviewMeta(character);
+        if (meta.Entries.Count == 0)
+        {
+            return;
+        }
+
+        var keyRenameMap = renameMap
+            .Select(item => new
+            {
+                OldKey = GetPortraitPreviewLayerKey(item.Key),
+                NewKey = GetPortraitPreviewLayerKey(item.Value)
+            })
+            .Where(item => item.OldKey is not null && item.NewKey is not null)
+            .Where(item => !string.Equals(item.OldKey, item.NewKey, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(item => item.OldKey!, item => item.NewKey!, StringComparer.OrdinalIgnoreCase);
+        var updatedEntries = new Dictionary<string, CharacterPortraitPreviewEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (fileName, entry) in meta.Entries)
+        {
+            var layerKey = GetPortraitPreviewLayerKey(fileName);
+            var targetKey = fileName;
+            if (layerKey is not null && keyRenameMap.TryGetValue(layerKey, out var renamedKey))
+            {
+                targetKey = renamedKey;
+            }
+            else if (renameMap.TryGetValue(fileName, out var renamedFileName))
+            {
+                targetKey = GetPortraitPreviewLayerKey(renamedFileName) ?? renamedFileName;
+            }
+            else if (layerKey is not null && layerKind == GetKindFromLayerKey(layerKey))
+            {
+                targetKey = layerKey;
+            }
+
+            updatedEntries[targetKey] = entry;
+        }
+
+        meta.Entries = updatedEntries;
+        WritePortraitPreviewMeta(character, meta);
     }
 
     public bool IsCompatibleWithCloth(
@@ -622,6 +881,169 @@ internal sealed class CharacterLayerAssetService
         };
     }
 
+    public static string? GetPortraitPreviewLayerKey(string? layerFileName)
+    {
+        if (string.IsNullOrWhiteSpace(layerFileName))
+        {
+            return null;
+        }
+
+        var name = Path.GetFileNameWithoutExtension(layerFileName);
+        var match = Regex.Match(name, @"(?:^|_)DN(?<index>\d+)", RegexOptions.IgnoreCase);
+        if (match.Success)
+        {
+            return $"DN{match.Groups["index"].Value}";
+        }
+
+        match = Regex.Match(name, @"^FC(?<index>\d+)", RegexOptions.IgnoreCase);
+        if (match.Success)
+        {
+            return $"FC{match.Groups["index"].Value}";
+        }
+
+        match = Regex.Match(name, @"^AD(?<index>\d+)", RegexOptions.IgnoreCase);
+        return match.Success ? $"AD{match.Groups["index"].Value}" : null;
+    }
+
+    private static CharacterLayerKind? GetKindFromLayerKey(string layerKey)
+    {
+        if (layerKey.StartsWith("DN", StringComparison.OrdinalIgnoreCase))
+        {
+            return CharacterLayerKind.Cloth;
+        }
+
+        if (layerKey.StartsWith("FC", StringComparison.OrdinalIgnoreCase))
+        {
+            return CharacterLayerKind.Face;
+        }
+
+        if (layerKey.StartsWith("AD", StringComparison.OrdinalIgnoreCase))
+        {
+            return CharacterLayerKind.Adorn;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> GetPortraitPreviewMetaKeys(string? layerKey, string layerFileName)
+    {
+        if (!string.IsNullOrWhiteSpace(layerKey))
+        {
+            yield return layerKey;
+        }
+
+        if (string.IsNullOrWhiteSpace(layerKey) ||
+            !string.Equals(layerKey, layerFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return layerFileName;
+        }
+    }
+
+    private static bool TryGetPortraitPreviewEntry(
+        CharacterPortraitPreviewMeta meta,
+        string? layerKey,
+        string layerFileName,
+        out CharacterPortraitPreviewEntry entry)
+    {
+        foreach (var key in GetPortraitPreviewMetaKeys(layerKey, layerFileName))
+        {
+            if (meta.Entries.TryGetValue(key, out entry!))
+            {
+                return true;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(layerKey))
+        {
+            foreach (var (key, value) in meta.Entries)
+            {
+                if (string.Equals(GetPortraitPreviewLayerKey(key), layerKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    entry = value;
+                    return true;
+                }
+            }
+        }
+
+        entry = new CharacterPortraitPreviewEntry();
+        return false;
+    }
+
+    private static IReadOnlyCollection<string> GetPortraitPreviewMatchingKeys(
+        CharacterPortraitPreviewMeta meta,
+        string? layerKey,
+        string layerFileName)
+    {
+        var keys = new HashSet<string>(GetPortraitPreviewMetaKeys(layerKey, layerFileName), StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(layerKey))
+        {
+            foreach (var key in meta.Entries.Keys)
+            {
+                if (string.Equals(GetPortraitPreviewLayerKey(key), layerKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    keys.Add(key);
+                }
+            }
+        }
+
+        return keys;
+    }
+
+    private static string? ResolvePortraitPreviewPath(
+        CharacterInfo character,
+        CharacterPortraitPreviewMeta meta,
+        string layerFileName)
+    {
+        var layerKey = GetPortraitPreviewLayerKey(layerFileName);
+        if (!TryGetPortraitPreviewEntry(meta, layerKey, layerFileName, out var entry) ||
+            string.IsNullOrWhiteSpace(entry.PreviewFileName))
+        {
+            return null;
+        }
+
+        var path = Path.Combine(WorkspacePathUtility.GetCharacterPortraitPreviewFolderPath(character), entry.PreviewFileName);
+        return File.Exists(path) ? path : null;
+    }
+
+    private static void DeletePortraitPreviewFileIfUnreferenced(
+        string previewFolderPath,
+        CharacterPortraitPreviewMeta meta,
+        string previewFileName)
+    {
+        if (meta.Entries.Values.Any(entry =>
+                string.Equals(entry.PreviewFileName, previewFileName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var previewPath = Path.Combine(previewFolderPath, previewFileName);
+        if (File.Exists(previewPath))
+        {
+            File.Delete(previewPath);
+        }
+    }
+
+    private static bool ArePortraitPreviewEntriesEqual(
+        IReadOnlyDictionary<string, CharacterPortraitPreviewEntry> first,
+        IReadOnlyDictionary<string, CharacterPortraitPreviewEntry> second)
+    {
+        if (first.Count != second.Count)
+        {
+            return false;
+        }
+
+        foreach (var (key, value) in first)
+        {
+            if (!second.TryGetValue(key, out var otherValue) ||
+                !string.Equals(value.PreviewFileName, otherValue.PreviewFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public static bool UsesScope(CharacterLayerKind layerKind)
     {
         return layerKind is CharacterLayerKind.Adorn or CharacterLayerKind.Vfx;
@@ -652,6 +1074,13 @@ internal sealed class CharacterLayerAssetService
             CharacterLayerKind.Vfx => "VFX",
             _ => "DN_Cloth"
         };
+    }
+
+    public static string BuildPortraitPreviewFileName(CharacterInfo character, string layerKey, string sourcePath)
+    {
+        var characterCode = TextUtility.SanitizeCharacterFolderName(character.Code);
+        var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
+        return $"Preview-{characterCode}-{layerKey}{extension}";
     }
 
     public static string GetCharacterFolderPath(CharacterInfo character, CharacterLayerKind layerKind)

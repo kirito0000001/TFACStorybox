@@ -22,6 +22,36 @@ internal static class FileSystemUtility
         return unitIndex == 0 ? $"{byteCount} {units[unitIndex]}" : $"{size:0.##} {units[unitIndex]}";
     }
 
+    public static long CountDirectoryBytes(string folderPath)
+    {
+        if (!Directory.Exists(folderPath))
+        {
+            return 0;
+        }
+
+        long total = 0;
+        try
+        {
+            foreach (var filePath in Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    total += new FileInfo(filePath).Length;
+                }
+                catch
+                {
+                    // Ignore files that are locked or disappear during the scan.
+                }
+            }
+        }
+        catch
+        {
+            return total;
+        }
+
+        return total;
+    }
+
     public static bool HashesEqual(string leftPath, string rightPath)
     {
         using var hashAlgorithm = SHA256.Create();

@@ -23,11 +23,15 @@ internal sealed record UnrealProjectBinding(string? EnginePath, string? ProjectP
 
 internal sealed record UnrealSyncChangePlan(
     List<UnrealSyncImportGroup> ImportGroups,
+    List<UnrealSyncDeleteGroup> DeleteGroups,
     List<UnrealStoryTableSyncEntry> StoryTables,
     List<UnrealAssetIndexTableSyncEntry> AssetIndexTables,
     bool LustrationChanged,
     List<UnrealLustrationSyncEntry> LustrationRows,
+    bool PortraitsChanged,
+    List<UnrealLustrationSyncEntry> PortraitRows,
     string LustrationHash,
+    string PortraitsHash,
     string AssetIndexTablesHash,
     int TotalChangedItems,
     string Summary,
@@ -37,6 +41,8 @@ internal sealed record UnrealSyncChangePlan(
 }
 
 internal sealed record UnrealSyncImportGroup(string Destination, List<string> Files);
+
+internal sealed record UnrealSyncDeleteGroup(string Destination, List<string> Assets);
 
 internal sealed record UnrealStoryTableSource(ChapterInfo Chapter, List<StoryTableCsvEntry> CsvEntries);
 
@@ -69,6 +75,8 @@ internal sealed class UnrealSyncState
     public DateTimeOffset LastSyncedAt { get; set; }
 
     public string? LustrationHash { get; set; }
+
+    public string? PortraitsHash { get; set; }
 
     public string? AssetIndexTablesHash { get; set; }
 }

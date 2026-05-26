@@ -89,6 +89,7 @@ internal sealed class CharacterWorkspaceService
         Directory.CreateDirectory(CharacterLayerAssetService.GetCharacterFolderPath(character, CharacterLayerKind.Face));
         Directory.CreateDirectory(CharacterLayerAssetService.GetCharacterFolderPath(character, CharacterLayerKind.Adorn));
         Directory.CreateDirectory(CharacterLayerAssetService.GetCharacterFolderPath(character, CharacterLayerKind.Vfx));
+        Directory.CreateDirectory(WorkspacePathUtility.GetCharacterPortraitPreviewFolderPath(character));
     }
 
     public CharacterInfo ReadCharacterInfo(string characterPath)

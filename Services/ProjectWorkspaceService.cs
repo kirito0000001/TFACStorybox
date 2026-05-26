@@ -92,6 +92,7 @@ internal sealed class ProjectWorkspaceService
             Path.GetFileName(assetLibraryPath),
             assetLibraryPath,
             thumbnailPath,
+            meta.IsPortraitPreviewEnabled,
             meta.LastEditedAt == default ? Directory.GetLastWriteTime(assetLibraryPath) : meta.LastEditedAt);
     }
 
@@ -305,6 +306,7 @@ internal sealed class ProjectWorkspaceService
         {
             AssetLibraryName = assetLibraryName,
             ThumbnailFileName = thumbnailFileName,
+            IsPortraitPreviewEnabled = false,
             LastEditedAt = DateTime.Now
         };
         File.WriteAllText(Path.Combine(toolsPath, AssetLibraryMetaFileName), JsonSerializer.Serialize(meta, JsonOptions));
@@ -393,6 +395,17 @@ internal sealed class ProjectWorkspaceService
             meta.AssetLibraryName = assetLibrary.Name;
             meta.LastEditedAt = DateTime.Now;
         });
+    }
+
+    public AssetLibraryInfo SetAssetLibraryPortraitPreviewEnabled(AssetLibraryInfo assetLibrary, bool isEnabled)
+    {
+        WriteAssetLibraryMeta(assetLibrary.Path, meta =>
+        {
+            meta.AssetLibraryName = assetLibrary.Name;
+            meta.IsPortraitPreviewEnabled = isEnabled;
+            meta.LastEditedAt = DateTime.Now;
+        });
+        return ReadAssetLibraryInfo(assetLibrary.Path);
     }
 
     public void DeleteProject(ProjectInfo project)

@@ -68,6 +68,8 @@ namespace GalExcleTools
         private readonly StoryStateService _storyStateService = new();
         private readonly StoryEditorService _storyEditorService;
         private readonly StorySessionService _storySessionService;
+        private readonly ProjectTextDataService _projectTextDataService;
+        private readonly ProjectVoiceAssetService _projectVoiceAssetService = new();
         private readonly ChapterRepairService _chapterRepairService;
         private readonly StoryAssetIndexSyncService _storyAssetIndexSyncService;
         private readonly IDialogService _dialogService;
@@ -97,6 +99,13 @@ namespace GalExcleTools
 
         private List<StoryRow> _storyRows => _storyEditorViewModel.Rows;
         private Dictionary<string, int> _storyRowSections => _storyEditorViewModel.RowSections;
+        private readonly List<ProjectTextRow> _projectTextRows = [];
+        private ProjectVoiceMapState _projectVoiceMapState = new();
+        private ProjectLocalizationState _projectLocalizationState = new();
+        private ChapterInfo? _selectedVoiceChapter;
+        private ChapterInfo? _selectedTextToolChapter;
+        private string _selectedLocalizationLanguage = "English";
+        private ProjectTextToolMode _projectTextToolMode = ProjectTextToolMode.Voice;
         private readonly Dictionary<string, BitmapImage> _storyPreviewImageCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, string> _storyCharacterPreviewKeys = new();
         private int _currentStoryRowIndex
@@ -156,6 +165,7 @@ namespace GalExcleTools
         private bool _isNormalizingCharacterAdorns;
         private bool _isReorderingCharacterFilters;
         private bool _isRepairingCharacterFilters;
+        private bool _isApplyingAssetLibraryMetadata;
         private bool _runFullUnrealSyncRequested;
         private bool _isLoadingUnrealSyncProjects;
         private GridViewItem? _draggingBackgroundImageItem;
@@ -168,6 +178,7 @@ namespace GalExcleTools
         private GridViewItem? _draggingCharacterAdornItem;
         private string? _viewingBackgroundImagePath;
         private CharacterLayerViewerState? _viewingCharacterLayer;
+        private bool _isViewingCharacterComposite;
         private string? _playingMusicPath;
         private AudioAssetKind _playingAudioKind = AudioAssetKind.Music;
         private string? _storyBgmPath;
@@ -240,6 +251,7 @@ namespace GalExcleTools
                 ClearCurrentStoryRow);
             _storyEditorService = new StoryEditorService(_storyCsvService);
             _storySessionService = new StorySessionService(_storyCsvService, _storyStateService, _storyEditorService);
+            _projectTextDataService = new ProjectTextDataService(_storyCsvService, _storySessionService, _jsonOptions);
             _chapterRepairService = new ChapterRepairService(_storyCsvService);
             _storyAssetIndexSyncService = new StoryAssetIndexSyncService(
                 GetProjects,
@@ -1073,6 +1085,8 @@ namespace GalExcleTools
             ProjectDetailNameTextBox.Text = project.Name;
             ProjectDetailCodeTextBox.Text = project.Code;
             LoadChapters(project);
+            LoadProjectTextPanels(project);
+            ProjectDetailInfoText.Text = CreateProjectDetailInfoText(project, CountProjectStoryCharacters());
 
             WorkbenchPage.Visibility = Visibility.Collapsed;
             ProjectDetailPage.Visibility = Visibility.Visible;
@@ -1082,6 +1096,7 @@ namespace GalExcleTools
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
             MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
@@ -1090,9 +1105,12 @@ namespace GalExcleTools
             ProjectDetailCloseButton.Focus(FocusState.Programmatic);
         }
 
-        private static string CreateProjectDetailInfoText(ProjectInfo project)
+        private static string CreateProjectDetailInfoText(ProjectInfo project, int? storyCharacterCount = null)
         {
-            return $"项目名字：{project.Name} | 英文代号：{project.Code} | 关联素材库：{project.AssetLibraryName} | 上次打开时间：{project.LastEditedAt:yyyy-MM-dd HH:mm}";
+            var storyText = storyCharacterCount is null
+                ? string.Empty
+                : $" | 剧情总字数：{storyCharacterCount.Value:N0}";
+            return $"项目名字：{project.Name} | 英文代号：{project.Code} | 关联素材库：{project.AssetLibraryName} | 上次打开时间：{project.LastEditedAt:yyyy-MM-dd HH:mm}{storyText}";
         }
 
         private void CloseProjectDetailButton_Click(object sender, RoutedEventArgs e)
@@ -1162,6 +1180,540 @@ namespace GalExcleTools
 
             ChaptersGridView.Items.Add(CreateAddCard("新建章节", "创建故事章节", AddChapterCard_Tapped));
             AppendLog(LogKind.Info, $"已加载章节卡：{chapters.Count} 个。");
+        }
+
+        private void LoadProjectTextPanels(ProjectInfo project)
+        {
+            var chapters = _projectWorkspaceService.GetChapters(project)
+                .OrderBy(chapter => chapter.Code, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _projectTextRows.Clear();
+            _projectTextRows.AddRange(_projectTextDataService.LoadTextRows(project, chapters));
+            _projectVoiceMapState = _projectTextDataService.ReadVoiceMap(project);
+            _projectLocalizationState = _projectTextDataService.ReadLocalization(project);
+            if (_selectedVoiceChapter is null || !chapters.Any(chapter => PathsEqual(chapter.Path, _selectedVoiceChapter.Path)))
+            {
+                _selectedVoiceChapter = chapters.FirstOrDefault();
+            }
+
+            if (_selectedTextToolChapter is null || !chapters.Any(chapter => PathsEqual(chapter.Path, _selectedTextToolChapter.Path)))
+            {
+                _selectedTextToolChapter = _selectedVoiceChapter;
+            }
+
+            RefreshProjectTextEntryCards(chapters);
+        }
+
+        private void RefreshProjectTextEntryCards(IReadOnlyList<ChapterInfo> chapters)
+        {
+            ProjectVoiceCardsGridView.Items.Clear();
+            ProjectLocalizationCardsGridView.Items.Clear();
+            var textCount = _projectTextRows.Count;
+            ProjectVoiceSummaryText.Text = chapters.Count == 0
+                ? "新建章节后会同步生成语音入口卡。"
+                : $"已聚合 {chapters.Count} 个章节、{textCount} 行文本。点击卡片进入语音映射页面。";
+            ProjectLocalizationSummaryText.Text = chapters.Count == 0
+                ? "新建章节后会同步生成本地化入口卡。"
+                : $"当前语言 {_selectedLocalizationLanguage}，已聚合 {textCount} 行文本。点击卡片进入本地化页面。";
+
+            foreach (var chapter in chapters)
+            {
+                var chapterTextCount = _projectTextRows.Count(row => string.Equals(row.ChapterCode, chapter.Code, StringComparison.OrdinalIgnoreCase));
+                ProjectVoiceCardsGridView.Items.Add(CreateProjectTextEntryCard(
+                    chapter,
+                    "语音",
+                    $"{chapter.Code} | 文本 {chapterTextCount} 行",
+                    () => OpenProjectTextTool(ProjectTextToolMode.Voice, chapter)));
+                ProjectLocalizationCardsGridView.Items.Add(CreateProjectTextEntryCard(
+                    chapter,
+                    "本地化",
+                    $"{chapter.Code} | {_selectedLocalizationLanguage} | 文本 {chapterTextCount} 行",
+                    () => OpenProjectTextTool(ProjectTextToolMode.Localization, chapter)));
+            }
+        }
+
+        private int CountProjectStoryCharacters()
+        {
+            return ProjectTextDataService.CountStoryCharacters(_projectTextRows);
+        }
+
+        private GridViewItem CreateProjectTextEntryCard(ChapterInfo chapter, string titleSuffix, string subtitle, Action open)
+        {
+            return DashboardCardFactory.CreateInfoCard(
+                chapter,
+                null,
+                $"{chapter.Name} {titleSuffix}",
+                subtitle,
+                $"上次编辑时间 {chapter.LastEditedAt:yyyy-MM-dd HH:mm}",
+                (_, _) =>
+                {
+                    PlaySelectionSound();
+                    open();
+                });
+        }
+
+        private void OpenProjectTextTool(ProjectTextToolMode mode, ChapterInfo chapter)
+        {
+            if (_currentProject is null)
+            {
+                return;
+            }
+
+            _projectTextToolMode = mode;
+            _selectedTextToolChapter = chapter;
+            _selectedVoiceChapter = chapter;
+            ProjectTextToolPage.Visibility = Visibility.Visible;
+            ProjectDetailPage.Visibility = Visibility.Collapsed;
+            StoryEditorPage.Visibility = Visibility.Collapsed;
+            AssetLibraryPage.Visibility = Visibility.Collapsed;
+            AssetLibraryDetailPage.Visibility = Visibility.Collapsed;
+            CharacterDetailPage.Visibility = Visibility.Collapsed;
+            BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
+            MusicPlayerPage.Visibility = Visibility.Collapsed;
+            CreateProjectPage.Visibility = Visibility.Collapsed;
+            CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
+            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SettingsPage.Visibility = Visibility.Collapsed;
+            RefreshProjectTextToolPage();
+            PlayPageEntrance(ProjectTextToolPage);
+        }
+
+        private void BackToProjectDetailFromTextToolButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentProject is null)
+            {
+                ShowWorkbenchPage();
+                return;
+            }
+
+            PlayNegativeSound();
+            ShowProjectDetailPage(_projectWorkspaceService.ReadProjectInfo(_currentProject.Path));
+        }
+
+        private async void SwitchProjectTextToolChapterButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentProject is null)
+            {
+                return;
+            }
+
+            var selected = await SelectProjectChapterAsync("切换章节", _selectedTextToolChapter);
+            if (selected is null)
+            {
+                return;
+            }
+
+            PlaySelectionSound();
+            _selectedTextToolChapter = selected;
+            _selectedVoiceChapter = selected;
+            RefreshProjectTextToolPage();
+        }
+
+        private void ReloadProjectTextToolButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentProject is null)
+            {
+                return;
+            }
+
+            PlaySelectionSound();
+            var chapters = _projectWorkspaceService.GetChapters(_currentProject)
+                .OrderBy(chapter => chapter.Code, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _projectTextRows.Clear();
+            _projectTextRows.AddRange(_projectTextDataService.LoadTextRows(_currentProject, chapters));
+            _projectVoiceMapState = _projectTextDataService.ReadVoiceMap(_currentProject);
+            _projectLocalizationState = _projectTextDataService.ReadLocalization(_currentProject);
+            RefreshProjectTextToolPage();
+        }
+
+        private async void SwitchProjectTextToolLanguageButton_Click(object sender, RoutedEventArgs e)
+        {
+            var language = await ShowNameInputDialogAsync("切换语言", "目标语言", _selectedLocalizationLanguage);
+            if (string.IsNullOrWhiteSpace(language))
+            {
+                return;
+            }
+
+            PlaySelectionSound();
+            _selectedLocalizationLanguage = language.Trim();
+            RefreshProjectTextToolPage();
+        }
+
+        private async Task<ChapterInfo?> SelectProjectChapterAsync(string title, ChapterInfo? selectedChapter)
+        {
+            if (_currentProject is null)
+            {
+                return null;
+            }
+
+            var chapters = _projectWorkspaceService.GetChapters(_currentProject)
+                .OrderBy(chapter => chapter.Code, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (chapters.Count == 0)
+            {
+                ShowChapterStatus(InfoBarSeverity.Warning, "没有可切换章节", "当前项目还没有章节。");
+                return null;
+            }
+
+            var selected = await _dialogService.SelectAsync(new SelectionDialogRequest<ChapterInfo>(
+                title,
+                "选择要显示文本表格的章节。",
+                chapters
+                    .Select(chapter => new SelectionDialogItem<ChapterInfo>($"{chapter.Name} / {chapter.Code}", chapter))
+                    .ToList(),
+                "确定",
+                "取消",
+                460,
+                420,
+                chapter => selectedChapter is not null && PathsEqual(chapter.Path, selectedChapter.Path)));
+            return selected;
+        }
+
+        private void RefreshProjectTextToolPage()
+        {
+            ProjectTextToolTablePanel.Children.Clear();
+            ProjectTextToolSwitchLanguageButton.Visibility = _projectTextToolMode == ProjectTextToolMode.Localization
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            if (_selectedTextToolChapter is null)
+            {
+                ProjectTextToolTitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice ? "文本语音" : "文本本地化";
+                ProjectTextToolSubtitleText.Text = "当前项目还没有章节。";
+                ProjectTextToolTablePanel.Children.Add(CreateProjectTextEmptyRow("暂无可显示文本。"));
+                return;
+            }
+
+            var rows = _projectTextRows
+                .Where(row => string.Equals(row.ChapterCode, _selectedTextToolChapter.Code, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            ProjectTextToolTitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice
+                ? $"文本语音 {_selectedTextToolChapter.Name}"
+                : $"文本本地化 {_selectedTextToolChapter.Name}";
+            ProjectTextToolSubtitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice
+                ? $"当前章节：{_selectedTextToolChapter.Code}，文本 {rows.Count} 行。右侧点击选择语音文件，仅支持 wav。"
+                : $"当前语言：{_selectedLocalizationLanguage}，章节：{_selectedTextToolChapter.Code}，文本 {rows.Count} 行。";
+            ProjectTextToolTablePanel.Children.Add(CreateProjectTextTableHeader(
+                _projectTextToolMode == ProjectTextToolMode.Voice ? "语音文件" : _selectedLocalizationLanguage));
+            if (rows.Count == 0)
+            {
+                ProjectTextToolTablePanel.Children.Add(CreateProjectTextEmptyRow("这个章节还没有可编辑的文本。"));
+                return;
+            }
+
+            for (var index = 0; index < rows.Count; index++)
+            {
+                var row = rows[index];
+                if (_projectTextToolMode == ProjectTextToolMode.Voice)
+                {
+                    var value = _projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) ? voicePath : string.Empty;
+                    ProjectTextToolTablePanel.Children.Add(CreateProjectTextVoiceTableRow(row, value, index + 1, rows.Count));
+                }
+                else
+                {
+                    var languageMap = GetCurrentLocalizationLanguageMap();
+                    var value = languageMap.TryGetValue(row.Id, out var localizedText) ? localizedText : string.Empty;
+                    ProjectTextToolTablePanel.Children.Add(CreateProjectTextLocalizationTableRow(row, value, languageMap));
+                }
+            }
+        }
+
+        private Dictionary<string, string> GetCurrentLocalizationLanguageMap()
+        {
+            if (!_projectLocalizationState.Languages.TryGetValue(_selectedLocalizationLanguage, out var languageMap))
+            {
+                languageMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                _projectLocalizationState.Languages[_selectedLocalizationLanguage] = languageMap;
+            }
+
+            return languageMap;
+        }
+
+        private async Task SetProjectVoiceRemarkAsync(ProjectTextRow row, int rowNumber, int rowCount, Button? button = null)
+        {
+            if (_currentProject is null)
+            {
+                return;
+            }
+
+            if (!_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) || !File.Exists(voicePath))
+            {
+                ShowChapterStatus(InfoBarSeverity.Warning, "没有可修改的语音", "请先为这一行选择 wav 语音文件。");
+                return;
+            }
+
+            var remarkInput = await _dialogService.PromptTextAsync(new TextInputDialogRequest(
+                "更改语音备注",
+                "备注",
+                ProjectVoiceAssetService.ParseRemark(voicePath),
+                "例如：不要S3"));
+            if (remarkInput is null)
+            {
+                return;
+            }
+
+            var updatedPath = _projectVoiceAssetService.UpdateRemark(
+                _currentProject,
+                row,
+                rowNumber,
+                rowCount,
+                remarkInput,
+                _projectVoiceMapState);
+            _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
+            TouchProjectLastEditedAt(_currentProject);
+            if (button is not null)
+            {
+                UpdateProjectVoiceButton(button, updatedPath);
+            }
+            else
+            {
+                RefreshProjectTextToolPage();
+            }
+
+            AppendLog(LogKind.User, $"已更改语音备注：{Path.GetFileName(updatedPath)}");
+        }
+
+        private async Task RemoveProjectVoiceAsync(ProjectTextRow row, Button? button = null)
+        {
+            if (_currentProject is null)
+            {
+                return;
+            }
+
+            if (!_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath))
+            {
+                ShowChapterStatus(InfoBarSeverity.Warning, "没有可移除的语音", "这一行还没有设置语音文件。");
+                return;
+            }
+
+            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                "移除语音映射",
+                $"确定移除 {Path.GetFileName(voicePath)} 吗？项目 Voice 文件夹中的对应文件也会删除。",
+                "移除",
+                "取消",
+                PrimaryButtonStyle: CreateDestructivePrimaryButtonStyle()));
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var removedPath = _projectVoiceAssetService.RemoveVoice(_currentProject, row, _projectVoiceMapState);
+            _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
+            TouchProjectLastEditedAt(_currentProject);
+            if (button is not null)
+            {
+                UpdateProjectVoiceButton(button, string.Empty);
+            }
+            else
+            {
+                RefreshProjectTextToolPage();
+            }
+
+            AppendLog(LogKind.User, $"已移除语音映射：{Path.GetFileName(removedPath ?? voicePath)}");
+        }
+
+        private static UIElement CreateProjectTextTableHeader(string valueHeader)
+        {
+            var grid = CreateProjectTextGrid();
+            grid.Background = new SolidColorBrush(Microsoft.UI.Colors.WhiteSmoke);
+            grid.Children.Add(CreateProjectTextCell("文本", 0, isHeader: true));
+            grid.Children.Add(CreateProjectTextCell(valueHeader, 1, isHeader: true));
+            return grid;
+        }
+
+        private static UIElement CreateProjectTextEmptyRow(string text)
+        {
+            var border = new Border
+            {
+                Padding = new Thickness(12),
+                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Child = new TextBlock
+                {
+                    Text = text,
+                    Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush,
+                    TextWrapping = TextWrapping.Wrap
+                }
+            };
+            return border;
+        }
+
+        private Grid CreateProjectTextVoiceTableRow(ProjectTextRow row, string value, int rowNumber, int rowCount)
+        {
+            var grid = CreateProjectTextGrid();
+            grid.Children.Add(CreateProjectTextSourceCell(row));
+            var hasVoice = !string.IsNullOrWhiteSpace(value);
+            var button = new Button
+            {
+                MinWidth = 520,
+                Margin = new Thickness(8),
+                Tag = row.Id
+            };
+            UpdateProjectVoiceButton(button, hasVoice ? value : string.Empty);
+            button.ContextFlyout = GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("更改备注", async (_, _) => await SetProjectVoiceRemarkAsync(row, rowNumber, rowCount, button)),
+                GridViewItemFactory.CreateMenuItem("移除", async (_, _) => await RemoveProjectVoiceAsync(row, button)));
+            button.Click += async (_, _) =>
+            {
+                var selectedPath = await PickReplacementFileAsync([".wav"], PickerLocationId.MusicLibrary);
+                if (string.IsNullOrWhiteSpace(selectedPath))
+                {
+                    return;
+                }
+
+                if (_currentProject is not null)
+                {
+                    selectedPath = _projectVoiceAssetService.ImportVoice(
+                        _currentProject,
+                        row,
+                        rowNumber,
+                        rowCount,
+                        selectedPath,
+                        _projectVoiceMapState);
+                    _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
+                    TouchProjectLastEditedAt(_currentProject);
+                }
+
+                UpdateProjectVoiceButton(button, selectedPath);
+                PlaySelectionSound();
+            };
+            grid.Children.Add(CreateProjectTextScrollableCell(button, 1));
+            return grid;
+        }
+
+        private Grid CreateProjectTextLocalizationTableRow(
+            ProjectTextRow row,
+            string value,
+            Dictionary<string, string> languageMap)
+        {
+            var grid = CreateProjectTextGrid();
+            grid.Children.Add(CreateProjectTextSourceCell(row));
+            var textBox = new TextBox
+            {
+                Text = value,
+                PlaceholderText = "填写目标语言文本",
+                AcceptsReturn = false,
+                MinWidth = 520,
+                Margin = new Thickness(8),
+                Tag = row.Id
+            };
+            textBox.TextChanged += (_, _) =>
+            {
+                if (string.IsNullOrWhiteSpace(textBox.Text))
+                {
+                    languageMap.Remove(row.Id);
+                }
+                else
+                {
+                    languageMap[row.Id] = textBox.Text;
+                }
+
+                if (_currentProject is not null)
+                {
+                    _projectTextDataService.WriteLocalization(_currentProject, _projectLocalizationState);
+                }
+            };
+            grid.Children.Add(CreateProjectTextScrollableCell(textBox, 1));
+            return grid;
+        }
+
+        private static Grid CreateProjectTextGrid()
+        {
+            var grid = new Grid
+            {
+                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
+                BorderThickness = new Thickness(0, 0, 0, 1)
+            };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 240 });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 240 });
+            return grid;
+        }
+
+        private static string CreateProjectTextSourceContent(ProjectTextRow row)
+        {
+            return $"{row.Text}\n{row.ChapterCode} / 小节 {row.Section} / 行 {row.RowName}";
+        }
+
+        private static Border CreateProjectTextSourceCell(ProjectTextRow row)
+        {
+            var panel = new StackPanel
+            {
+                Spacing = 4
+            };
+            panel.Children.Add(new TextBlock
+            {
+                Text = row.Text,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"{row.ChapterCode} / 小节 {row.Section} / 行 {row.RowName}",
+                TextWrapping = TextWrapping.Wrap,
+                FontWeight = Microsoft.UI.Text.FontWeights.Normal,
+                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
+            });
+
+            var border = new Border
+            {
+                Padding = new Thickness(10, 8, 10, 8),
+                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
+                BorderThickness = new Thickness(0, 0, 1, 0),
+                Child = panel
+            };
+            Grid.SetColumn(border, 0);
+            return border;
+        }
+
+        private static void UpdateProjectVoiceButton(Button button, string voicePath)
+        {
+            var hasVoice = !string.IsNullOrWhiteSpace(voicePath);
+            button.Content = hasVoice ? Path.GetFileName(voicePath) : "点击选择语音文件（仅支持 wav）";
+            button.Foreground = Application.Current.Resources[
+                hasVoice ? "TextFillColorPrimaryBrush" : "TextFillColorTertiaryBrush"] as Brush;
+            button.FontWeight = hasVoice
+                ? Microsoft.UI.Text.FontWeights.Normal
+                : Microsoft.UI.Text.FontWeights.Normal;
+            button.Opacity = hasVoice ? 1 : 0.72;
+            ToolTipService.SetToolTip(button, hasVoice ? voicePath : "未设置语音文件");
+        }
+
+        private static Border CreateProjectTextCell(string text, int column, bool isHeader = false)
+        {
+            var border = new Border
+            {
+                Padding = new Thickness(10, 8, 10, 8),
+                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
+                BorderThickness = column == 0 ? new Thickness(0, 0, 1, 0) : new Thickness(0),
+                Child = new TextBlock
+                {
+                    Text = text,
+                    TextWrapping = TextWrapping.Wrap,
+                    FontWeight = isHeader ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+                    Foreground = Application.Current.Resources[isHeader ? "TextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush"] as Brush
+                }
+            };
+            Grid.SetColumn(border, column);
+            return border;
+        }
+
+        private static Border CreateProjectTextScrollableCell(FrameworkElement content, int column)
+        {
+            var border = new Border
+            {
+                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
+                BorderThickness = column == 0 ? new Thickness(0, 0, 1, 0) : new Thickness(0),
+                Child = new ScrollViewer
+                {
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    HorizontalScrollMode = ScrollMode.Auto,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                    VerticalScrollMode = ScrollMode.Disabled,
+                    Content = content
+                }
+            };
+            Grid.SetColumn(border, column);
+            return border;
         }
 
         private GridViewItem CreateChapterCard(ChapterInfo chapter)
@@ -1905,6 +2457,7 @@ namespace GalExcleTools
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
             MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
@@ -2839,6 +3392,7 @@ namespace GalExcleTools
                 ? "当前函数：无"
                 : $"当前函数：{custom}";
             _storyEditorViewModel.HasCurrentFunction = hasFunction;
+            _storyEditorViewModel.HasMultipleCurrentFunctions = StoryFunctionService.SplitFunctionValues(custom).Skip(1).Any();
             _storyEditorViewModel.HasCurrentChoices = GetCurrentStoryChoiceValues().Count > 0;
         }
 
@@ -6098,6 +6652,22 @@ namespace GalExcleTools
             return selectedFile?.Path;
         }
 
+        private async Task<string?> PickReplacementFileAsync(IEnumerable<string> extensions, PickerLocationId startLocation)
+        {
+            var picker = new FileOpenPicker
+            {
+                SuggestedStartLocation = startLocation
+            };
+            foreach (var extension in extensions)
+            {
+                picker.FileTypeFilter.Add(extension);
+            }
+
+            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+            var selectedFile = await picker.PickSingleFileAsync();
+            return selectedFile?.Path;
+        }
+
         private void CreateProjectButton_Click(object sender, RoutedEventArgs e)
         {
             PlayPositiveSound();
@@ -6739,6 +7309,7 @@ namespace GalExcleTools
                 },
                 GridViewItemFactory.CreateMenu(
                     GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetBackgroundImageRemarkAsync(imagePath)),
+                    GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceBackgroundImageAsync(imagePath)),
                     GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(imagePath))));
         }
 
@@ -6750,6 +7321,7 @@ namespace GalExcleTools
         private async Task RefreshAudioCardsAsync(AssetLibraryInfo assetLibrary, AudioAssetKind kind, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
             var musicFolderPath = GetAudioFolderPath(assetLibrary, kind);
+            AudioAssetService.DeleteIgnoredSidecarFiles(kind, musicFolderPath);
             var musicPaths = AudioAssetService.GetFilePaths(musicFolderPath);
             var gridView = GetAudioGridView(kind);
 
@@ -6973,6 +7545,42 @@ namespace GalExcleTools
             RunAssetLibraryLoad(LoadCharacterFiltersAsync(assetLibrary, GetAssetLibraryLoadToken()));
         }
 
+        private void ApplyAssetLibraryMetadataToUi(AssetLibraryInfo assetLibrary)
+        {
+            _isApplyingAssetLibraryMetadata = true;
+            try
+            {
+                AssetLibraryPortraitPreviewEnabledCheckBox.IsChecked = assetLibrary.IsPortraitPreviewEnabled;
+                UpdateAssetLibraryDiskUsage(assetLibrary);
+            }
+            finally
+            {
+                _isApplyingAssetLibraryMetadata = false;
+            }
+        }
+
+        private void UpdateAssetLibraryDiskUsage(AssetLibraryInfo assetLibrary)
+        {
+            AssetLibraryDiskUsageText.Text = $"当前占用：{FormatFileSize(CountDirectoryBytes(assetLibrary.Path))}";
+        }
+
+        private void AssetLibraryPortraitPreviewEnabledCheckBox_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_isApplyingAssetLibraryMetadata || _currentAssetLibrary is null)
+            {
+                return;
+            }
+
+            var isEnabled = AssetLibraryPortraitPreviewEnabledCheckBox.IsChecked == true;
+            _currentAssetLibrary = _projectWorkspaceService.SetAssetLibraryPortraitPreviewEnabled(_currentAssetLibrary, isEnabled);
+            AssetLibraryDetailStatusText.Text = isEnabled
+                ? "已启用小预览；未设置的小预览会在虚幻同步前提示。"
+                : "已关闭小预览；虚幻同步不会写入 DA_Portraits。";
+            LoadCharacters(_currentAssetLibrary);
+            ReloadCharacterDetailLayersPreservingScroll();
+            AppendLog(LogKind.User, isEnabled ? "已启用素材库小预览。" : "已关闭素材库小预览。");
+        }
+
         private async Task RepairStoredCharacterFiltersAsync(
             AssetLibraryInfo assetLibrary,
             IReadOnlyList<CharacterFilterEntry> oldFilters,
@@ -7159,13 +7767,19 @@ namespace GalExcleTools
 
         private GridViewItem CreateCharacterCard(CharacterInfo character)
         {
+            var content = AssetCardContentFactory.CreateCharacterCardContent(
+                character.Code,
+                character.Name,
+                character.ColorHex);
+            var warningMessage = GetCharacterPortraitPreviewWarningMessage(character);
+            var cardContent = warningMessage is null
+                ? content
+                : CreateWarningBadgeOverlay(content, warningMessage);
+
             return AssetCardFactory.CreateCard(
                 150,
                 220,
-                AssetCardContentFactory.CreateCharacterCardContent(
-                    character.Code,
-                    character.Name,
-                    character.ColorHex),
+                cardContent,
                 character,
                 (_, _) =>
                 {
@@ -7179,6 +7793,105 @@ namespace GalExcleTools
         private GridViewItem CreateMusicCard(string musicPath)
         {
             return CreateAudioCard(AudioAssetKind.Music, musicPath);
+        }
+
+        private string? GetCharacterPortraitPreviewWarningMessage(CharacterInfo character)
+        {
+            if (_currentAssetLibrary?.IsPortraitPreviewEnabled != true)
+            {
+                return null;
+            }
+
+            var missing = _characterLayerAssetService.GetMissingPortraitPreviewLayerNames(character);
+            return missing.Count == 0
+                ? null
+                : $"{character.Name} 有 {missing.Count} 个立绘素材还没有设置小预览：{string.Join(", ", missing.Take(8))}{(missing.Count > 8 ? "..." : string.Empty)}";
+        }
+
+        private string? GetCharacterLayerPortraitPreviewWarningMessage(string imagePath, CharacterLayerKind layerKind)
+        {
+            if (_currentAssetLibrary?.IsPortraitPreviewEnabled != true ||
+                _currentCharacter is null ||
+                layerKind is not (CharacterLayerKind.Cloth or CharacterLayerKind.Face or CharacterLayerKind.Adorn))
+            {
+                return null;
+            }
+
+            return _characterLayerAssetService.ResolvePortraitPreviewPath(_currentCharacter, Path.GetFileName(imagePath)) is null
+                ? $"{GetCharacterLayerDisplayName(layerKind)} {Path.GetFileNameWithoutExtension(imagePath)} 还没有设置小预览。右键选择“设置预览”后，同步会写入 DA_Portraits。"
+                : null;
+        }
+
+        private UIElement CreateWarningBadgeOverlay(UIElement content, string message)
+        {
+            var badge = new Button
+            {
+                Width = 26,
+                Height = 26,
+                Padding = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 0, 6, 6),
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Gold),
+                BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.DarkGoldenrod),
+                BorderThickness = new Thickness(1),
+                Content = new FontIcon
+                {
+                    Glyph = "\uE7BA",
+                    FontSize = 14,
+                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black)
+                }
+            };
+            ToolTipService.SetToolTip(badge, "缺少小预览");
+            badge.Tapped += (_, args) =>
+            {
+                args.Handled = true;
+            };
+            badge.PointerPressed += (_, args) =>
+            {
+                args.Handled = true;
+            };
+            badge.Click += async (_, args) =>
+            {
+                PlaySelectionSound();
+                await ShowPortraitPreviewWarningAsync(message);
+            };
+
+            return new Grid
+            {
+                Children =
+                {
+                    content,
+                    badge
+                }
+            };
+        }
+
+        private async Task ShowPortraitPreviewWarningAsync(string message)
+        {
+            var targetInfoBar = CharacterDetailPage.Visibility == Visibility.Visible
+                ? CharacterDetailInfoBar
+                : null;
+            if (targetInfoBar is not null)
+            {
+                targetInfoBar.Severity = InfoBarSeverity.Warning;
+                targetInfoBar.Title = "缺少小预览";
+                targetInfoBar.Message = message;
+                targetInfoBar.IsOpen = true;
+            }
+            else
+            {
+                AssetLibraryDetailStatusText.Text = message;
+            }
+
+            AppendLog(LogKind.Warning, message);
+            await _dialogService.ShowAsync(new DialogRequest(
+                "缺少小预览",
+                message,
+                PrimaryButtonText: string.Empty,
+                CloseButtonText: "知道了",
+                PrimarySound: DialogSoundIntent.None,
+                CloseSound: DialogSoundIntent.Selection));
         }
 
         private GridViewItem CreateFunctionCard(FunctionEntry function)
@@ -7251,6 +7964,7 @@ namespace GalExcleTools
                 },
                 GridViewItemFactory.CreateMenu(
                     GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetAudioRemarkAsync(kind, musicPath)),
+                    GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceAudioAsync(kind, musicPath)),
                     GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteAudioAsync(kind, musicPath))));
         }
 
@@ -8182,6 +8896,47 @@ namespace GalExcleTools
             return true;
         }
 
+        private async Task<bool> ReplaceBackgroundImageAsync(string imagePath)
+        {
+            if (_currentAssetLibrary is null || !File.Exists(imagePath))
+            {
+                return false;
+            }
+
+            var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+            if (sourcePath is null)
+            {
+                return false;
+            }
+
+            if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+            {
+                AppendLog(LogKind.Warning, $"替换背景图失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                return false;
+            }
+
+            _isNormalizingBackgroundImages = true;
+            try
+            {
+                await ImportBackgroundImageAsPngAsync(sourcePath, imagePath);
+            }
+            finally
+            {
+                _isNormalizingBackgroundImages = false;
+            }
+
+            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            RefreshBackgroundImageCards(_currentAssetLibrary);
+            RequestDelayedRefresh();
+            if (_viewingBackgroundImagePath is not null && PathsEqual(_viewingBackgroundImagePath, imagePath))
+            {
+                await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, imagePath);
+            }
+
+            AppendLog(LogKind.User, $"已替换背景图素材：{Path.GetFileName(imagePath)} <- {Path.GetFileName(sourcePath)}");
+            return true;
+        }
+
         private async Task<string?> PromptRemarkAsync(string title, string currentRemark, string placeholderText)
         {
             return await _dialogService.PromptTextAsync(new TextInputDialogRequest(
@@ -8539,6 +9294,94 @@ namespace GalExcleTools
             return true;
         }
 
+        private async Task<bool> ReplaceCharacterLayerAsync(CharacterLayerKind layerKind, string layerPath)
+        {
+            if (_currentCharacter is null || !File.Exists(layerPath))
+            {
+                return false;
+            }
+
+            var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+            if (sourcePath is null)
+            {
+                return false;
+            }
+
+            if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+            {
+                AppendLog(LogKind.Warning, $"替换{GetCharacterLayerDisplayName(layerKind)}失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                return false;
+            }
+
+            var restoreHorizontalOffset = CharacterDetailScrollViewer.HorizontalOffset;
+            var restoreVerticalOffset = CharacterDetailScrollViewer.VerticalOffset;
+            File.Copy(sourcePath, layerPath, overwrite: true);
+
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
+
+            SetSelectedCharacterLayer(layerKind, layerPath);
+            ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
+            await UpdateCharacterLayerPreviewAsync();
+            RequestDelayedRefresh();
+
+            if (_viewingCharacterLayer is { } viewingLayer &&
+                viewingLayer.Kind == layerKind &&
+                PathsEqual(viewingLayer.Path, layerPath))
+            {
+                await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, layerPath);
+            }
+
+            if (_isViewingCharacterComposite)
+            {
+                await LoadCharacterCompositeViewerImagesAsync();
+            }
+
+            AppendLog(LogKind.User, $"已替换{GetCharacterLayerDisplayName(layerKind)}素材：{Path.GetFileName(layerPath)} <- {Path.GetFileName(sourcePath)}");
+            return true;
+        }
+
+        private async Task SetCharacterPortraitPreviewAsync(CharacterLayerKind layerKind, string layerPath)
+        {
+            if (_currentCharacter is null || !File.Exists(layerPath))
+            {
+                return;
+            }
+
+            var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+            if (sourcePath is null)
+            {
+                return;
+            }
+
+            if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+            {
+                AppendLog(LogKind.Warning, $"设置{GetCharacterLayerDisplayName(layerKind)}小预览失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                return;
+            }
+
+            _characterLayerAssetService.SetPortraitPreview(_currentCharacter, Path.GetFileName(layerPath), sourcePath);
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
+
+            CharacterDetailInfoBar.Severity = InfoBarSeverity.Success;
+            CharacterDetailInfoBar.Title = "已设置小预览";
+            CharacterDetailInfoBar.Message = $"{Path.GetFileNameWithoutExtension(layerPath)} <- {Path.GetFileName(sourcePath)}";
+            CharacterDetailInfoBar.IsOpen = true;
+            ReloadCharacterDetailLayersPreservingScroll();
+            if (_currentAssetLibrary is not null)
+            {
+                LoadCharacters(_currentAssetLibrary);
+            }
+
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已设置{GetCharacterLayerDisplayName(layerKind)}小预览：{Path.GetFileName(layerPath)} <- {Path.GetFileName(sourcePath)}");
+        }
+
         private async Task SetCharacterAdornAvailabilityAsync(string adornPath)
         {
             if (_currentCharacter is null || !File.Exists(adornPath))
@@ -8637,6 +9480,51 @@ namespace GalExcleTools
             return true;
         }
 
+        private async Task<bool> ReplaceAudioAsync(AudioAssetKind kind, string musicPath)
+        {
+            if (_currentAssetLibrary is null || !File.Exists(musicPath))
+            {
+                return false;
+            }
+
+            var sourcePath = await PickReplacementFileAsync(AudioAssetService.Extensions, PickerLocationId.MusicLibrary);
+            if (sourcePath is null)
+            {
+                return false;
+            }
+
+            if (!AudioAssetService.IsValidAudioPath(sourcePath))
+            {
+                AppendLog(LogKind.Warning, $"替换{AudioAssetService.GetDisplayName(kind)}失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                return false;
+            }
+
+            SetAudioNormalizing(kind, true);
+            try
+            {
+                File.Copy(sourcePath, musicPath, overwrite: true);
+                AudioAssetService.DeleteIgnoredSidecarFiles(kind, GetAudioFolderPath(_currentAssetLibrary, kind));
+            }
+            finally
+            {
+                SetAudioNormalizing(kind, false);
+            }
+
+            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            RefreshAudioCards(_currentAssetLibrary, kind);
+            RequestDelayedRefresh();
+            if (_playingMusicPath is not null && PathsEqual(_playingMusicPath, musicPath))
+            {
+                MusicPlayerElement.MediaPlayer.Pause();
+                var file = await StorageFile.GetFileFromPathAsync(musicPath);
+                MusicPlayerElement.Source = MediaSource.CreateFromStorageFile(file);
+                MusicPlayPauseButton.Content = "播放";
+            }
+
+            AppendLog(LogKind.User, $"已替换{AudioAssetService.GetDisplayName(kind)}素材：{Path.GetFileName(musicPath)} <- {Path.GetFileName(sourcePath)}");
+            return true;
+        }
+
         private async Task NormalizeMusicFilesAsync(string musicFolderPath, IReadOnlyList<string>? orderedPaths = null)
         {
             await NormalizeAudioFilesAsync(AudioAssetKind.Music, musicFolderPath, orderedPaths);
@@ -8657,8 +9545,11 @@ namespace GalExcleTools
 
             _viewingBackgroundImagePath = imagePath;
             _viewingCharacterLayer = null;
+            _isViewingCharacterComposite = false;
             BackgroundImageViewerTabTitleText.Text = Path.GetFileNameWithoutExtension(imagePath);
+            SetBackgroundImageViewerEditingEnabled(true);
             ResetBackgroundImageViewerTransform();
+            ClearBackgroundImageViewerLayerImages();
             _ = ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, imagePath);
 
             WorkbenchPage.Visibility = Visibility.Collapsed;
@@ -8668,11 +9559,12 @@ namespace GalExcleTools
             AssetLibraryDetailPage.Visibility = Visibility.Collapsed;
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Visible;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
-            BackgroundImageViewerCloseButton.Focus(FocusState.Programmatic);
+            BackgroundImageViewerPage.Focus(FocusState.Programmatic);
             AppendLog(LogKind.User, $"打开背景图查看：{Path.GetFileName(imagePath)}");
         }
 
@@ -8685,9 +9577,12 @@ namespace GalExcleTools
 
             _viewingBackgroundImagePath = null;
             _viewingCharacterLayer = new CharacterLayerViewerState(layerKind, layerPath);
+            _isViewingCharacterComposite = false;
             SetSelectedCharacterLayerPath(layerKind, layerPath);
             UpdateCharacterLayerViewerTitle(layerKind, layerPath);
+            SetBackgroundImageViewerEditingEnabled(true);
             ResetBackgroundImageViewerTransform();
+            ClearBackgroundImageViewerLayerImages();
             _ = ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, layerPath);
             _ = UpdateCharacterLayerPreviewAsync();
 
@@ -8699,12 +9594,94 @@ namespace GalExcleTools
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Visible;
             MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
-            BackgroundImageViewerCloseButton.Focus(FocusState.Programmatic);
+            BackgroundImageViewerPage.Focus(FocusState.Programmatic);
             AppendLog(LogKind.User, $"打开{GetCharacterLayerDisplayName(layerKind)}查看：{Path.GetFileName(layerPath)}");
+        }
+
+        private async void ShowCharacterCompositeViewerPage()
+        {
+            if (_currentCharacter is null ||
+                string.IsNullOrWhiteSpace(_selectedCharacterClothPath) ||
+                !File.Exists(_selectedCharacterClothPath))
+            {
+                CharacterDetailInfoBar.Severity = InfoBarSeverity.Warning;
+                CharacterDetailInfoBar.Title = "无法查看立绘";
+                CharacterDetailInfoBar.Message = "当前角色还没有可查看的服装图层。";
+                CharacterDetailInfoBar.IsOpen = true;
+                return;
+            }
+
+            _viewingBackgroundImagePath = null;
+            _viewingCharacterLayer = null;
+            _isViewingCharacterComposite = true;
+            BackgroundImageViewerTabTitleText.Text = $"{_currentCharacter.Name} / 分层预览";
+            SetBackgroundImageViewerEditingEnabled(false);
+            ResetBackgroundImageViewerTransform();
+            await LoadCharacterCompositeViewerImagesAsync();
+
+            WorkbenchPage.Visibility = Visibility.Collapsed;
+            ProjectDetailPage.Visibility = Visibility.Collapsed;
+            StoryEditorPage.Visibility = Visibility.Collapsed;
+            AssetLibraryPage.Visibility = Visibility.Collapsed;
+            AssetLibraryDetailPage.Visibility = Visibility.Collapsed;
+            CharacterDetailPage.Visibility = Visibility.Collapsed;
+            BackgroundImageViewerPage.Visibility = Visibility.Visible;
+            MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
+            CreateProjectPage.Visibility = Visibility.Collapsed;
+            CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
+            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SettingsPage.Visibility = Visibility.Collapsed;
+            BackgroundImageViewerPage.Focus(FocusState.Programmatic);
+            AppendLog(LogKind.User, $"打开组合立绘查看：{_currentCharacter.Name}");
+        }
+
+        private async Task LoadCharacterCompositeViewerImagesAsync()
+        {
+            await SetViewerLayerImageAsync(BackgroundImageViewerImage, _selectedCharacterClothPath);
+            await SetViewerLayerImageAsync(
+                BackgroundImageViewerFaceImage,
+                IsCharacterLayerCompatibleWithSelectedCloth(_selectedCharacterFacePath) ? _selectedCharacterFacePath : null);
+            await SetViewerLayerImageAsync(
+                BackgroundImageViewerAdornImage,
+                IsCharacterLayerCompatibleWithSelectedCloth(_selectedCharacterAdornPath) ? _selectedCharacterAdornPath : null);
+            await SetViewerLayerImageAsync(
+                BackgroundImageViewerVfxImage,
+                IsCharacterLayerCompatibleWithSelectedCloth(_selectedCharacterVfxPath) ? _selectedCharacterVfxPath : null);
+        }
+
+        private async Task SetViewerLayerImageAsync(Image image, string? path)
+        {
+            image.RenderTransform = BackgroundImageViewerTransform;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                image.Source = null;
+                image.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            await ThumbnailFactory.LoadThumbnailFromFileAsync(image, path);
+            image.Visibility = Visibility.Visible;
+        }
+
+        private void ClearBackgroundImageViewerLayerImages()
+        {
+            _ = SetViewerLayerImageAsync(BackgroundImageViewerFaceImage, null);
+            _ = SetViewerLayerImageAsync(BackgroundImageViewerAdornImage, null);
+            _ = SetViewerLayerImageAsync(BackgroundImageViewerVfxImage, null);
+            BackgroundImageViewerImage.RenderTransform = BackgroundImageViewerTransform;
+        }
+
+        private void SetBackgroundImageViewerEditingEnabled(bool isEnabled)
+        {
+            BackgroundImageViewerRemarkButton.IsEnabled = isEnabled;
+            BackgroundImageViewerReplaceButton.IsEnabled = isEnabled;
+            BackgroundImageViewerDeleteButton.IsEnabled = isEnabled;
         }
 
         private void SetSelectedCharacterLayerPath(CharacterLayerKind layerKind, string layerPath)
@@ -8769,17 +9746,19 @@ namespace GalExcleTools
         private void CloseBackgroundImageViewer()
         {
             _isPanningBackgroundImage = false;
-            var wasViewingCharacterLayer = _viewingCharacterLayer is not null;
+            var shouldReturnToCharacterDetail = (_viewingCharacterLayer is not null || _isViewingCharacterComposite) && _currentCharacter is not null;
             _viewingBackgroundImagePath = null;
             _viewingCharacterLayer = null;
+            _isViewingCharacterComposite = false;
             BackgroundImageViewerImage.Source = null;
+            ClearBackgroundImageViewerLayerImages();
             ResetBackgroundImageViewerTransform();
 
-            if (wasViewingCharacterLayer && _currentCharacter is not null)
+            if (shouldReturnToCharacterDetail)
             {
                 BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
                 CharacterDetailPage.Visibility = Visibility.Visible;
-                CharacterDetailCloseButton.Focus(FocusState.Programmatic);
+                CharacterPreviewSurface.Focus(FocusState.Programmatic);
             }
             else if (_currentAssetLibrary is not null)
             {
@@ -8793,6 +9772,11 @@ namespace GalExcleTools
             {
                 CloseBackgroundImageViewer();
                 e.Handled = true;
+                return;
+            }
+
+            if (_isViewingCharacterComposite && HandleCharacterCompositeViewerKeyDown(e))
+            {
                 return;
             }
 
@@ -8810,6 +9794,53 @@ namespace GalExcleTools
                 ShowAdjacentViewerImage(1);
                 e.Handled = true;
             }
+        }
+
+        private bool HandleCharacterCompositeViewerKeyDown(KeyRoutedEventArgs e)
+        {
+            switch (e.Key)
+            {
+                case Windows.System.VirtualKey.Q:
+                    _ = CycleCharacterCompositeViewerLayerAsync(CharacterLayerKind.Adorn, -1);
+                    e.Handled = true;
+                    return true;
+                case Windows.System.VirtualKey.E:
+                    _ = CycleCharacterCompositeViewerLayerAsync(CharacterLayerKind.Adorn, 1);
+                    e.Handled = true;
+                    return true;
+                case Windows.System.VirtualKey.A:
+                    _ = CycleCharacterCompositeViewerLayerAsync(CharacterLayerKind.Face, -1);
+                    e.Handled = true;
+                    return true;
+                case Windows.System.VirtualKey.D:
+                    _ = CycleCharacterCompositeViewerLayerAsync(CharacterLayerKind.Face, 1);
+                    e.Handled = true;
+                    return true;
+                case Windows.System.VirtualKey.Z:
+                    _ = CycleCharacterCompositeViewerLayerAsync(CharacterLayerKind.Cloth, -1);
+                    e.Handled = true;
+                    return true;
+                case Windows.System.VirtualKey.C:
+                    _ = CycleCharacterCompositeViewerLayerAsync(CharacterLayerKind.Cloth, 1);
+                    e.Handled = true;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private async Task CycleCharacterCompositeViewerLayerAsync(CharacterLayerKind layerKind, int direction)
+        {
+            await CycleCharacterDetailLayerAsync(layerKind, direction);
+            await LoadCharacterCompositeViewerImagesAsync();
+            BackgroundImageViewerPage.Focus(FocusState.Programmatic);
+        }
+
+        private void BackgroundImageViewerPage_RightTapped(object sender, RightTappedRoutedEventArgs e)
+        {
+            PlayNegativeSound();
+            CloseBackgroundImageViewer();
+            e.Handled = true;
         }
 
         private void BackgroundImageViewerCanvas_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
@@ -9004,6 +10035,23 @@ namespace GalExcleTools
             _viewingBackgroundImagePath = updatedPath;
             BackgroundImageViewerTabTitleText.Text = Path.GetFileNameWithoutExtension(updatedPath);
             await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, updatedPath);
+        }
+
+        private async void BackgroundImageViewerReplaceButton_Click(object sender, RoutedEventArgs e)
+        {
+            var currentLayer = _viewingCharacterLayer;
+            if (currentLayer is not null)
+            {
+                await ReplaceCharacterLayerAsync(currentLayer.Kind, currentLayer.Path);
+                return;
+            }
+
+            if (_viewingBackgroundImagePath is null)
+            {
+                return;
+            }
+
+            await ReplaceBackgroundImageAsync(_viewingBackgroundImagePath);
         }
 
         private async void BackgroundImageViewerDeleteButton_Click(object sender, RoutedEventArgs e)
@@ -9501,13 +10549,20 @@ namespace GalExcleTools
 
         private GridViewItem CreateCharacterImageLayerCard(string imagePath, CharacterLayerKind layerKind)
         {
-            TappedEventHandler? tappedHandler = null;
+            TappedEventHandler? tappedHandler = (_, args) =>
+            {
+                PlaySelectionSound();
+                ShowCharacterLayerViewerPage(imagePath, layerKind);
+                args.Handled = true;
+            };
             MenuFlyout? contextFlyout = null;
 
             if (layerKind == CharacterLayerKind.Cloth)
             {
                 contextFlyout = GridViewItemFactory.CreateMenu(
                     GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetCharacterClothRemarkAsync(imagePath)),
+                    GridViewItemFactory.CreateMenuItem("设置预览", async (_, _) => await SetCharacterPortraitPreviewAsync(CharacterLayerKind.Cloth, imagePath)),
+                    GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceCharacterLayerAsync(CharacterLayerKind.Cloth, imagePath)),
                     GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteCharacterClothAsync(imagePath)));
             }
             else if (layerKind is CharacterLayerKind.Face or CharacterLayerKind.Adorn)
@@ -9524,6 +10579,7 @@ namespace GalExcleTools
                             await SetCharacterAdornRemarkAsync(imagePath);
                         }
                     }),
+                    GridViewItemFactory.CreateMenuItem("设置预览", async (_, _) => await SetCharacterPortraitPreviewAsync(layerKind, imagePath)),
                     GridViewItemFactory.CreateMenuItem("可用范围", async (_, _) =>
                     {
                         if (layerKind == CharacterLayerKind.Face)
@@ -9535,6 +10591,7 @@ namespace GalExcleTools
                             await SetCharacterAdornAvailabilityAsync(imagePath);
                         }
                     }),
+                    GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceCharacterLayerAsync(layerKind, imagePath)),
                     GridViewItemFactory.CreateMenuItem("删除", async (_, _) =>
                     {
                         if (layerKind == CharacterLayerKind.Face)
@@ -9549,17 +10606,25 @@ namespace GalExcleTools
             }
             else
             {
-                tappedHandler = async (_, _) =>
+                tappedHandler = async (_, args) =>
                 {
+                    PlaySelectionSound();
                     SetSelectedCharacterLayer(layerKind, imagePath);
                     await UpdateCharacterLayerPreviewAsync();
+                    args.Handled = true;
                 };
             }
+
+            var content = AssetCardContentFactory.CreateImageAssetCardContent(imagePath, 178, 152, tagWithPath: true);
+            var warningMessage = GetCharacterLayerPortraitPreviewWarningMessage(imagePath, layerKind);
+            var cardContent = warningMessage is null
+                ? content
+                : CreateWarningBadgeOverlay(content, warningMessage);
 
             return AssetCardFactory.CreateCard(
                 190,
                 190,
-                AssetCardContentFactory.CreateImageAssetCardContent(imagePath, 178, 152, tagWithPath: true),
+                cardContent,
                 imagePath,
                 tappedHandler,
                 contextFlyout,
@@ -9673,6 +10738,24 @@ namespace GalExcleTools
                 GridViewItemFactory.CreateMenuItem("表情", async (_, _) => await ChooseCharacterDetailLayerAsync(CharacterLayerKind.Face)),
                 GridViewItemFactory.CreateMenuItem("装饰", async (_, _) => await ChooseCharacterDetailLayerAsync(CharacterLayerKind.Adorn)))
                 .ShowAt(CharacterPreviewSurface);
+            e.Handled = true;
+        }
+
+        private void CharacterPreviewSurface_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+        }
+
+        private void CharacterPreviewSurface_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            var point = e.GetCurrentPoint(CharacterPreviewSurface);
+            if (!point.Properties.IsLeftButtonPressed)
+            {
+                return;
+            }
+
+            PlaySelectionSound();
+            ShowCharacterCompositeViewerPage();
             e.Handled = true;
         }
 
@@ -10400,7 +11483,7 @@ namespace GalExcleTools
             SetUnrealSyncProgress(true, "正在检测虚幻同步差异... 5%", false, 5);
             UnrealSyncSummaryText.Text = forceFullSync
                 ? "正在准备全量重新同步，将忽略本地缓存和 .uasset 时间戳。"
-                : "正在比较工具箱源文件与虚幻项目内的 .uasset 时间戳。";
+                : "正在比较工具箱源文件与虚幻项目内的 .uasset 时间戳；文件名不变但内容重新导出时，也会因源文件写入时间更新而进入同步计划。";
             var changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context, forceFullSync));
             ApplyUnrealSyncChangePlan(changePlan);
             if (!changePlan.HasChanges)
@@ -10439,18 +11522,19 @@ namespace GalExcleTools
             SetUnrealSyncStatus(InfoBarSeverity.Informational, "正在同步", "正在生成导入清单并调用 Unreal Editor，请等待引擎完成资源导入。");
             try
             {
+                var cancellationToken = GetGlobalProgressCancellationToken();
                 string? backupPath = null;
                 if (backupChoice == true)
                 {
                     SetUnrealSyncProgress(true, "正在备份虚幻项目... 20%", false, 20);
-                    backupPath = await Task.Run(() => CreateCleanUnrealProjectBackup(validation.Context));
+                    backupPath = await Task.Run(() => CreateCleanUnrealProjectBackup(validation.Context, cancellationToken), cancellationToken);
                     SetUnrealSyncProgress(true, "虚幻项目备份完成... 30%", false, 30);
                     AppendLog(LogKind.User, $"虚幻项目备份完成：{backupPath}");
                 }
 
                 var progress = new Progress<UnrealSyncProgressUpdate>(update =>
                     SetUnrealSyncProgress(true, $"{update.Message} {update.Percent:0}%", false, update.Percent));
-                var result = await Task.Run(() => RunUnrealSync(validation.Context, changePlan, progress));
+                var result = await Task.Run(() => RunUnrealSync(validation.Context, changePlan, progress, cancellationToken), cancellationToken);
                 SetUnrealSyncStatus(
                     result.ExitCode == 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
                     result.ExitCode == 0 ? "同步完成" : "同步命令已结束",
@@ -10461,6 +11545,8 @@ namespace GalExcleTools
                     : $"{backupSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}\n{TrimLongText(result.Output, 900)}";
                 var lustrationConfirmed = !changePlan.LustrationChanged ||
                     result.Output.Contains("GalExcleTools updated lustration data asset", StringComparison.OrdinalIgnoreCase);
+                var portraitsConfirmed = !changePlan.PortraitsChanged ||
+                    result.Output.Contains("GalExcleTools updated portrait data asset", StringComparison.OrdinalIgnoreCase);
                 var storyTableFailed =
                     result.Output.Contains("GalExcleTools failed to update story data table", StringComparison.OrdinalIgnoreCase) ||
                     result.Output.Contains("GalExcleTools could not create or load story data table", StringComparison.OrdinalIgnoreCase) ||
@@ -10469,7 +11555,7 @@ namespace GalExcleTools
                 var assetIndexTableFailed =
                     result.Output.Contains("GalExcleTools failed to update asset index data table", StringComparison.OrdinalIgnoreCase) ||
                     result.Output.Contains("GalExcleTools could not create or load asset index data table", StringComparison.OrdinalIgnoreCase);
-                if (result.ExitCode == 0 && lustrationConfirmed && !assetIndexTableFailed)
+                if (result.ExitCode == 0 && lustrationConfirmed && portraitsConfirmed && !assetIndexTableFailed)
                 {
                     _unrealSyncService.WriteState(validation.Context, changePlan);
                     SetUnrealSyncProgress(true, "同步完成 100%", false, 100);
@@ -10487,10 +11573,20 @@ namespace GalExcleTools
                 {
                     SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步结束，但立绘数据未确认", "Unreal 日志没有返回立绘数据资产写入确认。本次不会缓存为已同步，请关闭虚幻编辑器后再同步一次。");
                 }
+                else if (result.ExitCode == 0 && changePlan.PortraitsChanged)
+                {
+                    SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步结束，但小预览数据未确认", "Unreal 日志没有返回 DA_Portraits 写入确认。本次不会缓存为已同步，请关闭虚幻编辑器后再同步一次。");
+                }
 
                 AppendLog(result.ExitCode == 0 ? LogKind.User : LogKind.Warning, $"虚幻同步结束，退出码：{result.ExitCode}");
                 NotifyUnrealSyncFinishedIfInactive(result, changePlan);
                 await ShowUnrealSyncFinishedDialogAsync(validation.Context, result, changePlan);
+            }
+            catch (OperationCanceledException)
+            {
+                CompleteGlobalProgress("虚幻同步已取消", "已停止当前同步步骤；如果 Unreal 命令进程已经启动，工具箱会尝试一并终止。");
+                SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步已取消", "本次虚幻同步没有完成。已写入的临时清单或 Unreal 侧中途导入结果可能会保留。");
+                AppendLog(LogKind.Warning, "虚幻同步已取消。");
             }
             catch (Exception ex)
             {
@@ -10650,6 +11746,15 @@ namespace GalExcleTools
                 }
             }
 
+            foreach (var group in changePlan.DeleteGroups)
+            {
+                AddUnrealSyncPlanText($"[{group.Destination}] 待删除多余资产", topMargin: 8);
+                foreach (var assetPath in group.Assets)
+                {
+                    AddUnrealSyncPlanText($"  - {assetPath}");
+                }
+            }
+
             if (changePlan.StoryTables.Count > 0)
             {
                 AddUnrealSyncPlanText("[ExcelTexts] 待更新剧情表", topMargin: 8);
@@ -10672,6 +11777,15 @@ namespace GalExcleTools
             {
                 AddUnrealSyncPlanText("[Lustration] 待更新立绘数据资产", topMargin: 8);
                 foreach (var row in changePlan.LustrationRows)
+                {
+                    AddUnrealSyncPlanText($"  - {row.Key} / {row.Name}");
+                }
+            }
+
+            if (changePlan.PortraitsChanged)
+            {
+                AddUnrealSyncPlanText("[Lustration] 待更新小预览数据资产", topMargin: 8);
+                foreach (var row in changePlan.PortraitRows)
                 {
                     AddUnrealSyncPlanText($"  - {row.Key} / {row.Name}");
                 }
@@ -10831,7 +11945,7 @@ namespace GalExcleTools
             }
         }
 
-        private static string CreateCleanUnrealProjectBackup(UnrealSyncContext context)
+        private static string CreateCleanUnrealProjectBackup(UnrealSyncContext context, CancellationToken cancellationToken = default)
         {
             var unrealProjectRoot = Path.GetDirectoryName(context.UnrealProjectPath)
                 ?? throw new InvalidOperationException("无法定位虚幻项目根目录。");
@@ -10852,6 +11966,7 @@ namespace GalExcleTools
             using var archive = ZipFile.Open(backupPath, ZipArchiveMode.Create);
             foreach (var filePath in Directory.EnumerateFiles(unrealProjectRoot, "*", SearchOption.AllDirectories))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var relativePath = Path.GetRelativePath(unrealProjectRoot, filePath);
                 var segments = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                 if (segments.Any(excludedFolders.Contains))
@@ -10958,6 +12073,14 @@ namespace GalExcleTools
             if (contentFolderPath.Length > 0 && Directory.Exists(contentFolderPath) && assetLibrary is not null && project is not null)
             {
                 planItems.AddRange(CreateUnrealSyncPlanItems(project, assetLibrary, contentFolderPath));
+                if (assetLibrary.IsPortraitPreviewEnabled)
+                {
+                    var missingPortraitPreviewNames = GetMissingPortraitPreviewLayerNames(assetLibrary);
+                    if (missingPortraitPreviewNames.Count > 0)
+                    {
+                        warnings.Add($"小预览已启用，但有 {missingPortraitPreviewNames.Count} 个立绘素材未设置预览：{string.Join(", ", missingPortraitPreviewNames.Take(8))}{(missingPortraitPreviewNames.Count > 8 ? "..." : string.Empty)}");
+                    }
+                }
             }
 
             var canSync = errors.Count == 0 && editorPath is not null && project is not null && assetLibrary is not null && targetAssetRoot is not null;
@@ -10992,21 +12115,31 @@ namespace GalExcleTools
             var musicCount = AudioAssetService.GetFilePaths(GetMusicFolderPath(assetLibrary)).Count;
             var sceneCount = AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(assetLibrary)).Count;
             var soundEffectCount = AudioAssetService.GetFilePaths(GetSoundEffectFolderPath(assetLibrary)).Count;
+            var voiceCount = ProjectVoiceAssetService.GetVoiceFilePaths(project).Count;
             var csvCount = GetProjectStoryCsvPaths(project).Count;
             var characterLayerCount = GetProjectCharacterLayerImportPaths(assetLibrary).Count;
+            var portraitPreviewCount = GetProjectPortraitPreviewImportPaths(assetLibrary).Count;
+            var missingPortraitPreviewCount = assetLibrary.IsPortraitPreviewEnabled
+                ? GetMissingPortraitPreviewLayerNames(assetLibrary).Count
+                : 0;
             var lustrationRowCount = GetCharactersForAssetLibrary(assetLibrary).Count;
             var existingBackgroundCount = UnrealSyncService.CountAssets(Path.Combine(contentFolderPath, "BackGround"));
             var existingMusicCount = UnrealSyncService.CountAssets(Path.Combine(contentFolderPath, "BGM"));
             var existingSceneCount = UnrealSyncService.CountAssets(Path.Combine(contentFolderPath, "Scene_Effect"));
+            var existingVoiceCount = UnrealSyncService.CountAssetsRecursive(Path.Combine(contentFolderPath, "Voice"));
 
             return
             [
                 $"背景图：源文件 {backgroundCount} 个，引擎内已有 {existingBackgroundCount} 个 .uasset。",
                 $"音乐：源文件 {musicCount} 个，引擎内已有 {existingMusicCount} 个 .uasset。",
                 $"环境音/特殊音效：源文件 {sceneCount + soundEffectCount} 个，引擎内已有 {existingSceneCount} 个 .uasset。",
+                $"文本语音：源文件 {voiceCount} 个，引擎内已有 {existingVoiceCount} 个 .uasset，将只同步 wav 到 Voice 文件夹。",
                 $"素材索引表：背景 {backgroundCount}、BGM {musicCount}、环境音 {sceneCount}、特殊音效 {soundEffectCount}，将同步到 ExcelTexts 的 4 张 DataTable。",
                 $"CSV 表格：{csvCount} 个，将导入到 ExcelTexts。",
                 $"立绘图层：{characterLayerCount} 个，将按 Lustration/角色/图层目录导入。",
+                assetLibrary.IsPortraitPreviewEnabled
+                    ? $"小预览：源文件 {portraitPreviewCount} 个，缺失设置 {missingPortraitPreviewCount} 个，将同步到 Lustration/角色/Log_Preview 和 DA_Portraits。"
+                    : "小预览：当前素材库未启用。",
                 $"立绘信息表：{lustrationRowCount} 个角色，将同步到 Lustration/DA_LustrationInfor。"
             ];
         }
@@ -11019,12 +12152,13 @@ namespace GalExcleTools
         private UnrealSyncResult RunUnrealSync(
             UnrealSyncContext context,
             UnrealSyncChangePlan changePlan,
-            IProgress<UnrealSyncProgressUpdate>? progress = null)
+            IProgress<UnrealSyncProgressUpdate>? progress = null,
+            CancellationToken cancellationToken = default)
         {
             var filters = File.Exists(GetCharacterFilterIndexPath(context.AssetLibrary))
                 ? _characterFilterService.Read(context.AssetLibrary)
                 : [];
-            return _unrealSyncService.Run(context, changePlan, filters, progress);
+            return _unrealSyncService.Run(context, changePlan, filters, progress, cancellationToken);
         }
 
         private List<UnrealStoryTableSyncEntry> BuildStoryTableSyncEntries(UnrealSyncContext context)
@@ -11046,8 +12180,10 @@ namespace GalExcleTools
                 AudioAssetService.GetFilePaths(GetMusicFolderPath(context.AssetLibrary)),
                 AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(context.AssetLibrary)),
                 AudioAssetService.GetFilePaths(GetSoundEffectFolderPath(context.AssetLibrary)),
+                ProjectVoiceAssetService.GetVoiceFilePaths(context.Project),
                 allStoryTables,
-                assetIndexTableCacheFolder);
+                assetIndexTableCacheFolder,
+                GetPortraitPreviewPathsByLayerFileName);
         }
 
         private List<string> GetProjectStoryCsvPaths(ProjectInfo project)
@@ -11071,6 +12207,30 @@ namespace GalExcleTools
             }
 
             return result;
+        }
+
+        private IReadOnlyDictionary<string, string> GetPortraitPreviewPathsByLayerFileName(CharacterInfo character)
+        {
+            _characterLayerAssetService.CleanupPortraitPreviewMeta(character);
+            return _characterLayerAssetService.GetPortraitPreviewPathsByLayerFileName(character);
+        }
+
+        private List<string> GetProjectPortraitPreviewImportPaths(AssetLibraryInfo assetLibrary)
+        {
+            return GetCharactersForAssetLibrary(assetLibrary)
+                .SelectMany(character => GetPortraitPreviewPathsByLayerFileName(character).Values)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private List<string> GetMissingPortraitPreviewLayerNames(AssetLibraryInfo assetLibrary)
+        {
+            return GetCharactersForAssetLibrary(assetLibrary)
+                .SelectMany(character => _characterLayerAssetService
+                    .GetMissingPortraitPreviewLayerNames(character)
+                    .Select(fileName => $"{character.Code}/{fileName}"))
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         private async void ShowProjectRootHelpButton_Click(object sender, RoutedEventArgs e)
@@ -11133,6 +12293,7 @@ namespace GalExcleTools
             AssetLibraryDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
             MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
@@ -11160,6 +12321,7 @@ namespace GalExcleTools
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
             MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
@@ -11175,6 +12337,8 @@ namespace GalExcleTools
             RunAssetLibraryLoad(LoadFunctionsAsync(assetLibrary, cancellationToken));
             RunAssetLibraryLoad(LoadCharactersAsync(assetLibrary, cancellationToken));
             RunAssetLibraryLoad(LoadCharacterFiltersAsync(assetLibrary, cancellationToken));
+            ApplyAssetLibraryMetadataToUi(assetLibrary);
+            UpdateAssetLibraryDiskUsage(assetLibrary);
             PlayPageEntrance(AssetLibraryDetailPage);
         }
 
@@ -11189,6 +12353,7 @@ namespace GalExcleTools
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
             MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Visible;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
@@ -11211,6 +12376,7 @@ namespace GalExcleTools
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
             MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Visible;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
@@ -11232,6 +12398,7 @@ namespace GalExcleTools
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
             MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Visible;
@@ -11257,6 +12424,7 @@ namespace GalExcleTools
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
             MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;

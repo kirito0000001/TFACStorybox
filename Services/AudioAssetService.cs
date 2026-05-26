@@ -74,6 +74,8 @@ internal sealed class AudioAssetService
 
     public void NormalizeFiles(AudioAssetKind kind, string folderPath, IReadOnlyList<string>? orderedPaths = null)
     {
+        DeleteIgnoredSidecarFiles(kind, folderPath);
+
         var sourcePaths = orderedPaths is null
             ? GetFilePaths(folderPath)
             : orderedPaths
@@ -202,5 +204,23 @@ internal sealed class AudioAssetService
     private static bool IsSupportedExtension(string path)
     {
         return Extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static void DeleteIgnoredSidecarFiles(AudioAssetKind kind, string folderPath)
+    {
+        DeleteSidecarFiles(folderPath, "*.pkf");
+    }
+
+    private static void DeleteSidecarFiles(string folderPath, string searchPattern)
+    {
+        if (!Directory.Exists(folderPath))
+        {
+            return;
+        }
+
+        foreach (var metadataPath in Directory.EnumerateFiles(folderPath, searchPattern))
+        {
+            File.Delete(metadataPath);
+        }
     }
 }
