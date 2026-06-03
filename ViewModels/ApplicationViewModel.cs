@@ -10,11 +10,23 @@ internal sealed class ApplicationViewModel : ObservableObject
     {
         Settings = settings;
         GlobalProgress = globalProgress;
+        Workbench = new ProjectWorkbenchViewModel();
+        AssetLibrary = new AssetLibraryViewModel();
+        StoryEditor = new StoryEditorViewModel();
+        UnrealSync = new UnrealSyncViewModel();
     }
 
     public SettingsViewModel Settings { get; }
 
     public GlobalProgressViewModel GlobalProgress { get; }
+
+    public ProjectWorkbenchViewModel Workbench { get; }
+
+    public AssetLibraryViewModel AssetLibrary { get; }
+
+    public StoryEditorViewModel StoryEditor { get; }
+
+    public UnrealSyncViewModel UnrealSync { get; }
 
     public IReadOnlyList<ToolboxModuleDefinition> Modules { get; } =
     [

@@ -1,0 +1,635 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using GalExcleTools.Services;
+using GalExcleTools.ViewModels;
+using GalExcleTools.Views;
+using static GalExcleTools.Services.ColorUtility;
+using static GalExcleTools.Services.FileSystemUtility;
+using static GalExcleTools.Services.TextUtility;
+using static GalExcleTools.Services.WorkspacePathUtility;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
+using Microsoft.Windows.AppNotifications;
+using Microsoft.Windows.AppNotifications.Builder;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.Graphics;
+using Windows.Graphics.Imaging;
+using Windows.Media.Core;
+using Windows.Media.Playback;
+using Windows.Storage;
+using Windows.Storage.Pickers;
+using Windows.Storage.Streams;
+using WinRT.Interop;
+
+namespace GalExcleTools
+{
+    public sealed partial class MainWindow
+    {
+        private void ApplyUnrealSyncSettingsToUi()
+        {
+            if (UnrealEnginePathTextBox is null)
+            {
+                return;
+            }
+
+            SelectUnrealSyncProject(_appSettings.UnrealToolProjectFolderName);
+            ApplySelectedUnrealProjectBindingToUi();
+        }
+
+        private void LoadUnrealSyncProjectOptions()
+        {
+            var selectedFolderName = GetSelectedUnrealSyncProject()?.FolderName ?? _appSettings.UnrealToolProjectFolderName;
+            _isLoadingUnrealSyncProjects = true;
+            UnrealSyncProjectComboBox.Items.Clear();
+            UnrealSyncProjectCardsGridView.Items.Clear();
+            try
+            {
+                foreach (var project in GetProjects())
+                {
+                    var item = new ComboBoxItem
+                    {
+                        Content = $"{project.Name} / {project.Code}",
+                        Tag = project.FolderName
+                    };
+                    UnrealSyncProjectComboBox.Items.Add(item);
+                    UnrealSyncProjectCardsGridView.Items.Add(CreateUnrealSyncProjectCard(project, selectedFolderName));
+                }
+
+                SelectUnrealSyncProject(selectedFolderName);
+            }
+            finally
+            {
+                _isLoadingUnrealSyncProjects = false;
+            }
+        }
+
+        private GridViewItem CreateUnrealSyncProjectCard(ProjectInfo project, string? selectedFolderName)
+        {
+            var isSelected = string.Equals(project.FolderName, selectedFolderName, StringComparison.OrdinalIgnoreCase);
+            var binding = _projectWorkspaceService.ReadProjectUnrealBinding(project);
+            var footer = binding.IsComplete
+                ? "已保存虚幻关联"
+                : "未完整关联";
+            if (isSelected)
+            {
+                footer = $"当前选择 · {footer}";
+            }
+
+            var item = DashboardCardFactory.CreateInfoCard(
+                project,
+                project.ThumbnailPath,
+                project.Name,
+                $"{project.Code} | {project.AssetLibraryName}",
+                footer,
+                UnrealSyncProjectCard_Tapped);
+            if (isSelected)
+            {
+                DashboardCardFactory.MarkSelected(item);
+            }
+
+            return item;
+        }
+
+        private void UnrealSyncProjectCard_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            if (sender is not GridViewItem { Tag: ProjectInfo project })
+            {
+                return;
+            }
+
+            _appSettings.UnrealToolProjectFolderName = project.FolderName;
+            SaveAppSettings();
+            SelectUnrealSyncProject(project.FolderName);
+            ApplySelectedUnrealProjectBindingToUi();
+            LoadUnrealSyncProjectOptions();
+            RefreshUnrealSyncStatus();
+            AppendLog(LogKind.User, $"选择虚幻同步工作台项目：{project.Name}");
+            e.Handled = true;
+        }
+
+        private void SelectUnrealSyncProject(string? folderName)
+        {
+            if (UnrealSyncProjectComboBox is null || string.IsNullOrWhiteSpace(folderName))
+            {
+                return;
+            }
+
+            foreach (var item in UnrealSyncProjectComboBox.Items.OfType<ComboBoxItem>())
+            {
+                if (string.Equals(item.Tag as string, folderName, StringComparison.OrdinalIgnoreCase))
+                {
+                    UnrealSyncProjectComboBox.SelectedItem = item;
+                    return;
+                }
+            }
+        }
+
+        private ProjectInfo? GetSelectedUnrealSyncProject()
+        {
+            var folderName = (UnrealSyncProjectComboBox?.SelectedItem as ComboBoxItem)?.Tag as string
+                ?? _appSettings.UnrealToolProjectFolderName;
+            if (string.IsNullOrWhiteSpace(folderName))
+            {
+                return null;
+            }
+
+            return GetProjects()
+                .FirstOrDefault(project => string.Equals(project.FolderName, folderName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void ApplySelectedUnrealProjectBindingToUi()
+        {
+            var project = GetSelectedUnrealSyncProject();
+            var binding = project is null
+                ? new UnrealProjectBinding(_appSettings.UnrealEnginePath, _appSettings.UnrealProjectPath, _appSettings.UnrealContentFolderPath)
+                : _projectWorkspaceService.ReadProjectUnrealBinding(project);
+            if (project is not null &&
+                !binding.IsComplete &&
+                string.Equals(project.FolderName, _appSettings.UnrealToolProjectFolderName, StringComparison.OrdinalIgnoreCase))
+            {
+                binding = new UnrealProjectBinding(_appSettings.UnrealEnginePath, _appSettings.UnrealProjectPath, _appSettings.UnrealContentFolderPath);
+            }
+
+            UnrealEnginePathTextBox.Text = binding.EnginePath ?? string.Empty;
+            UnrealProjectPathTextBox.Text = binding.ProjectPath ?? string.Empty;
+            UnrealContentFolderTextBox.Text = binding.ContentFolderPath ?? string.Empty;
+        }
+
+        private async void ChooseUnrealEngineButton_Click(object sender, RoutedEventArgs e)
+        {
+            var picker = new FileOpenPicker
+            {
+                SuggestedStartLocation = PickerLocationId.ComputerFolder
+            };
+            picker.FileTypeFilter.Add(".exe");
+            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+
+            var selectedFile = await picker.PickSingleFileAsync();
+            if (selectedFile is null)
+            {
+                return;
+            }
+
+            UnrealEnginePathTextBox.Text = selectedFile.Path;
+            SaveUnrealSyncSettingsFromUi();
+            RefreshUnrealSyncStatus();
+        }
+
+        private async void ChooseUnrealProjectButton_Click(object sender, RoutedEventArgs e)
+        {
+            var picker = new FileOpenPicker
+            {
+                SuggestedStartLocation = PickerLocationId.ComputerFolder
+            };
+            picker.FileTypeFilter.Add(".uproject");
+            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+
+            var selectedFile = await picker.PickSingleFileAsync();
+            if (selectedFile is null)
+            {
+                return;
+            }
+
+            UnrealProjectPathTextBox.Text = selectedFile.Path;
+            SaveUnrealSyncSettingsFromUi();
+            RefreshUnrealSyncStatus();
+        }
+
+        private async void ChooseUnrealContentFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            var picker = new FolderPicker
+            {
+                SuggestedStartLocation = PickerLocationId.ComputerFolder
+            };
+            picker.FileTypeFilter.Add("*");
+            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+
+            var selectedFolder = await picker.PickSingleFolderAsync();
+            if (selectedFolder is null)
+            {
+                return;
+            }
+
+            UnrealContentFolderTextBox.Text = selectedFolder.Path;
+            SaveUnrealSyncSettingsFromUi();
+            RefreshUnrealSyncStatus();
+        }
+
+        private void UnrealSyncProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isLoadingUnrealSyncProjects)
+            {
+                return;
+            }
+
+            SaveUnrealSyncSettingsFromUi();
+            RefreshUnrealSyncStatus();
+        }
+
+        private async void CheckUnrealSyncButton_Click(object sender, RoutedEventArgs e)
+        {
+            SaveUnrealSyncSettingsFromUi();
+            var validation = ValidateUnrealSync(useUiValues: true);
+            ApplyUnrealSyncValidation(validation);
+            if (!validation.CanSync || validation.Context is null)
+            {
+                AppendLog(LogKind.User, "已重新检测虚幻同步台关联状态。");
+                return;
+            }
+
+            var checkButton = sender as Button;
+            if (checkButton is not null)
+            {
+                checkButton.IsEnabled = false;
+            }
+            SetUnrealSyncProgress(true, "正在检测虚幻同步差异... 5%", false, 5);
+            UnrealSyncSummaryText.Text = "正在比较工具箱源文件与虚幻项目内的 .uasset 时间戳。";
+            try
+            {
+                var changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context));
+                ApplyUnrealSyncChangePlan(changePlan);
+                AppendUnrealSyncDiffDetails(changePlan);
+                SetUnrealSyncStatus(
+                    changePlan.HasChanges ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                    changePlan.HasChanges ? "检测到同步差异" : "没有同步差异",
+                    changePlan.HasChanges ? "差异文件已列在下方。" : "工具箱项目、素材库和虚幻目标目录已经一致。");
+                SetUnrealSyncProgress(false, string.Empty);
+                AppendLog(LogKind.User, $"已重新检测虚幻同步差异：{changePlan.TotalChangedItems} 项。");
+            }
+            catch (Exception ex)
+            {
+                SetUnrealSyncProgress(false, string.Empty);
+                SetUnrealSyncStatus(InfoBarSeverity.Error, "检测差异失败", ex.Message);
+                UnrealSyncSummaryText.Text = $"检测差异失败：{ex.Message}";
+                AppendLog(LogKind.Error, "重新检测虚幻同步差异失败。", ex);
+            }
+            finally
+            {
+                if (checkButton is not null)
+                {
+                    checkButton.IsEnabled = true;
+                }
+            }
+        }
+
+        private void RunFullUnrealSyncButton_Click(object sender, RoutedEventArgs e)
+        {
+            _runFullUnrealSyncRequested = true;
+            RunUnrealSyncButton_Click(sender, e);
+        }
+
+        private async void RunUnrealSyncButton_Click(object sender, RoutedEventArgs e)
+        {
+            SaveUnrealSyncSettingsFromUi();
+            var forceFullSync = _runFullUnrealSyncRequested;
+            _runFullUnrealSyncRequested = false;
+            var validation = ValidateUnrealSync(useUiValues: true);
+            ApplyUnrealSyncValidation(validation);
+            if (!validation.CanSync || validation.Context is null)
+            {
+                return;
+            }
+
+            RunUnrealSyncButton.IsEnabled = false;
+            SetUnrealSyncProgress(true, "正在检测虚幻同步差异... 5%", false, 5);
+            UnrealSyncSummaryText.Text = forceFullSync
+                ? "正在准备全量重新同步，将忽略本地缓存和 .uasset 时间戳。"
+                : "正在比较工具箱源文件与虚幻项目内的 .uasset 时间戳；文件名不变但内容重新导出时，也会因源文件写入时间更新而进入同步计划。";
+            var changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context, forceFullSync));
+            ApplyUnrealSyncChangePlan(changePlan);
+            if (!changePlan.HasChanges)
+            {
+                SetUnrealSyncProgress(false, string.Empty);
+                SetUnrealSyncStatus(InfoBarSeverity.Informational, "无需同步", "没有检测到素材、CSV 或立绘数据资产变动，本次不会启动虚幻同步。");
+                UnrealSyncSummaryText.Text = changePlan.Summary;
+                RunUnrealSyncButton.IsEnabled = true;
+                return;
+            }
+
+            SetUnrealSyncProgress(true, "差异检测完成，等待确认备份... 10%", false, 10);
+            var runningUnrealChoice = await ShowRunningUnrealEditorDialogAsync();
+            if (runningUnrealChoice is null)
+            {
+                SetUnrealSyncProgress(false, string.Empty);
+                RunUnrealSyncButton.IsEnabled = true;
+                return;
+            }
+
+            if (runningUnrealChoice == true)
+            {
+                SetUnrealSyncProgress(true, "正在尝试关闭已打开的 Unreal Editor... 12%", false, 12);
+                await Task.Run(CloseRunningUnrealEditors);
+                await Task.Delay(1200);
+            }
+
+            var backupChoice = await ShowUnrealBackupDialogAsync(validation.Context);
+            if (backupChoice is null)
+            {
+                SetUnrealSyncProgress(false, string.Empty);
+                RunUnrealSyncButton.IsEnabled = true;
+                return;
+            }
+
+            SetUnrealSyncStatus(InfoBarSeverity.Informational, "正在同步", "正在生成导入清单并调用 Unreal Editor，请等待引擎完成资源导入。");
+            try
+            {
+                var cancellationToken = GetGlobalProgressCancellationToken();
+                string? backupPath = null;
+                if (backupChoice == true)
+                {
+                    SetUnrealSyncProgress(true, "正在备份虚幻项目... 20%", false, 20);
+                    backupPath = await Task.Run(() => CreateCleanUnrealProjectBackup(validation.Context, cancellationToken), cancellationToken);
+                    SetUnrealSyncProgress(true, "虚幻项目备份完成... 30%", false, 30);
+                    AppendLog(LogKind.User, $"虚幻项目备份完成：{backupPath}");
+                }
+
+                var progress = new Progress<UnrealSyncProgressUpdate>(update =>
+                    SetUnrealSyncProgress(true, $"{update.Message} {update.Percent:0}%", false, update.Percent));
+                var result = await Task.Run(() => RunUnrealSync(validation.Context, changePlan, progress, cancellationToken), cancellationToken);
+                SetUnrealSyncStatus(
+                    result.ExitCode == 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                    result.ExitCode == 0 ? "同步完成" : "同步命令已结束",
+                    $"退出码 {result.ExitCode}。脚本：{result.ScriptPath}");
+                var backupSummary = backupPath is null ? string.Empty : $"备份：{backupPath}\n";
+                UnrealSyncSummaryText.Text = result.Output.Length == 0
+                    ? $"{backupSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}"
+                    : $"{backupSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}\n{TrimLongText(result.Output, 900)}";
+                var lustrationConfirmed = !changePlan.LustrationChanged ||
+                    result.Output.Contains("GalExcleTools updated lustration data asset", StringComparison.OrdinalIgnoreCase);
+                var portraitsConfirmed = !changePlan.PortraitsChanged ||
+                    result.Output.Contains("GalExcleTools updated portrait data asset", StringComparison.OrdinalIgnoreCase);
+                var storyTableFailed =
+                    result.Output.Contains("GalExcleTools failed to update story data table", StringComparison.OrdinalIgnoreCase) ||
+                    result.Output.Contains("GalExcleTools could not create or load story data table", StringComparison.OrdinalIgnoreCase) ||
+                    result.Output.Contains("GalExcleTools story row struct missing", StringComparison.OrdinalIgnoreCase) ||
+                    result.Output.Contains("GalExcleTools failed to load story row struct", StringComparison.OrdinalIgnoreCase);
+                var assetIndexTableFailed =
+                    result.Output.Contains("GalExcleTools failed to update asset index data table", StringComparison.OrdinalIgnoreCase) ||
+                    result.Output.Contains("GalExcleTools could not create or load asset index data table", StringComparison.OrdinalIgnoreCase);
+                if (result.ExitCode == 0 && lustrationConfirmed && portraitsConfirmed && !assetIndexTableFailed)
+                {
+                    _unrealSyncService.WriteState(validation.Context, changePlan);
+                    SetUnrealSyncProgress(true, "同步完成 100%", false, 100);
+                    CompleteGlobalProgress("虚幻同步完成", $"处理 {changePlan.TotalChangedItems} 项，退出码 {result.ExitCode}");
+                    if (storyTableFailed)
+                    {
+                        SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步完成，但剧情表未确认", "Unreal 日志提示 StoryStruct 或 DataTable 写入失败，请查看下方日志输出。");
+                    }
+                }
+                else if (result.ExitCode == 0 && assetIndexTableFailed)
+                {
+                    SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步结束，但素材索引表未确认", "Unreal 日志提示素材索引 DataTable 写入失败，请检查 FTexture2DTable / FWaveTable 结构体路径和表格资产。");
+                }
+                else if (result.ExitCode == 0 && changePlan.LustrationChanged)
+                {
+                    SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步结束，但立绘数据未确认", "Unreal 日志没有返回立绘数据资产写入确认。本次不会缓存为已同步，请关闭虚幻编辑器后再同步一次。");
+                }
+                else if (result.ExitCode == 0 && changePlan.PortraitsChanged)
+                {
+                    SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步结束，但小预览数据未确认", "Unreal 日志没有返回 DA_Portraits 写入确认。本次不会缓存为已同步，请关闭虚幻编辑器后再同步一次。");
+                }
+
+                AppendLog(result.ExitCode == 0 ? LogKind.User : LogKind.Warning, $"虚幻同步结束，退出码：{result.ExitCode}");
+                NotifyUnrealSyncFinishedIfInactive(result, changePlan);
+                await ShowUnrealSyncFinishedDialogAsync(validation.Context, result, changePlan);
+            }
+            catch (OperationCanceledException)
+            {
+                CompleteGlobalProgress("虚幻同步已取消", "已停止当前同步步骤；如果 Unreal 命令进程已经启动，工具箱会尝试一并终止。");
+                SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步已取消", "本次虚幻同步没有完成。已写入的临时清单或 Unreal 侧中途导入结果可能会保留。");
+                AppendLog(LogKind.Warning, "虚幻同步已取消。");
+            }
+            catch (Exception ex)
+            {
+                CompleteGlobalProgress("虚幻同步失败", ex.Message);
+                SetUnrealSyncStatus(InfoBarSeverity.Error, "同步失败", ex.Message);
+                AppendLog(LogKind.Error, "虚幻同步失败。", ex);
+            }
+            finally
+            {
+                await HideGlobalProgressAfterDelayAsync();
+                RunUnrealSyncButton.IsEnabled = true;
+                RefreshWorkbenchUnrealSyncTip();
+            }
+        }
+
+        private void SaveUnrealSyncSettingsFromUi()
+        {
+            if (UnrealEnginePathTextBox is null)
+            {
+                return;
+            }
+
+            var enginePath = UnrealEnginePathTextBox.Text.Trim();
+            var unrealProjectPath = UnrealProjectPathTextBox.Text.Trim();
+            var contentFolderPath = UnrealContentFolderTextBox.Text.Trim();
+            var selectedProject = GetSelectedUnrealSyncProject();
+            _appSettings.UnrealToolProjectFolderName = selectedProject?.FolderName ?? (UnrealSyncProjectComboBox.SelectedItem as ComboBoxItem)?.Tag as string;
+            _appSettings.UnrealEnginePath = enginePath;
+            _appSettings.UnrealProjectPath = unrealProjectPath;
+            _appSettings.UnrealContentFolderPath = contentFolderPath;
+            SaveAppSettings();
+
+            if (selectedProject is not null)
+            {
+                _projectWorkspaceService.SaveProjectUnrealBinding(selectedProject, enginePath, unrealProjectPath, contentFolderPath);
+                LoadUnrealSyncProjectOptions();
+            }
+        }
+
+        private void RefreshUnrealSyncStatus()
+        {
+            var validation = ValidateUnrealSync(useUiValues: true);
+            ApplyUnrealSyncValidation(validation);
+        }
+
+        private void RefreshWorkbenchUnrealSyncTip()
+        {
+            if (UnrealSyncWorkbenchTipInfoBar is null)
+            {
+                return;
+            }
+
+            UnrealSyncWorkbenchTipInfoBar.IsOpen = false;
+        }
+
+        private void ApplyUnrealSyncValidation(UnrealSyncValidation validation)
+        {
+            SetUnrealSyncStatus(validation.Severity, validation.Title, validation.Message);
+            UnrealSyncPlanItemsControl.Items.Clear();
+            foreach (var item in validation.PlanItems)
+            {
+                UnrealSyncPlanItemsControl.Items.Add(new TextBlock
+                {
+                    Text = $"• {item}",
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 0, 0, 4),
+                    Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
+                });
+            }
+
+            UnrealSyncSummaryText.Text = validation.Summary;
+            RunUnrealSyncButton.IsEnabled = validation.CanSync;
+        }
+
+        private void SetUnrealSyncStatus(InfoBarSeverity severity, string title, string message)
+        {
+            UnrealSyncStatusInfoBar.IsOpen = true;
+            UnrealSyncStatusInfoBar.Severity = severity;
+            UnrealSyncStatusInfoBar.Title = title;
+            UnrealSyncStatusInfoBar.Message = message;
+        }
+
+        private void SetUnrealSyncProgress(bool isVisible, string message, bool isIndeterminate = true, double value = 0)
+        {
+            UnrealSyncProgressPanel.Visibility = Visibility.Collapsed;
+            UnrealSyncProgressBar.IsIndeterminate = false;
+            UnrealSyncProgressBar.Value = 0;
+            UnrealSyncProgressText.Text = string.Empty;
+            if (isVisible)
+            {
+                if (!_isGlobalProgressVisible)
+                {
+                    ShowGlobalProgress("虚幻同步", message);
+                }
+
+                UpdateGlobalProgress(message, value, "正在同步工具箱项目、素材库和 Unreal 目标目录。", isIndeterminate);
+            }
+            else if (_isGlobalProgressVisible && string.Equals(_globalProgressOperationTitle, "虚幻同步", StringComparison.Ordinal))
+            {
+                HideGlobalProgress();
+            }
+        }
+
+        private void NotifyUnrealSyncFinishedIfInactive(UnrealSyncResult result, UnrealSyncChangePlan changePlan)
+        {
+            if (_isWindowActive)
+            {
+                return;
+            }
+
+            try
+            {
+                var manager = AppNotificationManager.Default;
+                manager.Register();
+
+                var title = result.ExitCode == 0 ? "虚幻同步完成" : "虚幻同步结束";
+                var status = result.ExitCode == 0 ? "同步成功" : $"退出码 {result.ExitCode}";
+                var body = $"{status}，处理 {changePlan.TotalChangedItems} 项。";
+                var notification = new AppNotificationBuilder()
+                    .AddText(title)
+                    .AddText(body)
+                    .BuildNotification();
+                notification.Tag = "UnrealSync";
+                notification.Group = "GalExcleTools";
+                manager.Show(notification);
+            }
+            catch (Exception ex)
+            {
+                AppendLog(LogKind.Warning, $"虚幻同步完成通知发送失败：{ex.Message}");
+            }
+        }
+
+        private void ApplyUnrealSyncChangePlan(UnrealSyncChangePlan changePlan)
+        {
+            UnrealSyncPlanItemsControl.Items.Clear();
+            foreach (var item in changePlan.PlanItems)
+            {
+                AddUnrealSyncPlanText($"• {item}");
+            }
+
+            UnrealSyncSummaryText.Text = changePlan.Summary;
+        }
+
+        private void AppendUnrealSyncDiffDetails(UnrealSyncChangePlan changePlan)
+        {
+            if (!changePlan.HasChanges)
+            {
+                return;
+            }
+
+            foreach (var group in changePlan.ImportGroups)
+            {
+                AddUnrealSyncPlanText($"[{group.Destination}] 待导入文件", topMargin: 8);
+                foreach (var path in group.Files)
+                {
+                    AddUnrealSyncPlanText($"  - {Path.GetFileName(path)}");
+                }
+            }
+
+            foreach (var group in changePlan.DeleteGroups)
+            {
+                AddUnrealSyncPlanText($"[{group.Destination}] 待删除多余资产", topMargin: 8);
+                foreach (var assetPath in group.Assets)
+                {
+                    AddUnrealSyncPlanText($"  - {assetPath}");
+                }
+            }
+
+            if (changePlan.StoryTables.Count > 0)
+            {
+                AddUnrealSyncPlanText("[ExcelTexts] 待更新剧情表", topMargin: 8);
+                foreach (var entry in changePlan.StoryTables)
+                {
+                    AddUnrealSyncPlanText($"  - {Path.GetFileName(entry.CsvPath)} -> {entry.TableAsset}");
+                }
+            }
+
+            if (changePlan.AssetIndexTables.Count > 0)
+            {
+                AddUnrealSyncPlanText("[ExcelTexts] 待更新素材索引表", topMargin: 8);
+                foreach (var entry in changePlan.AssetIndexTables)
+                {
+                    AddUnrealSyncPlanText($"  - {Path.GetFileName(entry.CsvPath)} -> {entry.TableAsset}");
+                }
+            }
+
+            if (changePlan.LustrationChanged)
+            {
+                AddUnrealSyncPlanText("[Lustration] 待更新立绘数据资产", topMargin: 8);
+                foreach (var row in changePlan.LustrationRows)
+                {
+                    AddUnrealSyncPlanText($"  - {row.Key} / {row.Name}");
+                }
+            }
+
+            if (changePlan.PortraitsChanged)
+            {
+                AddUnrealSyncPlanText("[Lustration] 待更新小预览数据资产", topMargin: 8);
+                foreach (var row in changePlan.PortraitRows)
+                {
+                    AddUnrealSyncPlanText($"  - {row.Key} / {row.Name}");
+                }
+            }
+        }
+
+        private void AddUnrealSyncPlanText(string text, double topMargin = 0)
+        {
+            UnrealSyncPlanItemsControl.Items.Add(new TextBlock
+            {
+                Text = text,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, topMargin, 0, 4),
+                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
+            });
+        }
+
+    }
+}

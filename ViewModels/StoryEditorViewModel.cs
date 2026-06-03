@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace GalExcleTools.ViewModels;
 
@@ -31,6 +32,17 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private bool _hasCurrentFunction;
     private bool _hasMultipleCurrentFunctions;
     private bool _hasCurrentChoices;
+    private StoryCharacterSlotClipboard? _characterSlotClipboard;
+    private StoryAssetClipboard? _assetClipboard;
+    private string? _backgroundPreviewKey;
+    private int _backgroundTransitionMode;
+    private bool _bgmPlaybackSuppressed;
+    private string? _bgmPath;
+    private string? _scenePath;
+    private int _bgmPlaybackRequestId;
+    private int _scenePlaybackRequestId;
+    private int? _hoveredCharacterSlotIndex;
+    private string? _hoveredAssetFieldName;
 
     public StoryEditorViewModel()
     {
@@ -57,6 +69,10 @@ internal sealed class StoryEditorViewModel : ObservableObject
     public Dictionary<string, int> RowSections { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public List<StoryEditorUndoState> UndoStack { get; } = [];
+
+    public Dictionary<string, BitmapImage> PreviewImageCache { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Dictionary<int, string> CharacterPreviewKeys { get; } = [];
 
     public RelayCommand UndoCommand { get; private set; }
 
@@ -270,6 +286,72 @@ internal sealed class StoryEditorViewModel : ObservableObject
                 ViewChoicesCommand.NotifyCanExecuteChanged();
             }
         }
+    }
+
+    public StoryCharacterSlotClipboard? CharacterSlotClipboard
+    {
+        get => _characterSlotClipboard;
+        set => SetProperty(ref _characterSlotClipboard, value);
+    }
+
+    public StoryAssetClipboard? AssetClipboard
+    {
+        get => _assetClipboard;
+        set => SetProperty(ref _assetClipboard, value);
+    }
+
+    public string? BackgroundPreviewKey
+    {
+        get => _backgroundPreviewKey;
+        set => SetProperty(ref _backgroundPreviewKey, value);
+    }
+
+    public int BackgroundTransitionMode
+    {
+        get => _backgroundTransitionMode;
+        set => SetProperty(ref _backgroundTransitionMode, value);
+    }
+
+    public bool BgmPlaybackSuppressed
+    {
+        get => _bgmPlaybackSuppressed;
+        set => SetProperty(ref _bgmPlaybackSuppressed, value);
+    }
+
+    public string? BgmPath
+    {
+        get => _bgmPath;
+        set => SetProperty(ref _bgmPath, value);
+    }
+
+    public string? ScenePath
+    {
+        get => _scenePath;
+        set => SetProperty(ref _scenePath, value);
+    }
+
+    public int BgmPlaybackRequestId
+    {
+        get => _bgmPlaybackRequestId;
+        set => SetProperty(ref _bgmPlaybackRequestId, value);
+    }
+
+    public int ScenePlaybackRequestId
+    {
+        get => _scenePlaybackRequestId;
+        set => SetProperty(ref _scenePlaybackRequestId, value);
+    }
+
+    public int? HoveredCharacterSlotIndex
+    {
+        get => _hoveredCharacterSlotIndex;
+        set => SetProperty(ref _hoveredCharacterSlotIndex, value);
+    }
+
+    public string? HoveredAssetFieldName
+    {
+        get => _hoveredAssetFieldName;
+        set => SetProperty(ref _hoveredAssetFieldName, value);
     }
 
     public void RefreshCollectionState()

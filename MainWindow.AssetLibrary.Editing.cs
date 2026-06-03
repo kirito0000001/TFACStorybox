@@ -1,0 +1,758 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using GalExcleTools.Services;
+using GalExcleTools.ViewModels;
+using GalExcleTools.Views;
+using static GalExcleTools.Services.ColorUtility;
+using static GalExcleTools.Services.FileSystemUtility;
+using static GalExcleTools.Services.TextUtility;
+using static GalExcleTools.Services.WorkspacePathUtility;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
+using Microsoft.Windows.AppNotifications;
+using Microsoft.Windows.AppNotifications.Builder;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.Graphics;
+using Windows.Graphics.Imaging;
+using Windows.Media.Core;
+using Windows.Media.Playback;
+using Windows.Storage;
+using Windows.Storage.Pickers;
+using Windows.Storage.Streams;
+using WinRT.Interop;
+
+namespace GalExcleTools
+{
+    public sealed partial class MainWindow
+    {
+        private async Task<string?> SetBackgroundImageRemarkAsync(string imagePath)
+        {
+            if (_currentAssetLibrary is null || !File.Exists(imagePath))
+            {
+                return null;
+            }
+
+            var parsed = BackgroundImageService.ParseFileName(imagePath);
+            var remarkInput = await _dialogService.PromptTextAsync(new TextInputDialogRequest(
+                "设置背景图备注",
+                "备注",
+                parsed.Remark,
+                "例如：我是备注"));
+            if (remarkInput is null)
+            {
+                return null;
+            }
+
+            var folderPath = GetBackgroundFolderPath(_currentAssetLibrary);
+            string? updatedPath;
+            _isNormalizingBackgroundImages = true;
+            try
+            {
+                updatedPath = _backgroundImageService.UpdateRemark(folderPath, imagePath, remarkInput);
+            }
+            finally
+            {
+                _isNormalizingBackgroundImages = false;
+            }
+
+            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            RefreshBackgroundImageCards(_currentAssetLibrary);
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已设置背景图备注：{Path.GetFileName(imagePath)}");
+            return updatedPath;
+        }
+
+        private async Task<bool> DeleteBackgroundImageAsync(string imagePath)
+        {
+            if (_currentAssetLibrary is null || !File.Exists(imagePath))
+            {
+                return false;
+            }
+
+            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                "删除背景图",
+                $"确定删除 {Path.GetFileName(imagePath)} 吗？",
+                "删除",
+                "取消",
+                PrimaryButtonStyle: CreateDestructivePrimaryButtonStyle()));
+            if (!confirmed)
+            {
+                return false;
+            }
+
+            _isNormalizingBackgroundImages = true;
+            try
+            {
+                _backgroundImageService.DeleteAndNormalize(GetBackgroundFolderPath(_currentAssetLibrary), imagePath);
+            }
+            finally
+            {
+                _isNormalizingBackgroundImages = false;
+            }
+
+            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            RefreshBackgroundImageCards(_currentAssetLibrary);
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已删除背景图：{Path.GetFileName(imagePath)}");
+            return true;
+        }
+
+        private async Task<bool> ReplaceBackgroundImageAsync(string imagePath)
+        {
+            if (_currentAssetLibrary is null || !File.Exists(imagePath))
+            {
+                return false;
+            }
+
+            var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+            if (sourcePath is null)
+            {
+                return false;
+            }
+
+            if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+            {
+                AppendLog(LogKind.Warning, $"替换背景图失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                return false;
+            }
+
+            _isNormalizingBackgroundImages = true;
+            try
+            {
+                await ImportBackgroundImageAsPngAsync(sourcePath, imagePath);
+            }
+            finally
+            {
+                _isNormalizingBackgroundImages = false;
+            }
+
+            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            RefreshBackgroundImageCards(_currentAssetLibrary);
+            RequestDelayedRefresh();
+            if (_viewingBackgroundImagePath is not null && PathsEqual(_viewingBackgroundImagePath, imagePath))
+            {
+                await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, imagePath);
+            }
+
+            AppendLog(LogKind.User, $"已替换背景图素材：{Path.GetFileName(imagePath)} <- {Path.GetFileName(sourcePath)}");
+            return true;
+        }
+
+        private async Task<string?> PromptRemarkAsync(string title, string currentRemark, string placeholderText)
+        {
+            return await _dialogService.PromptTextAsync(new TextInputDialogRequest(
+                title,
+                "备注",
+                currentRemark,
+                placeholderText));
+        }
+
+        private async Task<bool> ConfirmDeleteAsync(string title, string message)
+        {
+            return await _dialogService.ConfirmAsync(new DialogRequest(
+                title,
+                message,
+                "删除",
+                "取消",
+                PrimaryButtonStyle: CreateDestructivePrimaryButtonStyle()));
+        }
+
+        private async Task<string?> SetCharacterClothRemarkAsync(string clothPath)
+        {
+            if (_currentCharacter is null || !File.Exists(clothPath))
+            {
+                return null;
+            }
+
+            var restoreHorizontalOffset = CharacterDetailScrollViewer.HorizontalOffset;
+            var restoreVerticalOffset = CharacterDetailScrollViewer.VerticalOffset;
+            var parsed = CharacterLayerAssetService.ParseFileName(clothPath, CharacterLayerKind.Cloth, string.Empty);
+            var remark = await PromptRemarkAsync("设置服装备注", parsed.Remark, "例如：校服");
+            if (remark is null)
+            {
+                return null;
+            }
+
+            var clothFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Cloth);
+            var updatedEntries = _characterLayerAssetService.CreateRemarkEntries(
+                clothFolderPath,
+                clothPath,
+                CharacterLayerKind.Cloth,
+                string.Empty,
+                remark);
+            var updatedIndex = _characterLayerAssetService.FindEntryIndex(updatedEntries, clothPath);
+
+            _isNormalizingCharacterClothes = true;
+            try
+            {
+                _characterLayerAssetService.RenameEntries(updatedEntries, CharacterLayerKind.Cloth, _currentCharacter.Code);
+            }
+            finally
+            {
+                _isNormalizingCharacterClothes = false;
+            }
+
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
+
+            var updatedPath = updatedIndex >= 0
+                ? CharacterLayerAssetService.GetTargetPath(updatedEntries, updatedIndex, CharacterLayerKind.Cloth, _currentCharacter.Code)
+                : null;
+            ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已设置服装备注：{Path.GetFileName(clothPath)}");
+            return updatedPath;
+        }
+
+        private async Task<bool> DeleteCharacterClothAsync(string clothPath)
+        {
+            if (_currentCharacter is null || !File.Exists(clothPath))
+            {
+                return false;
+            }
+
+            var confirmed = await ConfirmDeleteAsync("删除服装", $"确定删除 {Path.GetFileName(clothPath)} 吗？");
+            if (!confirmed)
+            {
+                return false;
+            }
+
+            _isNormalizingCharacterClothes = true;
+            try
+            {
+                var entries = _characterLayerAssetService.DeleteFileAndCreateRemainingEntries(
+                    clothPath,
+                    CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Cloth),
+                    CharacterLayerKind.Cloth,
+                    string.Empty);
+                _characterLayerAssetService.RenameEntries(entries, CharacterLayerKind.Cloth, _currentCharacter.Code);
+            }
+            finally
+            {
+                _isNormalizingCharacterClothes = false;
+            }
+
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
+
+            ReloadCharacterDetailLayersPreservingScroll();
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已删除服装：{Path.GetFileName(clothPath)}");
+            return true;
+        }
+
+        private async Task<string?> SetCharacterFaceRemarkAsync(string facePath)
+        {
+            if (_currentCharacter is null || !File.Exists(facePath))
+            {
+                return null;
+            }
+
+            var restoreHorizontalOffset = CharacterDetailScrollViewer.HorizontalOffset;
+            var restoreVerticalOffset = CharacterDetailScrollViewer.VerticalOffset;
+            var parsed = CharacterLayerAssetService.ParseFileName(facePath, CharacterLayerKind.Face, string.Empty);
+            var remark = await PromptRemarkAsync("设置表情备注", parsed.Remark, "例如：微笑");
+            if (remark is null)
+            {
+                return null;
+            }
+
+            var faceFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Face);
+            var updatedEntries = _characterLayerAssetService.CreateRemarkEntries(
+                faceFolderPath,
+                facePath,
+                CharacterLayerKind.Face,
+                string.Empty,
+                remark);
+            var updatedIndex = _characterLayerAssetService.FindEntryIndex(updatedEntries, facePath);
+
+            _isNormalizingCharacterFaces = true;
+            try
+            {
+                _characterLayerAssetService.RenameEntriesAndScopeMeta(updatedEntries, CharacterLayerKind.Face);
+            }
+            finally
+            {
+                _isNormalizingCharacterFaces = false;
+            }
+
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
+
+            var updatedPath = updatedIndex >= 0
+                ? CharacterLayerAssetService.GetTargetPath(updatedEntries, updatedIndex, CharacterLayerKind.Face)
+                : null;
+            ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已设置表情备注：{Path.GetFileName(facePath)}");
+            return updatedPath;
+        }
+
+        private async Task<bool> DeleteCharacterFaceAsync(string facePath)
+        {
+            if (_currentCharacter is null || !File.Exists(facePath))
+            {
+                return false;
+            }
+
+            var confirmed = await ConfirmDeleteAsync("删除表情", $"确定删除 {Path.GetFileName(facePath)} 吗？");
+            if (!confirmed)
+            {
+                return false;
+            }
+
+            var faceFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Face);
+            _characterLayerAssetService.RemoveScopeEntry(faceFolderPath, CharacterLayerKind.Face, Path.GetFileName(facePath));
+
+            _isNormalizingCharacterFaces = true;
+            try
+            {
+                var entries = _characterLayerAssetService.DeleteFileAndCreateRemainingEntries(
+                    facePath,
+                    faceFolderPath,
+                    CharacterLayerKind.Face,
+                    string.Empty);
+                _characterLayerAssetService.RenameEntriesAndScopeMeta(entries, CharacterLayerKind.Face);
+            }
+            finally
+            {
+                _isNormalizingCharacterFaces = false;
+            }
+
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
+
+            ReloadCharacterDetailLayersPreservingScroll();
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已删除表情：{Path.GetFileName(facePath)}");
+            return true;
+        }
+
+        private async Task SetCharacterFaceAvailabilityAsync(string facePath)
+        {
+            if (_currentCharacter is null || !File.Exists(facePath))
+            {
+                return;
+            }
+
+            var faceFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Face);
+            await SetCharacterLayerAvailabilityAsync(
+                facePath,
+                faceFolderPath,
+                CharacterLayerKind.Face,
+                "表情可用范围",
+                "表情");
+        }
+
+        private async Task SetCharacterLayerAvailabilityAsync(
+            string layerPath,
+            string layerFolderPath,
+            CharacterLayerKind layerKind,
+            string title,
+            string logLabel)
+        {
+            if (_currentCharacter is null || !File.Exists(layerPath))
+            {
+                return;
+            }
+
+            var clothFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Cloth);
+            var clothPaths = CharacterLayerAssetService.GetImagePaths(clothFolderPath);
+            if (clothPaths.Count == 0)
+            {
+                AppendLog(LogKind.Warning, $"还没有服装，暂时无法设置{logLabel}可用范围。");
+                return;
+            }
+
+            var meta = _characterLayerAssetService.ReadScopeMeta(layerFolderPath, layerKind);
+            var layerFileName = Path.GetFileName(layerPath);
+            var existingEntry = meta.Entries.TryGetValue(layerFileName, out var savedEntry)
+                ? savedEntry
+                : new CharacterLayerScopeEntry { UseAllCostumes = true };
+            var dialogContent = CharacterDialogContentFactory.CreateCharacterLayerAvailabilityContent(
+                clothPaths,
+                existingEntry,
+                ComputeFileHash,
+                clothPath => ThumbnailFactory.CreateThumbnail(clothPath, 120, 150, showAddIcon: false),
+                PlaySelectionSound);
+
+            var result = await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                title,
+                dialogContent.Content,
+                "确定",
+                "取消"));
+            if (result != DialogResultKind.Primary)
+            {
+                return;
+            }
+
+            var checkedHashes = dialogContent.ReadCheckedHashes();
+            _characterLayerAssetService.SaveScopeEntry(layerFolderPath, layerKind, layerFileName, new CharacterLayerScopeEntry
+            {
+                UseAllCostumes = checkedHashes.Count == clothPaths.Count,
+                CostumeHashes = checkedHashes.Count == clothPaths.Count ? [] : checkedHashes
+            });
+            await UpdateCharacterLayerPreviewAsync();
+            AppendLog(LogKind.User, $"已设置{logLabel}可用范围：{layerFileName}");
+        }
+
+        private async Task<string?> SetCharacterAdornRemarkAsync(string adornPath)
+        {
+            if (_currentCharacter is null || !File.Exists(adornPath))
+            {
+                return null;
+            }
+
+            var restoreHorizontalOffset = CharacterDetailScrollViewer.HorizontalOffset;
+            var restoreVerticalOffset = CharacterDetailScrollViewer.VerticalOffset;
+            var parsed = CharacterLayerAssetService.ParseFileName(adornPath, CharacterLayerKind.Adorn, string.Empty);
+            var remark = await PromptRemarkAsync("设置装饰备注", parsed.Remark, "例如：帽子");
+            if (remark is null)
+            {
+                return null;
+            }
+
+            var adornFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Adorn);
+            var updatedEntries = _characterLayerAssetService.CreateRemarkEntries(
+                adornFolderPath,
+                adornPath,
+                CharacterLayerKind.Adorn,
+                string.Empty,
+                remark);
+            var updatedIndex = _characterLayerAssetService.FindEntryIndex(updatedEntries, adornPath);
+
+            _isNormalizingCharacterAdorns = true;
+            try
+            {
+                _characterLayerAssetService.RenameEntriesAndScopeMeta(updatedEntries, CharacterLayerKind.Adorn);
+            }
+            finally
+            {
+                _isNormalizingCharacterAdorns = false;
+            }
+
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
+
+            var updatedPath = updatedIndex >= 0
+                ? CharacterLayerAssetService.GetTargetPath(updatedEntries, updatedIndex, CharacterLayerKind.Adorn)
+                : null;
+            ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已设置装饰备注：{Path.GetFileName(adornPath)}");
+            return updatedPath;
+        }
+
+        private async Task<bool> DeleteCharacterAdornAsync(string adornPath)
+        {
+            if (_currentCharacter is null || !File.Exists(adornPath))
+            {
+                return false;
+            }
+
+            var confirmed = await ConfirmDeleteAsync("删除装饰", $"确定删除 {Path.GetFileName(adornPath)} 吗？");
+            if (!confirmed)
+            {
+                return false;
+            }
+
+            var adornFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Adorn);
+            _characterLayerAssetService.RemoveScopeEntry(adornFolderPath, CharacterLayerKind.Adorn, Path.GetFileName(adornPath));
+
+            _isNormalizingCharacterAdorns = true;
+            try
+            {
+                var entries = _characterLayerAssetService.DeleteFileAndCreateRemainingEntries(
+                    adornPath,
+                    adornFolderPath,
+                    CharacterLayerKind.Adorn,
+                    string.Empty);
+                _characterLayerAssetService.RenameEntriesAndScopeMeta(entries, CharacterLayerKind.Adorn);
+            }
+            finally
+            {
+                _isNormalizingCharacterAdorns = false;
+            }
+
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
+
+            ReloadCharacterDetailLayersPreservingScroll();
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已删除装饰：{Path.GetFileName(adornPath)}");
+            return true;
+        }
+
+        private async Task<bool> ReplaceCharacterLayerAsync(CharacterLayerKind layerKind, string layerPath)
+        {
+            if (_currentCharacter is null || !File.Exists(layerPath))
+            {
+                return false;
+            }
+
+            var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+            if (sourcePath is null)
+            {
+                return false;
+            }
+
+            if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+            {
+                AppendLog(LogKind.Warning, $"替换{GetCharacterLayerDisplayName(layerKind)}失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                return false;
+            }
+
+            var restoreHorizontalOffset = CharacterDetailScrollViewer.HorizontalOffset;
+            var restoreVerticalOffset = CharacterDetailScrollViewer.VerticalOffset;
+            File.Copy(sourcePath, layerPath, overwrite: true);
+
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
+
+            SetSelectedCharacterLayer(layerKind, layerPath);
+            ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
+            await UpdateCharacterLayerPreviewAsync();
+            RequestDelayedRefresh();
+
+            if (_viewingCharacterLayer is { } viewingLayer &&
+                viewingLayer.Kind == layerKind &&
+                PathsEqual(viewingLayer.Path, layerPath))
+            {
+                await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, layerPath);
+            }
+
+            if (_isViewingCharacterComposite)
+            {
+                await LoadCharacterCompositeViewerImagesAsync();
+            }
+
+            AppendLog(LogKind.User, $"已替换{GetCharacterLayerDisplayName(layerKind)}素材：{Path.GetFileName(layerPath)} <- {Path.GetFileName(sourcePath)}");
+            return true;
+        }
+
+        private async Task SetCharacterPortraitPreviewAsync(CharacterLayerKind layerKind, string layerPath)
+        {
+            if (_currentCharacter is null || !File.Exists(layerPath))
+            {
+                return;
+            }
+
+            var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+            if (sourcePath is null)
+            {
+                return;
+            }
+
+            if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+            {
+                AppendLog(LogKind.Warning, $"设置{GetCharacterLayerDisplayName(layerKind)}小预览失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                return;
+            }
+
+            _characterLayerAssetService.SetPortraitPreview(_currentCharacter, Path.GetFileName(layerPath), sourcePath);
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
+
+            CharacterDetailInfoBar.Severity = InfoBarSeverity.Success;
+            CharacterDetailInfoBar.Title = "已设置小预览";
+            CharacterDetailInfoBar.Message = $"{Path.GetFileNameWithoutExtension(layerPath)} <- {Path.GetFileName(sourcePath)}";
+            CharacterDetailInfoBar.IsOpen = true;
+            ReloadCharacterDetailLayersPreservingScroll();
+            if (_currentAssetLibrary is not null)
+            {
+                LoadCharacters(_currentAssetLibrary);
+            }
+
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已设置{GetCharacterLayerDisplayName(layerKind)}小预览：{Path.GetFileName(layerPath)} <- {Path.GetFileName(sourcePath)}");
+        }
+
+        private async Task SetCharacterAdornAvailabilityAsync(string adornPath)
+        {
+            if (_currentCharacter is null || !File.Exists(adornPath))
+            {
+                return;
+            }
+
+            var adornFolderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, CharacterLayerKind.Adorn);
+            await SetCharacterLayerAvailabilityAsync(
+                adornPath,
+                adornFolderPath,
+                CharacterLayerKind.Adorn,
+                "装饰可用范围",
+                "装饰");
+        }
+
+        private async Task<string?> SetMusicRemarkAsync(string musicPath)
+        {
+            return await SetAudioRemarkAsync(AudioAssetKind.Music, musicPath);
+        }
+
+        private async Task<string?> SetAudioRemarkAsync(AudioAssetKind kind, string musicPath)
+        {
+            if (_currentAssetLibrary is null || !File.Exists(musicPath))
+            {
+                return null;
+            }
+
+            var parsed = AudioAssetService.ParseFileName(kind, musicPath);
+            var remarkInput = await _dialogService.PromptTextAsync(new TextInputDialogRequest(
+                $"设置{AudioAssetService.GetDisplayName(kind)}备注",
+                "备注",
+                parsed.Remark,
+                kind == AudioAssetKind.Music ? "例如：主题曲" : "例如：雨声"));
+            if (remarkInput is null)
+            {
+                return null;
+            }
+
+            var folderPath = GetAudioFolderPath(_currentAssetLibrary, kind);
+            string? renamedPath;
+            SetAudioNormalizing(kind, true);
+            try
+            {
+                renamedPath = _audioAssetService.UpdateRemark(kind, folderPath, musicPath, remarkInput);
+            }
+            finally
+            {
+                SetAudioNormalizing(kind, false);
+            }
+
+            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            RefreshAudioCards(_currentAssetLibrary, kind);
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已设置{AudioAssetService.GetDisplayName(kind)}备注：{Path.GetFileName(musicPath)}");
+            return renamedPath;
+        }
+
+        private async Task<bool> DeleteMusicAsync(string musicPath)
+        {
+            return await DeleteAudioAsync(AudioAssetKind.Music, musicPath);
+        }
+
+        private async Task<bool> DeleteAudioAsync(AudioAssetKind kind, string musicPath)
+        {
+            if (_currentAssetLibrary is null || !File.Exists(musicPath))
+            {
+                return false;
+            }
+
+            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                $"删除{AudioAssetService.GetDisplayName(kind)}",
+                $"确定删除 {Path.GetFileName(musicPath)} 吗？",
+                "删除",
+                "取消",
+                PrimaryButtonStyle: CreateDestructivePrimaryButtonStyle()));
+            if (!confirmed)
+            {
+                return false;
+            }
+
+            SetAudioNormalizing(kind, true);
+            try
+            {
+                _audioAssetService.DeleteAndNormalize(kind, GetAudioFolderPath(_currentAssetLibrary, kind), musicPath);
+            }
+            finally
+            {
+                SetAudioNormalizing(kind, false);
+            }
+
+            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            RefreshAudioCards(_currentAssetLibrary, kind);
+            RequestDelayedRefresh();
+            AppendLog(LogKind.User, $"已删除{AudioAssetService.GetDisplayName(kind)}：{Path.GetFileName(musicPath)}");
+            return true;
+        }
+
+        private async Task<bool> ReplaceAudioAsync(AudioAssetKind kind, string musicPath)
+        {
+            if (_currentAssetLibrary is null || !File.Exists(musicPath))
+            {
+                return false;
+            }
+
+            var sourcePath = await PickReplacementFileAsync(AudioAssetService.Extensions, PickerLocationId.MusicLibrary);
+            if (sourcePath is null)
+            {
+                return false;
+            }
+
+            if (!AudioAssetService.IsValidAudioPath(sourcePath))
+            {
+                AppendLog(LogKind.Warning, $"替换{AudioAssetService.GetDisplayName(kind)}失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                return false;
+            }
+
+            SetAudioNormalizing(kind, true);
+            try
+            {
+                File.Copy(sourcePath, musicPath, overwrite: true);
+                AudioAssetService.DeleteIgnoredSidecarFiles(kind, GetAudioFolderPath(_currentAssetLibrary, kind));
+            }
+            finally
+            {
+                SetAudioNormalizing(kind, false);
+            }
+
+            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            RefreshAudioCards(_currentAssetLibrary, kind);
+            RequestDelayedRefresh();
+            if (_playingMusicPath is not null && PathsEqual(_playingMusicPath, musicPath))
+            {
+                MusicPlayerElement.MediaPlayer.Pause();
+                var file = await StorageFile.GetFileFromPathAsync(musicPath);
+                MusicPlayerElement.Source = MediaSource.CreateFromStorageFile(file);
+                MusicPlayPauseButton.Content = "播放";
+            }
+
+            AppendLog(LogKind.User, $"已替换{AudioAssetService.GetDisplayName(kind)}素材：{Path.GetFileName(musicPath)} <- {Path.GetFileName(sourcePath)}");
+            return true;
+        }
+
+        private async Task NormalizeMusicFilesAsync(string musicFolderPath, IReadOnlyList<string>? orderedPaths = null)
+        {
+            await NormalizeAudioFilesAsync(AudioAssetKind.Music, musicFolderPath, orderedPaths);
+        }
+
+        private async Task NormalizeAudioFilesAsync(AudioAssetKind kind, string musicFolderPath, IReadOnlyList<string>? orderedPaths = null)
+        {
+            _audioAssetService.NormalizeFiles(kind, musicFolderPath, orderedPaths);
+            await Task.CompletedTask;
+        }
+
+    }
+}

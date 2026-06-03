@@ -173,6 +173,56 @@ internal static class StoryFunctionService
         return $"{prefix}{existingCount + 1}";
     }
 
+    public static string BuildChapterSectionCode(string chapterCode, int editorSection)
+    {
+        return $"{StoryCsvService.RemoveChapterSectionSuffix(chapterCode)}-{Math.Max(0, editorSection - 1):00}";
+    }
+
+    public static string BuildChapterSectionChoicePrefix(string chapterCode, int editorSection, string? projectCode)
+    {
+        var chapterSectionCode = RemoveProjectCodePrefix(BuildChapterSectionCode(chapterCode, editorSection), projectCode);
+        return $"{chapterSectionCode}-Choice";
+    }
+
+    public static string BuildNextChoiceIndicator(
+        string chapterCode,
+        int editorSection,
+        string? projectCode,
+        IEnumerable<StoryRow> rows)
+    {
+        var prefix = BuildChapterSectionChoicePrefix(chapterCode, editorSection, projectCode);
+        var maxChoiceIndex = rows
+            .SelectMany(row => SplitFunctionValues(row.Get("Custom")))
+            .Select(function => TryParseChoiceFunctionIndex(function, prefix))
+            .Where(index => index > 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{maxChoiceIndex + 1}";
+    }
+
+    public static int TryParseChoiceFunctionIndex(string functionValue, string prefix)
+    {
+        if (!functionValue.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        return int.TryParse(functionValue[prefix.Length..].Trim(), out var index) ? index : 0;
+    }
+
+    public static string FormatAssetStatus(
+        string label,
+        int rawIndex,
+        IReadOnlyList<StoryAssetChoice> choices,
+        Func<int, int, int?> resolveIndex)
+    {
+        var resolvedIndex = resolveIndex(rawIndex, choices.Count);
+        return resolvedIndex is null
+            ? $"{label}：无"
+            : $"{label}：{choices[resolvedIndex.Value].Index}: {choices[resolvedIndex.Value].Name}";
+    }
+
     public static IEnumerable<string> SplitFunctionValues(string functionValue)
     {
         return string.IsNullOrWhiteSpace(functionValue)

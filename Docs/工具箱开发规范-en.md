@@ -6,7 +6,7 @@ This document is the working standard for GalExcleTools-style WinUI toolboxes. U
 
 Every toolbox follows the same ownership split:
 
-- `ApplicationViewModel`: the root ViewModel. It aggregates modules and cross-page state only. It currently owns `SettingsViewModel` and `GlobalProgressViewModel`; future modules should attach workbench, asset library, story editor, and Unreal sync ViewModels here.
+- `ApplicationViewModel`: the root ViewModel. It aggregates modules and cross-page state only. It currently owns `SettingsViewModel`, `GlobalProgressViewModel`, `ProjectWorkbenchViewModel`, `AssetLibraryViewModel`, `StoryEditorViewModel`, and `UnrealSyncViewModel`.
 - `Models`: serialized contracts, immutable summaries, result records, progress records, and domain data. Models must not reference WinUI controls.
 - `Services`: filesystem work, JSON/CSV parsing, hashing, migration, import/export, backup, Unreal sync, image or audio processing, and other domain operations. Services may report `IProgress<T>` and accept `CancellationToken`, but they must not update controls directly.
 - `ViewModels`: screen state, validation state, commands, selected items, user-facing status text, and orchestration between services. ViewModels should inherit `ObservableObject` and expose bindable public properties.
@@ -38,7 +38,7 @@ Not allowed in `MainWindow`:
 - Duplicate helper logic already present in a service.
 - One-off dialog or progress styles that bypass shared conventions.
 
-If a new event handler exceeds a small bridge, stop and extract the work before continuing.
+If a new event handler exceeds a small bridge, stop and extract the work before continuing. Splitting into `MainWindow.*.cs` files is only the first step; do not leave business rules in window partials forever. Any path, naming, index, validation, import/export, or sync rule that can run without controls belongs in a Service.
 
 ## 3. ViewModel Rules
 
@@ -51,6 +51,7 @@ If a new event handler exceeds a small bridge, stop and extract the work before 
 - ViewModels may orchestrate Services, but the heavy work stays in Services.
 - ViewModels should accept services through constructors. Avoid constructing domain services deep inside event handlers.
 - Keep status text in ViewModels when the text reflects feature state; keep transient animation text in the global progress host.
+- `MainWindow` partials may temporarily bridge old controls, but persistent state must land in the relevant module ViewModel: workbench, asset library, story editor, Unreal sync, and settings stay separate.
 
 ## 4. Service Rules
 
@@ -148,6 +149,7 @@ After any C#, XAML, project file, resource, or packaging change:
    - For GalExcleTools: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Test-SourceHealth.ps1 -Build`
    - For a standard WinUI toolbox: `dotnet build <Project>.csproj --configuration Release --runtime win-x64 -p:Platform=x64`
 2. After the build succeeds, immediately short-start the app from the build output. This catches runtime XAML, resource, icon, title bar, and startup wiring issues.
+   - If the user asks to leave the app open after startup, keep it running after the verification start instead of closing the process for cleanup.
 3. If a packaging task is requested, run the packaging script after source health passes, then inspect the package output.
 4. Send a step-completion email notification with `C:\Users\liuyu\Documents\CodexTools\notify-step.ps1` after a meaningful step or final verification. If email credentials are unavailable, report that the notification could not be sent and continue.
 
@@ -192,7 +194,7 @@ Before marking work complete, check:
 
 ## 15. MainWindow Exit Standard
 
-GalExcleTools is now in the "framework migrated, feature pages continuing to move out" phase. Every future feature change should reduce the business surface in `MainWindow.xaml.cs`.
+GalExcleTools is now in the "root/module state migrated, window split into focused partials, business rules continuing to move down" phase. Every future feature change should reduce the business surface in `MainWindow` partials.
 
 In the final shape, `MainWindow` should contain mostly:
 

@@ -6,7 +6,7 @@
 
 所有工具箱都按同一套职责拆分：
 
-- `ApplicationViewModel`：根 ViewModel，只聚合模块和跨页面状态，不写具体业务。当前固定挂载 `SettingsViewModel`、`GlobalProgressViewModel`，后续再挂工作台、素材库、剧情编辑器、Unreal 同步等模块 ViewModel。
+- `ApplicationViewModel`：根 ViewModel，只聚合模块和跨页面状态，不写具体业务。当前固定挂载 `SettingsViewModel`、`GlobalProgressViewModel`、`ProjectWorkbenchViewModel`、`AssetLibraryViewModel`、`StoryEditorViewModel`、`UnrealSyncViewModel`。
 - `Models`：序列化数据、不可变摘要、操作结果、进度记录、领域数据。不能引用 WinUI 控件。
 - `Services`：文件系统、JSON/CSV 解析、哈希校验、目录迁移、导入导出、备份还原、Unreal 同步、图片/音频处理等领域操作。可以接收 `IProgress<T>` 和 `CancellationToken`，但不能直接更新控件。
 - `ViewModels`：页面状态、校验状态、命令、选中项、给用户看的状态文字，以及对 Service 的编排。ViewModel 继承 `ObservableObject`，公开可绑定属性。
@@ -38,7 +38,7 @@
 - 服务里已有的重复工具方法。
 - 绕过公共样式的一次性对话框或进度条。
 
-如果一个新的事件处理函数超过了“桥接”的范围，就先抽出去再继续写。
+如果一个新的事件处理函数超过了“桥接”的范围，就先抽出去再继续写。拆成 `MainWindow.*.cs` 只是第一步，不能把业务规则永远留在窗口分部；能脱离控件运行的路径、命名、索引、校验、导入、导出和同步规则必须继续下沉到 Service。
 
 ## 3. ViewModel 规则
 
@@ -51,6 +51,7 @@
 - ViewModel 可以编排 Service，但耗时和领域逻辑仍然放 Service。
 - ViewModel 通过构造函数接收 Service，不要在事件处理里临时到处 new 领域服务。
 - 如果文字反映的是功能状态，放 ViewModel；如果只是进度条动画里的瞬时文本，放全局进度条宿主。
+- 允许 `MainWindow` 分部暂时桥接旧控件，但持久状态必须优先落在对应模块 ViewModel：项目工作台、素材库、剧情编辑器、Unreal 同步、整体设置各自独立，不要把状态塞回窗口字段。
 
 ## 4. Service 规则
 
@@ -148,6 +149,7 @@
    - 剧情工具箱：`powershell -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Test-SourceHealth.ps1 -Build`
    - 普通 WinUI 工具箱：`dotnet build <Project>.csproj --configuration Release --runtime win-x64 -p:Platform=x64`
 2. 构建成功后，直接从输出目录短启动一次程序。这样能及时发现运行期 XAML、资源、图标、标题栏、启动连接问题。
+   - 如果用户要求“启动后不用关闭”，启动检查后保留程序运行，不要为了清理验证进程而关闭它。
 3. 如果任务包含打包，源码健康检查通过后再运行打包脚本，并检查打包输出。
 4. 一个有意义的步骤完成或最终验证完成后，使用 `C:\Users\liuyu\Documents\CodexTools\notify-step.ps1` 发送邮件提示。如果邮箱凭据不可用，就说明未能发送，但不要因此阻塞代码工作。
 
@@ -192,7 +194,7 @@
 
 ## 15. MainWindow 退出标准
 
-剧情工具箱当前处于“框架已迁移，业务页持续切出”的阶段。以后每次改功能都要顺手减少 `MainWindow.xaml.cs` 的业务面积。
+剧情工具箱当前处于“根状态和模块状态已迁移，窗口已按页面/功能拆成分部文件，业务规则继续下沉”的阶段。以后每次改功能都要顺手减少 `MainWindow` 分部里的业务面积。
 
 `MainWindow` 最终只应保留：
 

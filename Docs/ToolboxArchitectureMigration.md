@@ -8,13 +8,21 @@ The toolbox now has a root application ViewModel:
 
 - `ApplicationViewModel`
   - owns module definitions and selected module state.
-  - aggregates cross-cutting ViewModels.
+  - aggregates cross-cutting and feature module ViewModels.
 - `SettingsViewModel`
   - owns global settings, project root state, settings persistence, project root migration orchestration, log filtering state, and user-facing settings status.
 - `GlobalProgressViewModel`
   - owns global progress text, percent, elapsed text, detail, and indeterminate state.
+- `ProjectWorkbenchViewModel`
+  - owns selected project, chapter/text-tool state, localization state, and project voice map state.
+- `AssetLibraryViewModel`
+  - owns selected asset library, selected character, viewer state, current audio state, normalization flags, and selected character layer paths.
+- `StoryEditorViewModel`
+  - owns the open chapter, row collection, section map, undo state, row text, asset status text, preview cache, media playback state, and shortcut hover/clipboard state.
+- `UnrealSyncViewModel`
+  - owns Unreal sync busy/request flags and is the landing point for future validation/result bindings.
 
-`MainWindow` remains the WinUI shell and bridge. It still hosts legacy page code, but global settings and progress state no longer need direct control mutation.
+`MainWindow.xaml.cs` is now the shell constructor and startup bridge. Feature UI event code is split into focused partial files such as `MainWindow.Workbench.*.cs`, `MainWindow.Story.*.cs`, `MainWindow.AssetLibrary.*.cs`, and `MainWindow.UnrealSync.*.cs`. These partials may create controls and call pickers/dialogs, but persistent screen state belongs to ViewModels and domain rules belong to Services.
 
 ## Module Categories
 
@@ -30,23 +38,43 @@ Use `ToolboxModuleDefinition` and `ToolboxModuleCategory` to keep new work class
 ## Migration Priority
 
 1. Shell and settings
-   - Done for settings state and project root migration.
+   - Done for settings state, startup auxiliary-display synchronization, and project root migration.
    - Continue by extracting navigation state if more pages are added.
 2. Global progress
    - Done for progress state.
    - Keep ring geometry and animations in the view layer.
 3. Project workbench
-   - Move card loading, project selection, project import/export status into `ProjectWorkbenchViewModel`.
+   - Core state has moved into `ProjectWorkbenchViewModel`.
+   - Continue moving card factories into `Views/*Factory` when a card layout changes.
    - Keep `GridViewItem` creation in `Views/*Factory`.
 4. Asset library
-   - Split background, audio, character layers, and functions into child ViewModels.
+   - Core selection/viewer/normalization state has moved into `AssetLibraryViewModel`.
+   - Feature code is split by creation, loading, drag/drop, editing, viewers, and character detail.
+   - Continue splitting background, audio, character layers, and functions into child ViewModels.
    - Keep drag/drop event wiring in the view layer, but move ordering and normalization orchestration to ViewModels/Services.
 5. Story editor
-   - Continue expanding `StoryEditorViewModel`.
+   - Core row, section, undo, preview, clipboard, hover, and media state has moved into `StoryEditorViewModel`.
+   - Feature code is split by sections, functions, interaction, media, preview, assets, and sync.
    - Avoid one huge ViewModel; use child ViewModels for row navigation, preview slots, audio preview, and function tips.
 6. Unreal sync
-   - Move selected project, path bindings, validation result, and change plan summary into `UnrealSyncViewModel`.
+   - Request/loading flags have moved into `UnrealSyncViewModel`.
+   - Feature code is split by page bridge, dialogs, process helpers, and runner logic.
+   - Continue moving selected project, path bindings, validation result, and change plan summary into `UnrealSyncViewModel`.
    - Keep pickers and process confirmation dialogs in the window or a view service.
+
+## Current MainWindow Partial Layout
+
+- `MainWindow.xaml.cs`: composition root, settings load/apply, app icon/title bar, log routing, cancellation hosts, and shared batched UI loading.
+- `MainWindow.Settings.cs`: project root picker bridge, settings save, and shell navigation selection.
+- `MainWindow.Navigation.cs`: page switching, help dialogs, and entrance animation.
+- `MainWindow.Progress.cs`: global progress host, cancellation token, timer text, speed text, and ring geometry.
+- `MainWindow.Dialogs.cs`: dialog bridge and project/card editing dialogs that still require `XamlRoot`.
+- `MainWindow.Workbench*.cs`: project/asset-library cards, project detail, chapters, text/voice/localization panels, import/backup/restore bridges.
+- `MainWindow.Story*.cs`: story editor row bridge, sections, functions, keyboard shortcuts, media, preview, asset choices, and index sync bridge.
+- `MainWindow.AssetLibrary*.cs`: asset library creation, lazy loading, drag/drop, editing, viewers, character detail, utility conversion.
+- `MainWindow.UnrealSync*.cs`: Unreal sync page bridge, confirmation dialogs, process helpers, validation and runner bridge.
+
+When adding or editing a feature, place it in the narrowest existing partial file. If a partial grows into unrelated responsibilities, split it before adding new behavior.
 
 ## Performance Rules
 
