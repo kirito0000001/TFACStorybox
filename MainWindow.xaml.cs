@@ -11141,7 +11141,13 @@ namespace GalExcleTools
                 AppendLog(LogKind.Info, $"开始迁移整体项目目录：{oldProjectRootPath} -> {newProjectRootPath}");
                 ShowGlobalProgress("迁移整体项目目录", newProjectRootPath);
                 UpdateGlobalProgress("正在复制和校验项目文件...", 5, $"{oldProjectRootPath} -> {newProjectRootPath}");
-                var result = await Task.Run(() => _projectRootMigrationService.Migrate(oldProjectRootPath, newProjectRootPath, GetGlobalProgressCancellationToken()));
+                var progress = new Progress<ProgressUpdate>(update =>
+                    UpdateGlobalProgress(update.Message, update.Percent, update.Detail, update.IsIndeterminate));
+                var result = await Task.Run(() => _projectRootMigrationService.Migrate(
+                    oldProjectRootPath,
+                    newProjectRootPath,
+                    progress,
+                    GetGlobalProgressCancellationToken()));
 
                 _projectRootPath = newProjectRootPath;
                 _appSettings.ProjectRootPath = _projectRootPath;
