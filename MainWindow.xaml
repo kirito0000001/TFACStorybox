@@ -12,7 +12,7 @@
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
-    <Grid>
+    <Grid x:Name="RootGrid">
         <Grid.Resources>
             <Style x:Key="PanelBorderStyle" TargetType="Border">
                 <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
@@ -192,7 +192,7 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="WorkspaceStatusText" VerticalAlignment="Center" Style="{StaticResource SubtleTextStyle}" />
+                            <TextBlock x:Name="WorkspaceStatusText" VerticalAlignment="Center" Style="{StaticResource SubtleTextStyle}" Text="{Binding Settings.WorkspaceStatusText, Mode=OneWay}" />
                             <Button Grid.Column="1" Content="刷新项目" Click="RefreshProjectsButton_Click" />
                         </Grid>
                     </Border>
@@ -517,7 +517,7 @@
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock Text="显示完整章节长度" Foreground="#202020" VerticalAlignment="Center" />
-                                                    <CheckBox x:Name="ShowFullChapterLengthCheckBox" Grid.Column="1" VerticalAlignment="Center" Checked="StoryChapterLengthDisplayCheckBox_Changed" Unchecked="StoryChapterLengthDisplayCheckBox_Changed" />
+                                                    <CheckBox x:Name="ShowFullChapterLengthCheckBox" Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DataContext.Settings.ShowFullStoryChapterLength, ElementName=RootGrid, Mode=TwoWay}" Checked="StoryChapterLengthDisplayCheckBox_Changed" Unchecked="StoryChapterLengthDisplayCheckBox_Changed" />
                                                 </Grid>
                                                 <Grid Height="40" ColumnSpacing="12">
                                                     <Grid.ColumnDefinitions>
@@ -742,7 +742,7 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="AssetLibraryStatusText" VerticalAlignment="Center" Style="{StaticResource SubtleTextStyle}" />
+                            <TextBlock x:Name="AssetLibraryStatusText" VerticalAlignment="Center" Style="{StaticResource SubtleTextStyle}" Text="{Binding Settings.AssetLibraryStatusText, Mode=OneWay}" />
                             <Button Grid.Column="1" Content="刷新素材库" Click="RefreshAssetLibrariesButton_Click" />
                         </Grid>
                     </Border>
@@ -1959,7 +1959,8 @@ public:
                                 <TextBox
                                     x:Name="ProjectRootPathTextBox"
                                     Header="文件目录"
-                                    IsReadOnly="True" />
+                                    IsReadOnly="True"
+                                    Text="{Binding Settings.ProjectRootPath, Mode=OneWay}" />
                                 <Button
                                     Grid.Column="1"
                                     Margin="0,28,0,0"
@@ -1970,8 +1971,9 @@ public:
                             <InfoBar
                                 x:Name="ProjectRootStatusInfoBar"
                                 IsOpen="True"
-                                Severity="Success"
-                                Title="目录已就绪" />
+                                Message="{Binding Settings.ProjectRootStatusMessage, Mode=OneWay}"
+                                Severity="{Binding Settings.ProjectRootStatusSeverity, Mode=OneWay}"
+                                Title="{Binding Settings.ProjectRootStatusTitle, Mode=OneWay}" />
                         </StackPanel>
                     </Border>
 
@@ -1999,6 +2001,7 @@ public:
                                     x:Name="WorkspacePathVisibleCheckBox"
                                     Grid.Column="1"
                                     VerticalAlignment="Center"
+                                    IsChecked="{Binding Settings.ShowWorkspacePath, Mode=TwoWay}"
                                     Checked="LogSettingControl_Changed"
                                     Unchecked="LogSettingControl_Changed" />
                             </Grid>
@@ -2012,6 +2015,7 @@ public:
                                     x:Name="LogEnabledCheckBox"
                                     Grid.Column="1"
                                     VerticalAlignment="Center"
+                                    IsChecked="{Binding Settings.LogEnabled, Mode=TwoWay}"
                                     Checked="LogSettingControl_Changed"
                                     Unchecked="LogSettingControl_Changed" />
                             </Grid>
@@ -2025,6 +2029,7 @@ public:
                                     x:Name="LogUserOperationsCheckBox"
                                     Grid.Column="1"
                                     VerticalAlignment="Center"
+                                    IsChecked="{Binding Settings.LogUserOperations, Mode=TwoWay}"
                                     Checked="LogSettingControl_Changed"
                                     Unchecked="LogSettingControl_Changed" />
                             </Grid>
@@ -2038,6 +2043,7 @@ public:
                                     x:Name="LogWarningCheckBox"
                                     Grid.Column="1"
                                     VerticalAlignment="Center"
+                                    IsChecked="{Binding Settings.LogWarnings, Mode=TwoWay}"
                                     Checked="LogSettingControl_Changed"
                                     Unchecked="LogSettingControl_Changed" />
                             </Grid>
@@ -2051,6 +2057,7 @@ public:
                                     x:Name="LogErrorCheckBox"
                                     Grid.Column="1"
                                     VerticalAlignment="Center"
+                                    IsChecked="{Binding Settings.LogErrors, Mode=TwoWay}"
                                     Checked="LogSettingControl_Changed"
                                     Unchecked="LogSettingControl_Changed" />
                             </Grid>
@@ -2064,6 +2071,7 @@ public:
                                     x:Name="UiSoundEnabledCheckBox"
                                     Grid.Column="1"
                                     VerticalAlignment="Center"
+                                    IsChecked="{Binding Settings.UiSoundEnabled, Mode=TwoWay}"
                                     Checked="LogSettingControl_Changed"
                                     Unchecked="LogSettingControl_Changed" />
                             </Grid>
@@ -2087,10 +2095,12 @@ public:
                                     Minimum="0.5"
                                     Maximum="3"
                                     StepFrequency="0.1"
+                                    Value="{Binding Settings.AssetLibraryScrollSpeedMultiplier, Mode=TwoWay}"
                                     ValueChanged="AssetLibraryScrollSpeedSlider_ValueChanged" />
                                 <TextBlock
                                     x:Name="AssetLibraryScrollSpeedValueText"
                                     Grid.Column="1"
+                                    Text="{Binding Settings.AssetLibraryScrollSpeedText, Mode=OneWay}"
                                     VerticalAlignment="Center" />
                             </Grid>
                             <TextBlock Text="剧情文本字号" Margin="0,10,0,0" />
@@ -2104,11 +2114,13 @@ public:
                                     Minimum="16"
                                     Maximum="32"
                                     StepFrequency="1"
+                                    Value="{Binding Settings.StoryTextFontSize, Mode=TwoWay}"
                                     ValueChanged="StoryTextFontSizeSlider_ValueChanged" />
                                 <TextBlock
                                     x:Name="StoryTextFontSizeValueText"
                                     Grid.Column="1"
                                     MinWidth="44"
+                                    Text="{Binding Settings.StoryTextFontSizeText, Mode=OneWay}"
                                     VerticalAlignment="Center" />
                             </Grid>
                         </StackPanel>
@@ -2226,6 +2238,7 @@ public:
                             Foreground="#202020"
                             FontSize="24"
                             FontWeight="SemiBold"
+                            Text="{Binding GlobalProgress.Title, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis"
                             VerticalAlignment="Center" />
                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
@@ -2238,7 +2251,8 @@ public:
                                 x:Name="GlobalProgressElapsedText"
                                 Foreground="#202020"
                                 FontSize="22"
-                                FontWeight="SemiBold" />
+                                FontWeight="SemiBold"
+                                Text="{Binding GlobalProgress.ElapsedText, Mode=OneWay}" />
                         </StackPanel>
                     </Grid>
 
@@ -2250,12 +2264,14 @@ public:
                         Maximum="100"
                         Foreground="#008F8D"
                         Background="#1A008F8D"
-                        IsIndeterminate="True" />
+                        IsIndeterminate="{Binding GlobalProgress.IsIndeterminate, Mode=OneWay}"
+                        Value="{Binding GlobalProgress.Percent, Mode=OneWay}" />
 
                     <TextBlock
                         x:Name="GlobalProgressDetailText"
                         Grid.Row="2"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{Binding GlobalProgress.Detail, Mode=OneWay}"
                         TextTrimming="CharacterEllipsis" />
                 </Grid>
 
@@ -2285,7 +2301,7 @@ public:
                         VerticalAlignment="Center"
                         TextAlignment="Center"
                         LineHeight="28"
-                        Text="0%" />
+                        Text="{Binding GlobalProgress.PercentText, Mode=OneWay}" />
                 </Grid>
             </Grid>
         </Border>

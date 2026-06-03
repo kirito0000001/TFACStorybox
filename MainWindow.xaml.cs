@@ -79,8 +79,12 @@ namespace GalExcleTools
         private readonly FunctionDialogService _functionDialogService;
         private readonly MediaPlayer _storyBgmPlayer = new();
         private readonly MediaPlayer _storyScenePlayer = new();
+        private readonly ApplicationViewModel _applicationViewModel;
+        private SettingsViewModel Settings => _applicationViewModel.Settings;
+        private GlobalProgressViewModel GlobalProgress => _applicationViewModel.GlobalProgress;
+        private AppSettings _appSettings => Settings.CurrentSettings;
+        private string _projectRootPath => Settings.ProjectRootPath;
 
-        private string _projectRootPath = AppSettingsService.DefaultProjectRootPath;
         private string? _selectedProjectThumbnailPath;
         private string? _selectedAssetLibraryThumbnailPath;
         private AssetLibraryInfo? _currentAssetLibrary;
@@ -154,8 +158,6 @@ namespace GalExcleTools
         private string? _storyBackgroundPreviewKey;
         private int _storyBackgroundTransitionMode;
         private bool _storyBgmPlaybackSuppressed;
-        private AppSettings _appSettings = new();
-        private bool _isApplyingLogSettings;
         private bool _isNormalizingBackgroundImages;
         private bool _isNormalizingMusicFiles;
         private bool _isNormalizingAmbientSoundFiles;
@@ -224,6 +226,10 @@ namespace GalExcleTools
         public MainWindow()
         {
             InitializeComponent();
+            _applicationViewModel = new ApplicationViewModel(
+                new SettingsViewModel(_appSettingsService, _projectRootMigrationService),
+                new GlobalProgressViewModel());
+            RootGrid.DataContext = _applicationViewModel;
             StoryEditorPage.DataContext = _storyEditorViewModel;
             _characterWorkspaceService = new CharacterWorkspaceService(_jsonOptions);
             _folderBackupService = new FolderBackupService(_jsonOptions);
@@ -232,6 +238,22 @@ namespace GalExcleTools
             _shortcutService = new ShortcutService(_dialogService);
             _storyDialogService = new StoryDialogService(_dialogService);
             _functionDialogService = new FunctionDialogService(_dialogService, _uiSoundService);
+            _applicationViewModel.Settings.AuxiliaryDisplayChanged += (_, _) => UpdateAuxiliaryDisplayVisibility();
+            _applicationViewModel.Settings.LogSettingsChanged += (_, _) =>
+            {
+                UpdateLogOptionEnabledState();
+                UpdateAuxiliaryDisplayVisibility();
+                if (_applicationViewModel.Settings.LogEnabled)
+                {
+                    AppendLog(LogKind.User, "已更新日志输出设置。");
+                }
+            };
+            _applicationViewModel.Settings.UiSoundSettingChanged += (_, _) =>
+            {
+                _uiSoundService.IsEnabled = _applicationViewModel.Settings.UiSoundEnabled;
+            };
+            _applicationViewModel.Settings.StoryTextFontSizeChanged += (_, _) => ApplyStoryTextFontSizeToUi();
+            _applicationViewModel.Settings.ShowFullStoryChapterLengthChanged += (_, _) => UpdateStoryRowIndexInput();
             _storyEditorViewModel.ConfigureCommands(
                 UndoStoryEditorOperation,
                 NavigatePreviousStoryRow,
@@ -283,13 +305,11 @@ namespace GalExcleTools
             RegisterAssetLibraryExpanderLazyLoading();
             RegisterCharacterDetailExpanderLazyLoading();
 
-            _appSettings = _appSettingsService.Load();
-            _uiSoundService.IsEnabled = _appSettings.UiSoundEnabled;
-            ApplyLogSettingsToUi();
+            Settings.Load();
+            _uiSoundService.IsEnabled = Settings.UiSoundEnabled;
             ApplyUnrealSyncSettingsToUi();
             ApplyStoryTextFontSizeToUi();
-            _projectRootPath = _appSettingsService.ResolveProjectRootPath(_appSettings);
-            EnsureProjectRootDirectory(_projectRootPath);
+            EnsureProjectRootDirectory(Settings.ProjectRootPath);
             AppendLog(LogKind.Info, "程序启动，已检查整体项目目录。");
             ShowWorkbenchPage();
         }
@@ -367,34 +387,9 @@ namespace GalExcleTools
             }
         }
 
-        private void ApplyLogSettingsToUi()
-        {
-            _isApplyingLogSettings = true;
-            try
-            {
-                WorkspacePathVisibleCheckBox.IsChecked = _appSettings.ShowWorkspacePath;
-                LogEnabledCheckBox.IsChecked = _appSettings.LogEnabled;
-                LogUserOperationsCheckBox.IsChecked = _appSettings.LogUserOperations;
-                LogWarningCheckBox.IsChecked = _appSettings.LogWarnings;
-                LogErrorCheckBox.IsChecked = _appSettings.LogErrors;
-                UiSoundEnabledCheckBox.IsChecked = _appSettings.UiSoundEnabled;
-                AssetLibraryScrollSpeedSlider.Value = _appSettings.AssetLibraryScrollSpeedMultiplier;
-                StoryTextFontSizeSlider.Value = Math.Clamp(_appSettings.StoryTextFontSize, 16, 32);
-                ShowFullChapterLengthCheckBox.IsChecked = _appSettings.ShowFullStoryChapterLength;
-                UpdateAssetLibraryScrollSpeedText();
-                UpdateStoryTextFontSizeText();
-                UpdateLogOptionEnabledState();
-                UpdateAuxiliaryDisplayVisibility();
-            }
-            finally
-            {
-                _isApplyingLogSettings = false;
-            }
-        }
-
         private void UpdateLogOptionEnabledState()
         {
-            var enabled = LogEnabledCheckBox.IsChecked == true;
+            var enabled = Settings.LogEnabled;
             LogUserOperationsCheckBox.IsEnabled = enabled;
             LogWarningCheckBox.IsEnabled = enabled;
             LogErrorCheckBox.IsEnabled = enabled;
@@ -402,32 +397,25 @@ namespace GalExcleTools
 
         private void UpdateAuxiliaryDisplayVisibility()
         {
-            var showWorkspacePath = _appSettings.ShowWorkspacePath ? Visibility.Visible : Visibility.Collapsed;
+            var showWorkspacePath = Settings.ShowWorkspacePath ? Visibility.Visible : Visibility.Collapsed;
             WorkspaceStatusBorder.Visibility = showWorkspacePath;
             AssetLibraryStatusBorder.Visibility = showWorkspacePath;
             AssetLibraryDetailStatusBorder.Visibility = showWorkspacePath;
-            LogPanelBorder.Visibility = _appSettings.LogEnabled ? Visibility.Visible : Visibility.Collapsed;
+            LogPanelBorder.Visibility = Settings.LogEnabled ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void LogSettingControl_Changed(object sender, RoutedEventArgs e)
         {
-            if (_isApplyingLogSettings)
-            {
-                return;
-            }
-
-            _appSettings.ShowWorkspacePath = WorkspacePathVisibleCheckBox.IsChecked == true;
-            _appSettings.LogEnabled = LogEnabledCheckBox.IsChecked == true;
-            _appSettings.LogUserOperations = LogUserOperationsCheckBox.IsChecked == true;
-            _appSettings.LogWarnings = LogWarningCheckBox.IsChecked == true;
-            _appSettings.LogErrors = LogErrorCheckBox.IsChecked == true;
-            _appSettings.UiSoundEnabled = UiSoundEnabledCheckBox.IsChecked == true;
-            _uiSoundService.IsEnabled = _appSettings.UiSoundEnabled;
-            SaveAppSettings();
+            Settings.ShowWorkspacePath = WorkspacePathVisibleCheckBox.IsChecked == true;
+            Settings.LogEnabled = LogEnabledCheckBox.IsChecked == true;
+            Settings.LogUserOperations = LogUserOperationsCheckBox.IsChecked == true;
+            Settings.LogWarnings = LogWarningCheckBox.IsChecked == true;
+            Settings.LogErrors = LogErrorCheckBox.IsChecked == true;
+            Settings.UiSoundEnabled = UiSoundEnabledCheckBox.IsChecked == true;
             UpdateLogOptionEnabledState();
             UpdateAuxiliaryDisplayVisibility();
 
-            if (_appSettings.LogEnabled)
+            if (Settings.LogEnabled)
             {
                 AppendLog(LogKind.User, "已更新日志输出设置。");
             }
@@ -435,56 +423,44 @@ namespace GalExcleTools
 
         private void AssetLibraryScrollSpeedSlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
         {
-            if (_isApplyingLogSettings || AssetLibraryScrollSpeedValueText is null)
+            if (AssetLibraryScrollSpeedValueText is null)
             {
                 return;
             }
 
-            _appSettings.AssetLibraryScrollSpeedMultiplier = Math.Round(AssetLibraryScrollSpeedSlider.Value, 1);
-            UpdateAssetLibraryScrollSpeedText();
-            SaveAppSettings();
+            Settings.AssetLibraryScrollSpeedMultiplier = AssetLibraryScrollSpeedSlider.Value;
         }
 
         private void UpdateAssetLibraryScrollSpeedText()
         {
-            AssetLibraryScrollSpeedValueText.Text = $"{_appSettings.AssetLibraryScrollSpeedMultiplier:0.0}x";
+            AssetLibraryScrollSpeedValueText.Text = Settings.AssetLibraryScrollSpeedText;
         }
 
         private void StoryTextFontSizeSlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
         {
-            if (_isApplyingLogSettings || StoryTextFontSizeValueText is null)
+            if (StoryTextFontSizeValueText is null)
             {
                 return;
             }
 
-            _appSettings.StoryTextFontSize = Math.Round(StoryTextFontSizeSlider.Value);
-            UpdateStoryTextFontSizeText();
-            ApplyStoryTextFontSizeToUi();
-            SaveAppSettings();
+            Settings.StoryTextFontSize = StoryTextFontSizeSlider.Value;
         }
 
         private void StoryChapterLengthDisplayCheckBox_Changed(object sender, RoutedEventArgs e)
         {
-            if (_isApplyingLogSettings)
-            {
-                return;
-            }
-
-            _appSettings.ShowFullStoryChapterLength = ShowFullChapterLengthCheckBox?.IsChecked == true;
-            SaveAppSettings();
-            UpdateStoryRowIndexInput();
+            Settings.ShowFullStoryChapterLength = ShowFullChapterLengthCheckBox?.IsChecked == true;
         }
 
         private void UpdateStoryTextFontSizeText()
         {
-            StoryTextFontSizeValueText.Text = $"{Math.Round(_appSettings.StoryTextFontSize)}";
+            StoryTextFontSizeValueText.Text = Settings.StoryTextFontSizeText;
         }
 
         private void ApplyStoryTextFontSizeToUi()
         {
             if (StoryTextTextBox is not null)
             {
-                StoryTextTextBox.FontSize = Math.Clamp(_appSettings.StoryTextFontSize, 16, 32);
+                StoryTextTextBox.FontSize = Math.Clamp(Settings.StoryTextFontSize, 16, 32);
             }
         }
 
@@ -496,18 +472,7 @@ namespace GalExcleTools
 
         private bool ShouldWriteLog(LogKind kind)
         {
-            if (!_appSettings.LogEnabled)
-            {
-                return false;
-            }
-
-            return kind switch
-            {
-                LogKind.User => _appSettings.LogUserOperations,
-                LogKind.Warning => _appSettings.LogWarnings,
-                LogKind.Error => _appSettings.LogErrors,
-                _ => true
-            };
+            return Settings.ShouldWriteLog(kind);
         }
 
         private void AppendLog(LogKind kind, string message, Exception? exception = null)
@@ -565,15 +530,10 @@ namespace GalExcleTools
 
         private void EnsureProjectRootDirectory(string projectRootPath)
         {
-            _appSettingsService.EnsureProjectRootDirectory(projectRootPath);
-
-            ProjectRootPathTextBox.Text = projectRootPath;
-            ProjectRootStatusInfoBar.Message = $"已确认目录存在：{projectRootPath}";
-            WorkspaceStatusText.Text = $"工作区路径：{projectRootPath}";
-            AssetLibraryStatusText.Text = $"素材库根目录：{projectRootPath}";
+            Settings.EnsureCurrentProjectRoot();
 
             LoadAllCards();
-            AppendLog(LogKind.Info, $"已确认整体项目目录：{projectRootPath}");
+            AppendLog(LogKind.Info, $"已确认整体项目目录：{Settings.ProjectRootPath}");
         }
 
         private void RequestDelayedRefresh(bool includeBackgroundImages = false)
@@ -5798,14 +5758,9 @@ namespace GalExcleTools
             _globalProgressStopwatch.Restart();
             _globalProgressElapsedTimer.Start();
             _isGlobalProgressVisible = true;
+            GlobalProgress.Start(title, detail);
 
             GlobalProgressHost.Visibility = Visibility.Visible;
-            GlobalProgressTitleText.Text = detail;
-            GlobalProgressDetailText.Text = title;
-            GlobalProgressElapsedText.Text = FormatElapsedTime(TimeSpan.Zero);
-            GlobalProgressPercentText.Text = "0%";
-            GlobalProgressBar.IsIndeterminate = true;
-            GlobalProgressBar.Value = 0;
             _globalProgressLastPercent = 0;
             UpdateGlobalProgressRing(0);
             AnimateGlobalProgressHost(show: true);
@@ -5819,17 +5774,7 @@ namespace GalExcleTools
             }
 
             var clampedPercent = Math.Clamp(percent, 0, 100);
-            GlobalProgressTitleText.Text = message;
-            GlobalProgressDetailText.Text = string.IsNullOrWhiteSpace(detail)
-                ? _globalProgressOperationTitle
-                : detail.Replace('\n', ' ');
-            GlobalProgressBar.IsIndeterminate = isIndeterminate;
-            if (!isIndeterminate)
-            {
-                GlobalProgressBar.Value = clampedPercent;
-            }
-
-            GlobalProgressPercentText.Text = $"{clampedPercent:0}%";
+            GlobalProgress.Update(message, clampedPercent, detail, isIndeterminate);
             _globalProgressLastPercent = clampedPercent;
             UpdateGlobalProgressRing(clampedPercent);
             UpdateGlobalProgressElapsedText();
@@ -5839,13 +5784,9 @@ namespace GalExcleTools
         {
             _globalProgressStopwatch.Stop();
             _globalProgressElapsedTimer.Stop();
-            GlobalProgressBar.IsIndeterminate = false;
-            GlobalProgressBar.Value = 100;
-            GlobalProgressPercentText.Text = "100%";
+            GlobalProgress.Complete(message, detail);
             _globalProgressLastPercent = 100;
             UpdateGlobalProgressRing(100);
-            GlobalProgressTitleText.Text = message;
-            GlobalProgressDetailText.Text = string.IsNullOrWhiteSpace(detail) ? _globalProgressOperationTitle : detail;
             UpdateGlobalProgressElapsedText();
         }
 
@@ -5860,6 +5801,7 @@ namespace GalExcleTools
             _globalProgressStopwatch.Reset();
             _globalProgressElapsedTimer.Stop();
             _isGlobalProgressVisible = false;
+            GlobalProgress.Hide();
             _globalProgressCancellation?.Dispose();
             _globalProgressCancellation = null;
             AnimateGlobalProgressHost(show: false);
@@ -5898,7 +5840,7 @@ namespace GalExcleTools
 
         private void UpdateGlobalProgressElapsedText()
         {
-            GlobalProgressElapsedText.Text = FormatElapsedTime(_globalProgressStopwatch.Elapsed);
+            GlobalProgress.UpdateElapsed(_globalProgressStopwatch.Elapsed);
         }
 
         private void UpdateGlobalProgressRing(double percent)
@@ -11120,17 +11062,17 @@ namespace GalExcleTools
                 return;
             }
 
-            var newProjectRootPath = _appSettingsService.BuildProjectRootPathFromParent(selectedFolder.Path);
-            var oldProjectRootPath = Path.GetFullPath(_projectRootPath);
+            var newProjectRootPath = Settings.BuildProjectRootPathFromParent(selectedFolder.Path);
+            var oldProjectRootPath = Path.GetFullPath(Settings.ProjectRootPath);
             AppendLog(LogKind.User, $"选择新的整体项目父目录：{selectedFolder.Path}");
 
-            if (PathsEqual(oldProjectRootPath, newProjectRootPath))
+            if (Settings.IsCurrentProjectRoot(newProjectRootPath))
             {
                 SetProjectRootStatus(InfoBarSeverity.Informational, "目录未变化", $"当前已经在使用：{newProjectRootPath}");
                 return;
             }
 
-            if (IsPathInsideDirectory(newProjectRootPath, oldProjectRootPath))
+            if (Settings.IsCandidateInsideCurrentRoot(newProjectRootPath))
             {
                 SetProjectRootStatus(InfoBarSeverity.Error, "无法迁移目录", "新位置不能放在旧项目总目录里面，否则迁移完成后删除旧目录时会连新目录一起删除。");
                 return;
@@ -11143,16 +11085,12 @@ namespace GalExcleTools
                 UpdateGlobalProgress("正在复制和校验项目文件...", 5, $"{oldProjectRootPath} -> {newProjectRootPath}");
                 var progress = new Progress<ProgressUpdate>(update =>
                     UpdateGlobalProgress(update.Message, update.Percent, update.Detail, update.IsIndeterminate));
-                var result = await Task.Run(() => _projectRootMigrationService.Migrate(
-                    oldProjectRootPath,
+                var result = await Settings.ChangeProjectRootAsync(
                     newProjectRootPath,
                     progress,
-                    GetGlobalProgressCancellationToken()));
+                    GetGlobalProgressCancellationToken());
 
-                _projectRootPath = newProjectRootPath;
-                _appSettings.ProjectRootPath = _projectRootPath;
-                SaveAppSettings();
-                EnsureProjectRootDirectory(_projectRootPath);
+                LoadAllCards();
                 CompleteGlobalProgress("目录迁移完成", $"已迁移 {result.FileCount} 个文件、{result.DirectoryCount} 个文件夹");
                 await HideGlobalProgressAfterDelayAsync();
                 SetProjectRootStatus(InfoBarSeverity.Success, "目录迁移完成", $"已迁移并校验 {result.FileCount} 个文件、{result.DirectoryCount} 个文件夹。旧目录已删除：{oldProjectRootPath}");
@@ -11161,7 +11099,7 @@ namespace GalExcleTools
             {
                 CompleteGlobalProgress(ex is OperationCanceledException ? "目录迁移已取消" : "目录迁移失败", ex.Message);
                 await HideGlobalProgressAfterDelayAsync();
-                EnsureProjectRootDirectory(_projectRootPath);
+                EnsureProjectRootDirectory(Settings.ProjectRootPath);
                 AppendLog(LogKind.Error, "整体项目目录迁移失败。", ex);
                 SetProjectRootStatus(InfoBarSeverity.Error, "目录迁移失败", $"已保留原目录和设置，未删除旧目录。错误：{ex.Message}");
             }
@@ -11169,10 +11107,7 @@ namespace GalExcleTools
 
         private void SetProjectRootStatus(InfoBarSeverity severity, string title, string message)
         {
-            ProjectRootStatusInfoBar.Severity = severity;
-            ProjectRootStatusInfoBar.Title = title;
-            ProjectRootStatusInfoBar.Message = message;
-            ProjectRootStatusInfoBar.IsOpen = true;
+            Settings.SetProjectRootStatus(severity, title, message);
 
             var logKind = severity == InfoBarSeverity.Error
                 ? LogKind.Error
@@ -11184,7 +11119,7 @@ namespace GalExcleTools
 
         private void SaveAppSettings()
         {
-            _appSettingsService.Save(_appSettings);
+            Settings.Save();
         }
 
         private void ShellNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -11199,19 +11134,25 @@ namespace GalExcleTools
                 PlaySelectionSound();
             }
 
-            if (tag == "Settings")
+            var module = _applicationViewModel.FindModuleByTag(tag);
+            if (module is not null)
+            {
+                _applicationViewModel.SelectedModule = module.Key;
+            }
+
+            if (module?.Key == ToolboxModuleKey.Settings)
             {
                 ShowSettingsPage();
                 return;
             }
 
-            if (tag == "AssetLibrary")
+            if (module?.Key == ToolboxModuleKey.AssetLibrary)
             {
                 ShowAssetLibraryPage();
                 return;
             }
 
-            if (tag == "UnrealSync")
+            if (module?.Key == ToolboxModuleKey.UnrealSync)
             {
                 ShowUnrealSyncPage();
                 return;

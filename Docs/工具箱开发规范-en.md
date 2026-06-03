@@ -6,6 +6,7 @@ This document is the working standard for GalExcleTools-style WinUI toolboxes. U
 
 Every toolbox follows the same ownership split:
 
+- `ApplicationViewModel`: the root ViewModel. It aggregates modules and cross-page state only. It currently owns `SettingsViewModel` and `GlobalProgressViewModel`; future modules should attach workbench, asset library, story editor, and Unreal sync ViewModels here.
 - `Models`: serialized contracts, immutable summaries, result records, progress records, and domain data. Models must not reference WinUI controls.
 - `Services`: filesystem work, JSON/CSV parsing, hashing, migration, import/export, backup, Unreal sync, image or audio processing, and other domain operations. Services may report `IProgress<T>` and accept `CancellationToken`, but they must not update controls directly.
 - `ViewModels`: screen state, validation state, commands, selected items, user-facing status text, and orchestration between services. ViewModels should inherit `ObservableObject` and expose bindable public properties.
@@ -14,6 +15,8 @@ Every toolbox follows the same ownership split:
 - `MainWindow`: shell and bridge only. It may own startup wiring, custom title bar, navigation selection, file/folder pickers, `XamlRoot`, page entrance animation, global progress host, and calls into ViewModels or dialog services.
 
 `MainWindow.xaml.cs` must not become the feature implementation file. When a feature needs parsing, scanning, validation, migration, sync rules, export rules, naming rules, or persistent state, create or extend a ViewModel and Service first, then call them from the window.
+
+Every module must have a category: workbench is `Project`, asset library is `Asset`, story editor is `Story`, Unreal sync is `Integration`, global settings is `Settings`, and title bar/navigation/progress/dialog bridges are `Shell`.
 
 ## 2. MainWindow Allowed Work
 
@@ -40,6 +43,8 @@ If a new event handler exceeds a small bridge, stop and extract the work before 
 ## 3. ViewModel Rules
 
 - One main page should have one main ViewModel. Shared panels may have smaller child ViewModels.
+- Do not migrate `MainWindow` into a different giant ViewModel. Split state into child ViewModels when it crosses one page responsibility.
+- The root ViewModel only aggregates modules, navigation state, and cross-page service entry points. It must not scan files, build cards, or own domain validation.
 - ViewModels own bindable state such as path text, selected item, status title/message/severity, busy state, command enabled state, and validation results.
 - Use `RelayCommand` or `AsyncRelayCommand` for repeatable actions. Raw click handlers are acceptable only when WinUI infrastructure requires them, such as `FolderPicker` or `ContentDialog`.
 - Async commands must guard against duplicate execution unless the feature explicitly supports parallel work.
@@ -59,6 +64,8 @@ If a new event handler exceeds a small bridge, stop and extract the work before 
 ## 5. Global Progress Standard
 
 All long-running or potentially long-running operations use the bottom global progress bar. Do not create separate progress dialogs.
+
+Global progress state belongs to `GlobalProgressViewModel`. The window layer keeps only animation, visibility transition, cancel click handling, and ring geometry drawing.
 
 Required progress behavior:
 
@@ -103,6 +110,15 @@ Examples that must use global progress:
 - Do not place page sections inside decorative nested cards. Use panels for real grouped controls and repeated item cards only where they represent individual items.
 - Text must fit inside controls at desktop and narrow widths. Avoid oversized headings inside compact panels.
 - Keep the interface quiet and operational. These are production tools, not marketing pages.
+
+## 8.1 Performance Rules
+
+- Do not create very large visual lists in a single UI pass. Add items in batches and yield to the UI thread between batches.
+- Cache image previews by path and cancel stale loads when the selected asset library or character changes.
+- ViewModels must not decode images, hash files, compress archives, or scan CSV trees. Put that work in Services.
+- Bindable property getters must stay lightweight; never scan the filesystem or run expensive calculations inside a getter.
+- Drag sorting, batch import, name normalization, and sync checks must support cancellation and progress.
+- Page switches should not rebuild stable data every time. Reuse caches and refresh only when needed.
 
 ## 9. Project Root Pattern
 
@@ -158,6 +174,7 @@ When starting another toolbox, copy the pattern before adding features:
 - Settings page copied from the GalExcleTools pattern, then trimmed to the new domain.
 - Internal documentation file describing any project-specific deviations.
 - Build, short-start, and email notification workflow.
+- A `Docs/ToolboxArchitectureMigration.md` or equivalent document that records module categories and the continuing migration path.
 
 ## 14. Review Standard
 
@@ -172,3 +189,25 @@ Before marking work complete, check:
 - Did the app short-start after build?
 - Was the email notification attempted?
 - Is Git local-only unless the user asked to push?
+
+## 15. MainWindow Exit Standard
+
+GalExcleTools is now in the "framework migrated, feature pages continuing to move out" phase. Every future feature change should reduce the business surface in `MainWindow.xaml.cs`.
+
+In the final shape, `MainWindow` should contain mostly:
+
+- constructor composition for services and ViewModels;
+- title bar, icon, and initial window placement;
+- navigation page switching and entrance animation;
+- file/folder pickers;
+- `ContentDialog` `XamlRoot` bridge;
+- global progress animation, cancel click, and ring geometry;
+- small event forwarding into ViewModel commands.
+
+Move these out over time:
+
+- CSV row logic, chapter import/export, index repair;
+- asset library scanning, audio normalization, image conversion, character layer rules;
+- Unreal sync validation, change plans, external process rules;
+- project and asset library create/rename/delete/backup/restore orchestration;
+- manual control updates for bindable state.
