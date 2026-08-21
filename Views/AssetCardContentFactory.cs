@@ -66,16 +66,36 @@ internal static class AssetCardContentFactory
         };
     }
 
-    public static Border CreateFunctionCardContent(string indicator, string detailText)
+    public static Border CreateFunctionCardContent(string name, string indicator, string description)
     {
-        var detailBlock = new TextBlock
+        var nameBlock = new TextBlock
         {
-            Text = detailText,
+            Text = name,
+            FontSize = 15,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap
+        };
+        var indicatorBlock = new TextBlock
+        {
+            Text = indicator,
+            FontSize = 12,
+            Opacity = 0.65,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap
+        };
+        Grid.SetRow(indicatorBlock, 1);
+        var descriptionBlock = new TextBlock
+        {
+            Text = description,
+            FontSize = 12,
             Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Bottom
+            TextWrapping = TextWrapping.Wrap,
+            MaxLines = 2,
+            VerticalAlignment = VerticalAlignment.Top
         };
-        Grid.SetRow(detailBlock, 1);
+        Grid.SetRow(descriptionBlock, 2);
 
         return new Border
         {
@@ -83,24 +103,23 @@ internal static class AssetCardContentFactory
             BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
             BorderThickness = new Thickness(1),
             Background = new SolidColorBrush(Microsoft.UI.Colors.White),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
             Child = new Grid
             {
-                Padding = new Thickness(14, 10, 14, 10),
+                Padding = new Thickness(14, 12, 14, 10),
+                RowSpacing = 3,
                 RowDefinitions =
                 {
-                    new RowDefinition { Height = new GridLength(1, GridUnitType.Star) },
+                    new RowDefinition { Height = GridLength.Auto },
+                    new RowDefinition { Height = GridLength.Auto },
                     new RowDefinition { Height = GridLength.Auto }
                 },
                 Children =
                 {
-                    new TextBlock
-                    {
-                        Text = indicator,
-                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                        TextTrimming = TextTrimming.CharacterEllipsis,
-                        VerticalAlignment = VerticalAlignment.Center
-                    },
-                    detailBlock
+                    nameBlock,
+                    indicatorBlock,
+                    descriptionBlock
                 }
             }
         };

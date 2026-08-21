@@ -382,7 +382,13 @@ namespace GalExcleTools
             }
 
             var functions = StoryFunctionService.ReadFunctions(_currentAssetLibrary, _jsonOptions);
-            functions.Add(new FunctionEntry(Guid.NewGuid().ToString("N"), input.Name, input.Indicator, input.Category, input.ChoiceNotes));
+            functions.Add(new FunctionEntry(
+                Guid.NewGuid().ToString("N"),
+                input.Name,
+                input.Indicator,
+                "自定义",
+                input.ChoiceNotes,
+                input.Description));
             StoryFunctionService.WriteFunctions(_currentAssetLibrary, functions, _jsonOptions);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             LoadFunctions(_currentAssetLibrary);
@@ -410,8 +416,8 @@ namespace GalExcleTools
                 {
                     Name = input.Name,
                     Indicator = input.Indicator,
-                    Category = input.Category,
-                    ChoiceNotes = input.ChoiceNotes
+                    ChoiceNotes = input.ChoiceNotes,
+                    Description = input.Description
                 } : entry)
                 .ToList();
             StoryFunctionService.WriteFunctions(_currentAssetLibrary, functions, _jsonOptions);
@@ -854,18 +860,19 @@ namespace GalExcleTools
         private GridViewItem CreateFunctionCard(FunctionEntry function)
         {
             var choiceNotes = function.ChoiceNotes ?? [];
-            var detailText = choiceNotes.Count > 0
-                ? $"{function.Name} / {function.Category} / 选项备注 {choiceNotes.Count}"
-                : $"{function.Name} / {function.Category}";
             return AssetCardFactory.CreateCard(
-                240,
-                104,
-                AssetCardContentFactory.CreateFunctionCardContent(function.Indicator, detailText),
+                260,
+                126,
+                AssetCardContentFactory.CreateFunctionCardContent(
+                    function.Name,
+                    function.Indicator,
+                    string.IsNullOrWhiteSpace(function.Description) ? "暂无介绍" : function.Description),
                 function,
                 async (_, _) => await EditFunctionAsync(function),
                 GridViewItemFactory.CreateMenu(
                     GridViewItemFactory.CreateMenuItem("修改函数", async (_, _) => await EditFunctionAsync(function)),
                     GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteFunctionAsync(function))),
+                stretchContent: true,
                 toolTip: choiceNotes.Count > 0
                     ? string.Join(Environment.NewLine, choiceNotes.Select((note, index) => $"{index + 1}. {note}"))
                     : null);
@@ -874,9 +881,10 @@ namespace GalExcleTools
         private GridViewItem CreateAddFunctionCard()
         {
             return AssetCardFactory.CreateCard(
-                240,
-                104,
+                260,
+                126,
                 AssetCardContentFactory.CreateAddTextCardContent("+"),
+                stretchContent: true,
                 tappedHandler: async (_, _) => await AddFunctionAsync());
         }
 

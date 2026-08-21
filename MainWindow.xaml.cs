@@ -83,6 +83,7 @@ namespace GalExcleTools
         private readonly StoryAudioPlaybackService _storyBgmPlayback = new(looping: true);
         private readonly StoryAudioPlaybackService _storyScenePlayback = new(looping: true);
         private readonly StoryAudioPlaybackService _storyVoicePlayback = new(looping: false);
+        private readonly StoryAudioPlaybackService _storySoundEffectPlayback = new(looping: false);
         private readonly MediaPlayer _projectVoicePreviewPlayer = new();
         private readonly ApplicationViewModel _applicationViewModel;
         private SettingsViewModel Settings => _applicationViewModel.Settings;
@@ -532,6 +533,7 @@ namespace GalExcleTools
                 _storyBgmPlayback.Dispose();
                 _storyScenePlayback.Dispose();
                 _storyVoicePlayback.Dispose();
+                _storySoundEffectPlayback.Dispose();
                 _storySaveCoordinator.Dispose();
             };
             AppWindow.Resize(new SizeInt32(1500, 920));

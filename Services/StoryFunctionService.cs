@@ -30,38 +30,38 @@ internal static class StoryFunctionService
             CreateChoiceFunctionTemplate(),
             CreateChapterJumpFunctionTemplate(),
             CreateSegmentJumpFunctionTemplate(),
-            new FunctionEntry("default-scene-sfx", "播放一次性特殊音效", "Scene_", "音频", []),
-            new FunctionEntry("default-bglerp-mode", "背景切换模式", "BGLerpMode_", "背景", []),
-            new FunctionEntry("default-vfx-on", "开启指定特效", "VFXON_", "特效", []),
-            new FunctionEntry("default-vfx-off", "关闭指定特效", "VFXOFF_", "特效", []),
-            new FunctionEntry("default-transanim", "播放动画序列", "TransAnim_", "动画", []),
-            new FunctionEntry("default-transanim-end", "停止目前动画", "TransAnim_END", "动画", []),
-            new FunctionEntry("default-medplay", "播放视频", "MedPlay_", "视频", []),
+            new FunctionEntry("default-scene-sfx", "播放一次性特殊音效", "Scene_", "音频", [], "播放一次特殊音效，不循环。"),
+            new FunctionEntry("default-bglerp-mode", "背景切换模式", "BGLerpMode_", "背景", [], "设置背景图切换时使用的过渡方式。"),
+            new FunctionEntry("default-vfx-on", "开启指定特效", "VFXON_", "特效", [], "开启指定名称的画面特效。"),
+            new FunctionEntry("default-vfx-off", "关闭指定特效", "VFXOFF_", "特效", [], "关闭指定名称的画面特效。"),
+            new FunctionEntry("default-transanim", "播放动画序列", "TransAnim_", "动画", [], "播放指定索引的动画序列。"),
+            new FunctionEntry("default-transanim-end", "停止目前动画", "TransAnim_END", "动画", [], "停止当前正在播放的动画。"),
+            new FunctionEntry("default-medplay", "播放视频", "MedPlay_", "视频", [], "播放指定索引的视频。"),
             CreateBgmFunctionTemplate(),
-            new FunctionEntry("default-title-show", "大标题显示", "TitleShowMode", "标题", []),
-            new FunctionEntry("default-close-all-fx", "关闭所有特效", "CloseAllFX", "特效", []),
-            new FunctionEntry("default-custom", "纯自定义函数", "CustomFunction", "自定义", [])
+            new FunctionEntry("default-title-show", "大标题显示", "TitleShowMode", "标题", [], "使用当前剧情文本显示大标题。"),
+            new FunctionEntry("default-close-all-fx", "关闭所有特效", "CloseAllFX", "特效", [], "关闭当前所有画面特效。"),
+            new FunctionEntry("default-custom", "纯自定义函数", "CustomFunction", "自定义", [], "写入任意自定义函数指示器。")
         ];
     }
 
     public static FunctionEntry CreateChoiceFunctionTemplate()
     {
-        return new FunctionEntry(ChoiceFunctionTemplateId, "创建触发选项", ChoiceFunctionTemplateIndicator, ChoiceFunctionCategory, []);
+        return new FunctionEntry(ChoiceFunctionTemplateId, "创建触发选项", ChoiceFunctionTemplateIndicator, ChoiceFunctionCategory, [], "创建一组剧情选项，具体行为由项目函数决定。");
     }
 
     public static FunctionEntry CreateChapterJumpFunctionTemplate()
     {
-        return new FunctionEntry(ChapterJumpFunctionTemplateId, "跳转章节", ChapterJumpFunctionTemplateIndicator, JumpFunctionCategory, []);
+        return new FunctionEntry(ChapterJumpFunctionTemplateId, "跳转章节", ChapterJumpFunctionTemplateIndicator, JumpFunctionCategory, [], "跳转到指定章节。");
     }
 
     public static FunctionEntry CreateSegmentJumpFunctionTemplate()
     {
-        return new FunctionEntry(SegmentJumpFunctionTemplateId, "跳转小节", SegmentJumpFunctionTemplateIndicator, JumpFunctionCategory, []);
+        return new FunctionEntry(SegmentJumpFunctionTemplateId, "跳转小节", SegmentJumpFunctionTemplateIndicator, JumpFunctionCategory, [], "跳转到当前章节的指定小节。");
     }
 
     public static FunctionEntry CreateBgmFunctionTemplate()
     {
-        return new FunctionEntry(BgmFunctionTemplateId, "BGM", BgmFunctionTemplateIndicator, "音频", []);
+        return new FunctionEntry(BgmFunctionTemplateId, "BGM", BgmFunctionTemplateIndicator, "音频", [], "开始或停止当前背景音乐。");
     }
 
     public static bool EnsureBuiltInFunctionTemplates(List<FunctionEntry> functions)
@@ -334,6 +334,13 @@ internal static class StoryFunctionService
         return false;
     }
 
+    public static bool TryParseSoundEffectIndex(string functionValue, out int index)
+    {
+        index = 0;
+        var match = Regex.Match(functionValue.Trim(), @"^Scene_(?<index>\d+)$", RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups["index"].Value, out index);
+    }
+
     public static string GetBackgroundTransitionModeDisplay(int mode)
     {
         return mode switch
@@ -370,6 +377,8 @@ internal static class StoryFunctionService
         }
 
         var changed = false;
+        var defaultDescriptions = CreateDefaultFunctions()
+            .ToDictionary(entry => entry.Id, entry => entry.Description, StringComparer.OrdinalIgnoreCase);
         var normalized = index.Entries
             .Where(entry => !string.IsNullOrWhiteSpace(entry.Indicator))
             .Select(entry =>
@@ -383,6 +392,10 @@ internal static class StoryFunctionService
 
                 var name = string.IsNullOrWhiteSpace(entry.Name) ? entry.Indicator : entry.Name.Trim();
                 var category = string.IsNullOrWhiteSpace(entry.Category) ? "自定义" : entry.Category.Trim();
+                var description = string.IsNullOrWhiteSpace(entry.Description) &&
+                    defaultDescriptions.TryGetValue(id, out var defaultDescription)
+                        ? defaultDescription
+                        : entry.Description?.Trim() ?? string.Empty;
                 var choiceNotes = (entry.ChoiceNotes ?? [])
                     .Select(NormalizeFunctionChoiceNote)
                     .Where(note => !string.IsNullOrWhiteSpace(note))
@@ -391,6 +404,7 @@ internal static class StoryFunctionService
                 if (id != entry.Id ||
                     name != entry.Name ||
                     category != entry.Category ||
+                    description != entry.Description ||
                     !choiceNotes.SequenceEqual(originalChoiceNotes))
                 {
                     changed = true;
@@ -402,7 +416,8 @@ internal static class StoryFunctionService
                     Name = name,
                     Indicator = entry.Indicator.Trim(),
                     Category = category,
-                    ChoiceNotes = choiceNotes
+                    ChoiceNotes = choiceNotes,
+                    Description = description
                 };
             })
             .ToList();
@@ -465,13 +480,17 @@ internal static class StoryFunctionService
             Name = string.IsNullOrWhiteSpace(template.Name) ? target.Name : template.Name.Trim(),
             Indicator = target.Indicator,
             Category = target.Category,
-            ChoiceNotes = []
+            ChoiceNotes = [],
+            Description = string.IsNullOrWhiteSpace(template.Description)
+                ? target.Description
+                : template.Description.Trim()
         };
         var changed =
             !string.Equals(normalizedTemplate.Id, template.Id, StringComparison.Ordinal) ||
             !string.Equals(normalizedTemplate.Name, template.Name, StringComparison.Ordinal) ||
             !string.Equals(normalizedTemplate.Indicator, template.Indicator, StringComparison.Ordinal) ||
             !string.Equals(normalizedTemplate.Category, template.Category, StringComparison.Ordinal) ||
+            !string.Equals(normalizedTemplate.Description, template.Description, StringComparison.Ordinal) ||
             (template.ChoiceNotes?.Count ?? 0) != 0 ||
             templateIndex != desiredIndex;
 

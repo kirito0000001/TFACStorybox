@@ -126,6 +126,9 @@ namespace GalExcleTools
                 }
             }
 
+            _storySoundEffectPlayback.Stop();
+            await PlayStorySoundEffectFunctionsAsync(functionValue);
+
             if (StoryFunctionService.ContainsFunction(functionValue, "BGMSTOP"))
             {
                 _storyBgmPlaybackSuppressed = true;
@@ -140,6 +143,46 @@ namespace GalExcleTools
             if (!string.IsNullOrWhiteSpace(functionValue))
             {
                 await PreviewStoryFunctionAsync(functionValue);
+            }
+        }
+
+        private async Task PlayStorySoundEffectFunctionsAsync(string functionValue)
+        {
+            if (_currentStoryAssetLibrary is null)
+            {
+                return;
+            }
+
+            var soundEffectPaths = AudioAssetService.GetFilePaths(GetSoundEffectFolderPath(_currentStoryAssetLibrary));
+            foreach (var function in StoryFunctionService.SplitFunctionValues(functionValue))
+            {
+                if (!StoryFunctionService.TryParseSoundEffectIndex(function, out var index))
+                {
+                    continue;
+                }
+
+                if (index < 0 || index >= soundEffectPaths.Count)
+                {
+                    ShowStoryStatus(
+                        InfoBarSeverity.Warning,
+                        "特殊音效未播放",
+                        $"Scene 索引 {index} 没有匹配到素材，当前共有 {soundEffectPaths.Count} 个特殊音效。");
+                    continue;
+                }
+
+                try
+                {
+                    await _storySoundEffectPlayback.PlayAsync(soundEffectPaths[index], restartCurrent: true);
+                }
+                catch (Exception ex)
+                {
+                    ShowStoryStatus(
+                        InfoBarSeverity.Error,
+                        "特殊音效播放失败",
+                        "错误详情已复制到剪贴板，并写入 Log。",
+                        ex,
+                        $"故事编辑器特殊音效播放失败：Scene_{index}");
+                }
             }
         }
 
@@ -344,6 +387,7 @@ namespace GalExcleTools
             StopStoryBgm();
             StopStoryScene();
             StopStoryVoicePlayback();
+            _storySoundEffectPlayback.Stop();
         }
 
     }

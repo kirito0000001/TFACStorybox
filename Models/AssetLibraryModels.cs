@@ -36,12 +36,13 @@ internal sealed record FunctionEntry(
     string Name,
     string Indicator,
     string Category,
-    List<string> ChoiceNotes);
+    List<string> ChoiceNotes,
+    string Description = "");
 
 internal sealed record FunctionEditorInput(
     string Name,
     string Indicator,
-    string Category,
+    string Description,
     List<string> ChoiceNotes);
 
 internal sealed class CharacterFilterIndex

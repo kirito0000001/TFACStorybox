@@ -136,7 +136,7 @@ internal sealed class FunctionEditorDialogContent
     private const string ChoiceFunctionCategory = "触发选项";
     private readonly TextBox _nameBox;
     private readonly TextBox _indicatorBox;
-    private readonly TextBox _categoryBox;
+    private readonly TextBox _descriptionBox;
     private readonly StackPanel _choiceNotesPanel;
     private readonly Action _playPositiveSound;
     private readonly Action _playNegativeSound;
@@ -163,12 +163,16 @@ internal sealed class FunctionEditorDialogContent
             Text = function?.Indicator ?? suggestedChoiceIndicator,
             PlaceholderText = "例如：Scene_、BGM_Stop、M2-04-Choice2"
         };
-        _categoryBox = new TextBox
+        _descriptionBox = new TextBox
         {
             Width = 420,
-            Header = "分类",
-            Text = function?.Category ?? (string.IsNullOrWhiteSpace(suggestedChoiceIndicator) ? "自定义" : ChoiceFunctionCategory),
-            PlaceholderText = "音频 / 背景 / 特效 / 动画 / 视频 / 标题 / 触发选项 / 自定义"
+            Header = "介绍",
+            Text = function?.Description ?? string.Empty,
+            PlaceholderText = "简要说明这个函数会做什么",
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 72,
+            MaxLength = 160
         };
         _choiceNotesPanel = new StackPanel
         {
@@ -201,7 +205,7 @@ internal sealed class FunctionEditorDialogContent
             {
                 _nameBox,
                 _indicatorBox,
-                _categoryBox,
+                _descriptionBox,
                 DialogContentFactory.CreateResultHeading("选项备注"),
                 _choiceNotesPanel,
                 addChoiceNoteButton,
@@ -216,7 +220,7 @@ internal sealed class FunctionEditorDialogContent
     {
         var name = _nameBox.Text.Trim();
         var indicator = _indicatorBox.Text.Trim();
-        var category = string.IsNullOrWhiteSpace(_categoryBox.Text) ? "自定义" : _categoryBox.Text.Trim();
+        var description = _descriptionBox.Text.Trim();
         var choiceNotes = _choiceNotesPanel.Children
             .OfType<Grid>()
             .Select(row => row.Children.OfType<TextBox>().FirstOrDefault()?.Text)
@@ -224,7 +228,7 @@ internal sealed class FunctionEditorDialogContent
             .Where(note => !string.IsNullOrWhiteSpace(note))
             .ToList();
 
-        return new FunctionEditorInput(name, indicator, category, choiceNotes);
+        return new FunctionEditorInput(name, indicator, description, choiceNotes);
     }
 
     private void AddChoiceNoteRow(string note = "")
