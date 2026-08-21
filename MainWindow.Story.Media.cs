@@ -258,6 +258,7 @@ namespace GalExcleTools
                 {
                     _storyBackgroundTransitionMode = transitionMode;
                     hasCurrentTransition = true;
+                    functionNames.Add(function);
                     continue;
                 }
 

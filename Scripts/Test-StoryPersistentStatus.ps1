@@ -36,6 +36,11 @@ Require-Pattern `
     'Refreshing current-row functions must replace the old persistent transition status.'
 
 Require-Pattern `
+    (Join-Path $root 'MainWindow.Story.Media.cs') `
+    'UpdateStoryFunctionInspector[\s\S]*?TryParseBackgroundTransitionMode[\s\S]*?functionNames\.Add\(function\)[\s\S]*?continue;' `
+    'The right-side function list must include the explicit BGLerpMode function code.'
+
+Require-Pattern `
     (Join-Path $root 'MainWindow.Story.Functions.cs') `
     'RefreshCurrentStoryFunctionStateAfterEdit[\s\S]*?RebuildStoryPersistentFunctionState[\s\S]*?UpdateStoryToolbarCurrentInfo[\s\S]*?RefreshCurrentStoryPersistentStatus' `
     'Function edits need one shared state-and-status refresh path.'
