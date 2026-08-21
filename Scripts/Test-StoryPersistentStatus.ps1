@@ -45,6 +45,21 @@ Require-Pattern `
     'ClearStoryFunction\(\)[\s\S]*?RefreshCurrentStoryFunctionStateAfterEdit[\s\S]*?ChooseStoryFunctionAsync\(\)[\s\S]*?RefreshCurrentStoryFunctionStateAfterEdit[\s\S]*?RemoveStoryFunctionAsync\(\)[\s\S]*?RefreshCurrentStoryFunctionStateAfterEdit' `
     'Adding, removing, and clearing functions must all refresh persistent status.'
 
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Story.cs') `
+    'NavigatePreviousStoryRow[\s\S]*?NavigateToStoryRow\([^;]*?showTransitionStatus:\s*false\)' `
+    'Previous-row debugging must suppress forward-only transition status.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Story.cs') `
+    'LoadStoryRowIntoUi\([^)]*showTransitionStatus[\s\S]*?if\s*\(showTransitionStatus\)[\s\S]*?RefreshCurrentStoryPersistentStatus\(\)[\s\S]*?else[\s\S]*?ClearStoryTransientTips\(\)[\s\S]*?RefreshStoryPreviewAsync\(showTransitionStatus\)' `
+    'Story-row loading must clear status and pass transition visibility to the preview.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Story.Preview.cs') `
+    'SetStoryBackgroundAsync\([^)]*showTransitionStatus[\s\S]*?if\s*\(showTransitionStatus\s*&&[\s\S]*?ShowPersistentStoryStatus' `
+    'Background preview must not emit transition status when backward navigation suppresses it.'
+
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Error $_ }
     exit 1

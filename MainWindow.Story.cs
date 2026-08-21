@@ -301,7 +301,7 @@ namespace GalExcleTools
             AppendLog(LogKind.User, $"重做编辑器操作：{application.Description}");
         }
 
-        private void LoadStoryRowIntoUi(bool playMedia = true)
+        private void LoadStoryRowIntoUi(bool playMedia = true, bool showTransitionStatus = true)
         {
             if (_storyRows.Count == 0)
             {
@@ -330,8 +330,16 @@ namespace GalExcleTools
                 _isLoadingStoryRow = false;
             }
 
-            RefreshCurrentStoryPersistentStatus();
-            _ = RefreshStoryPreviewAsync();
+            if (showTransitionStatus)
+            {
+                RefreshCurrentStoryPersistentStatus();
+            }
+            else
+            {
+                ClearStoryTransientTips();
+            }
+
+            _ = RefreshStoryPreviewAsync(showTransitionStatus);
             if (!playMedia)
             {
                 return;
@@ -427,7 +435,10 @@ namespace GalExcleTools
             NavigateToStoryRow(sectionIndexes[targetLocalIndex], rebuildPersistentState: true);
         }
 
-        private void NavigateToStoryRow(int targetIndex, bool rebuildPersistentState)
+        private void NavigateToStoryRow(
+            int targetIndex,
+            bool rebuildPersistentState,
+            bool showTransitionStatus = true)
         {
             if (_storyRows.Count == 0)
             {
@@ -450,7 +461,7 @@ namespace GalExcleTools
                 RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
             }
 
-            LoadStoryRowIntoUi();
+            LoadStoryRowIntoUi(showTransitionStatus: showTransitionStatus);
         }
 
         private void NavigatePreviousStoryRow()
@@ -460,7 +471,10 @@ namespace GalExcleTools
                 return;
             }
 
-            NavigateToStoryRow(_currentStoryRowIndex - 1, rebuildPersistentState: true);
+            NavigateToStoryRow(
+                _currentStoryRowIndex - 1,
+                rebuildPersistentState: true,
+                showTransitionStatus: false);
         }
 
         private void NavigateStorySection(int direction)
