@@ -243,15 +243,11 @@ namespace GalExcleTools
                 return;
             }
 
-            var selected = await _storyDialogService.SelectSimpleChoiceAsync(
+            var function = await _functionDialogService.SelectFunctionAsync(
                 "填写函数",
-                functions
-                    .Select(function => new StoryObjectChoice(
-                        function.Id,
-                        FormatStoryFunctionChoiceDisplay(function),
-                        function))
-                    .ToList());
-            if (selected is not FunctionEntry function)
+                functions,
+                BuildNextStoryChoiceFunctionIndicator());
+            if (function is null)
             {
                 return;
             }
@@ -313,12 +309,10 @@ namespace GalExcleTools
 
         private List<FunctionEntry> GetStoryFunctions()
         {
-            return _currentStoryAssetLibrary is null ? [] : StoryFunctionService.ReadFunctions(_currentStoryAssetLibrary, _jsonOptions);
-        }
-
-        private string FormatStoryFunctionChoiceDisplay(FunctionEntry function)
-        {
-            return StoryFunctionService.BuildFunctionChoiceDisplay(function, BuildNextStoryChoiceFunctionIndicator());
+            return _currentStoryAssetLibrary is null
+                ? []
+                : StoryFunctionService.OrderByUsageFrequency(
+                    StoryFunctionService.ReadFunctions(_currentStoryAssetLibrary, _jsonOptions));
         }
 
         private async Task<string?> BuildStoryFunctionValueAsync(FunctionEntry function)

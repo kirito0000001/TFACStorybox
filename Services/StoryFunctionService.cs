@@ -165,6 +165,63 @@ internal static class StoryFunctionService
         return $"{function.Name} / {indicator} / {function.Category}";
     }
 
+    public static List<FunctionEntry> OrderByUsageFrequency(IEnumerable<FunctionEntry> functions)
+    {
+        return functions
+            .Select((function, index) => new { Function = function, Index = index })
+            .OrderByDescending(item => GetUsageFrequency(item.Function))
+            .ThenBy(item => item.Index)
+            .Select(item => item.Function)
+            .ToList();
+    }
+
+    private static int GetUsageFrequency(FunctionEntry function)
+    {
+        var indicator = function.Indicator.Trim();
+        if (IsBgmFunctionTemplate(function) || indicator.StartsWith("BGM", StringComparison.OrdinalIgnoreCase))
+        {
+            return 30;
+        }
+        if (indicator.StartsWith("VFX", StringComparison.OrdinalIgnoreCase) ||
+            indicator.Equals("CloseAllFX", StringComparison.OrdinalIgnoreCase))
+        {
+            return 27;
+        }
+        if (indicator.StartsWith("BGLerpMode", StringComparison.OrdinalIgnoreCase))
+        {
+            return 15;
+        }
+        if (indicator.StartsWith("Scene_", StringComparison.OrdinalIgnoreCase))
+        {
+            return 12;
+        }
+        if (indicator.StartsWith("TransAnim", StringComparison.OrdinalIgnoreCase))
+        {
+            return 11;
+        }
+        if (IsChoiceFunctionTemplate(function) || indicator.Contains("Choice", StringComparison.OrdinalIgnoreCase))
+        {
+            return 4;
+        }
+        if (indicator.StartsWith("TitleShowMode", StringComparison.OrdinalIgnoreCase) ||
+            indicator.StartsWith("ChapterShow", StringComparison.OrdinalIgnoreCase))
+        {
+            return 4;
+        }
+        if (indicator.StartsWith("MedPlay", StringComparison.OrdinalIgnoreCase))
+        {
+            return 3;
+        }
+        if (IsChapterJumpFunctionTemplate(function) ||
+            IsSegmentJumpFunctionTemplate(function) ||
+            indicator.StartsWith("Into", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        return 0;
+    }
+
     public static string BuildSuggestedChoiceIndicator(string prefix, IEnumerable<FunctionEntry> functions)
     {
         var existingCount = functions.Count(function =>

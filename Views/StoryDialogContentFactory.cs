@@ -22,6 +22,13 @@ internal static class StoryDialogContentFactory
         return new ChoiceFunctionNoteDialogContent(choiceIndicator, playPositiveSound, playNegativeSound);
     }
 
+    public static FunctionSelectionDialogContent CreateFunctionSelectionContent(
+        IReadOnlyList<FunctionEntry> functions,
+        string nextChoiceIndicator)
+    {
+        return new FunctionSelectionDialogContent(functions, nextChoiceIndicator);
+    }
+
     public static UIElement CreateCurrentStoryChoicesContent(
         IReadOnlyList<string> choices,
         IReadOnlyDictionary<string, List<string>> noteMap)
@@ -303,6 +310,154 @@ internal static class StoryDialogContentFactory
         row.Children.Add(noteBox);
         return row;
     }
+}
+
+internal sealed class FunctionSelectionDialogContent
+{
+    private readonly IReadOnlyList<FunctionSelectionRow> _rows;
+    private readonly AutoSuggestBox _searchBox;
+    private readonly ListView _listView;
+    private readonly TextBlock _emptyText;
+
+    public FunctionSelectionDialogContent(
+        IReadOnlyList<FunctionEntry> functions,
+        string nextChoiceIndicator)
+    {
+        _rows = functions
+            .Select(function =>
+            {
+                var indicator = StoryFunctionService.IsChoiceFunctionTemplate(function)
+                    ? nextChoiceIndicator
+                    : function.Indicator;
+                return new FunctionSelectionRow(
+                    function,
+                    function.Name,
+                    indicator,
+                    $"{function.Name} {indicator}");
+            })
+            .ToList();
+
+        _listView = new ListView
+        {
+            Width = 560,
+            MaxHeight = 460,
+            SelectionMode = ListViewSelectionMode.Single,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch
+        };
+        _searchBox = new AutoSuggestBox
+        {
+            PlaceholderText = "搜索中文名称或英文代码",
+            QueryIcon = new SymbolIcon(Symbol.Find),
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        _searchBox.TextChanged += (_, args) =>
+        {
+            if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+            {
+                RefreshRows(_searchBox.Text);
+            }
+        };
+        _searchBox.QuerySubmitted += (_, _) =>
+        {
+            if (_listView.SelectedItem is null && _listView.Items.Count > 0)
+            {
+                _listView.SelectedIndex = 0;
+            }
+            _listView.Focus(FocusState.Keyboard);
+        };
+
+        _emptyText = new TextBlock
+        {
+            Text = "没有匹配的函数",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Opacity = 0.6,
+            Visibility = Visibility.Collapsed
+        };
+
+        Content = new StackPanel
+        {
+            Width = 560,
+            Spacing = 10,
+            Children =
+            {
+                _searchBox,
+                _listView,
+                _emptyText
+            }
+        };
+        RefreshRows(string.Empty);
+    }
+
+    public StackPanel Content { get; }
+
+    public FunctionEntry? SelectedFunction =>
+        (_listView.SelectedItem as ListViewItem)?.Tag as FunctionEntry;
+
+    public void AttachDialog(ContentDialog dialog)
+    {
+        dialog.IsPrimaryButtonEnabled = SelectedFunction is not null;
+        _listView.SelectionChanged += (_, _) =>
+            dialog.IsPrimaryButtonEnabled = SelectedFunction is not null;
+        dialog.PrimaryButtonClick += (_, args) => args.Cancel = SelectedFunction is null;
+        dialog.Opened += (_, _) => _searchBox.Focus(FocusState.Keyboard);
+    }
+
+    private void RefreshRows(string searchText)
+    {
+        var query = searchText.Trim();
+        var filteredRows = string.IsNullOrWhiteSpace(query)
+            ? _rows
+            : _rows.Where(row => row.SearchText.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        _listView.Items.Clear();
+        foreach (var row in filteredRows)
+        {
+            var primaryText = new TextBlock
+            {
+                Text = row.DisplayName,
+                FontSize = 15,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.NoWrap
+            };
+            var secondaryText = new TextBlock
+            {
+                Text = row.Indicator,
+                FontSize = 12,
+                Opacity = 0.6,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.NoWrap
+            };
+            var listItem = new ListViewItem
+            {
+                MinHeight = 56,
+                Padding = new Thickness(10, 5, 10, 5),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Content = new StackPanel
+                {
+                    Spacing = 2,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Children =
+                    {
+                        primaryText,
+                        secondaryText
+                    }
+                },
+                Tag = row.Function
+            };
+            ToolTipService.SetToolTip(listItem, row.Indicator);
+            _listView.Items.Add(listItem);
+        }
+
+        _listView.SelectedIndex = _listView.Items.Count > 0 ? 0 : -1;
+        _emptyText.Visibility = _listView.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private sealed record FunctionSelectionRow(
+        FunctionEntry Function,
+        string DisplayName,
+        string Indicator,
+        string SearchText);
 }
 
 internal sealed class ChoiceFunctionNoteDialogContent

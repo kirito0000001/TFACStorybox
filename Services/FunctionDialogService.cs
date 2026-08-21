@@ -44,6 +44,25 @@ internal sealed class FunctionDialogService
             : input;
     }
 
+    public async Task<FunctionEntry?> SelectFunctionAsync(
+        string title,
+        IReadOnlyList<FunctionEntry> functions,
+        string nextChoiceIndicator)
+    {
+        var selectionContent = StoryDialogContentFactory.CreateFunctionSelectionContent(
+            functions,
+            nextChoiceIndicator);
+        var result = await _dialogService.ShowContentAsync(new ContentDialogRequest(
+            title,
+            selectionContent.Content,
+            "确定",
+            "取消",
+            ConfigureDialog: selectionContent.AttachDialog));
+        return result == DialogResultKind.Primary
+            ? selectionContent.SelectedFunction
+            : null;
+    }
+
     public async Task<List<string>?> EditChoiceNotesAsync(string choiceIndicator)
     {
         var dialogContent = StoryDialogContentFactory.CreateChoiceFunctionNoteContent(
