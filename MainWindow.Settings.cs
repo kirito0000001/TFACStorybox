@@ -118,13 +118,14 @@ namespace GalExcleTools
             Settings.Save();
         }
 
-        private void ShellNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+        private async void ShellNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
         {
             if (args.SelectedItemContainer?.Tag is not string tag)
             {
                 return;
             }
 
+            var navigationRequestId = ++_shellNavigationRequestId;
             if (!_isChangingShellSelectionInternally)
             {
                 PlaySelectionSound();
@@ -138,23 +139,38 @@ namespace GalExcleTools
 
             if (module?.Key == ToolboxModuleKey.Settings)
             {
+                await PrepareWorkbenchSessionForModuleChangeAsync();
+                if (navigationRequestId != _shellNavigationRequestId)
+                {
+                    return;
+                }
                 ShowSettingsPage();
                 return;
             }
 
             if (module?.Key == ToolboxModuleKey.AssetLibrary)
             {
+                await PrepareWorkbenchSessionForModuleChangeAsync();
+                if (navigationRequestId != _shellNavigationRequestId)
+                {
+                    return;
+                }
                 ShowAssetLibraryPage();
                 return;
             }
 
             if (module?.Key == ToolboxModuleKey.UnrealSync)
             {
+                await PrepareWorkbenchSessionForModuleChangeAsync();
+                if (navigationRequestId != _shellNavigationRequestId)
+                {
+                    return;
+                }
                 ShowUnrealSyncPage();
                 return;
             }
 
-            ShowWorkbenchPage();
+            RestoreRememberedWorkbenchPage();
         }
 
     }

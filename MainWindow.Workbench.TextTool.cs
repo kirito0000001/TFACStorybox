@@ -49,6 +49,7 @@ namespace GalExcleTools
                 return;
             }
 
+            _workbenchReturnPage = WorkbenchReturnPage.ProjectTextTool;
             _projectTextToolMode = mode;
             _selectedTextToolChapter = chapter;
             _selectedVoiceChapter = chapter;

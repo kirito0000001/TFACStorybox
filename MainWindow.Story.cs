@@ -64,6 +64,7 @@ namespace GalExcleTools
                 return;
             }
 
+            _workbenchReturnPage = WorkbenchReturnPage.StoryEditor;
             SaveCurrentStoryRow();
             _storyEditSaveTimer?.Stop();
             await _storySaveCoordinator.FlushAsync();
@@ -300,7 +301,7 @@ namespace GalExcleTools
             AppendLog(LogKind.User, $"重做编辑器操作：{application.Description}");
         }
 
-        private void LoadStoryRowIntoUi()
+        private void LoadStoryRowIntoUi(bool playMedia = true)
         {
             if (_storyRows.Count == 0)
             {
@@ -330,6 +331,11 @@ namespace GalExcleTools
             }
 
             _ = RefreshStoryPreviewAsync();
+            if (!playMedia)
+            {
+                return;
+            }
+
             var activeRowId = _storyRows[_currentStoryRowIndex].StableId;
             if (!string.Equals(_lastStoryVoiceRowId, activeRowId, StringComparison.OrdinalIgnoreCase))
             {

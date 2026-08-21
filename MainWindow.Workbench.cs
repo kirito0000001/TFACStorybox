@@ -520,6 +520,7 @@ namespace GalExcleTools
 
         private void ShowProjectDetailPage(ProjectInfo project)
         {
+            _workbenchReturnPage = WorkbenchReturnPage.ProjectDetail;
             StopStoryEditorAudio();
             _currentProject = project;
             Directory.CreateDirectory(GetChaptersFolderPath(project));

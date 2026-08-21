@@ -66,6 +66,7 @@ namespace GalExcleTools
 
         private void ShowWorkbenchPage()
         {
+            _workbenchReturnPage = WorkbenchReturnPage.Root;
             StopStoryEditorAudio();
             ResetCreateProjectForm();
             _currentAssetLibrary = null;
@@ -77,6 +78,7 @@ namespace GalExcleTools
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
             MusicPlayerPage.Visibility = Visibility.Collapsed;
+            ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             UnrealSyncPage.Visibility = Visibility.Collapsed;
