@@ -509,7 +509,9 @@
                                         </Grid.ColumnDefinitions>
                                         <ToggleButton
                                             x:Name="StoryInspectorStateTabButton"
-                                            Height="36"
+                                            Height="40"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Center"
                                             Content="本句"
                                             FontSize="14"
                                             FontWeight="SemiBold"
@@ -518,7 +520,9 @@
                                         <ToggleButton
                                             x:Name="StoryInspectorToolsTabButton"
                                             Grid.Column="1"
-                                            Height="36"
+                                            Height="40"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Center"
                                             Content="工具"
                                             FontSize="14"
                                             FontWeight="SemiBold"
