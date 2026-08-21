@@ -339,7 +339,8 @@ namespace GalExcleTools
 
         private async Task LoadFunctionsAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
-            var functions = StoryFunctionService.ReadFunctions(assetLibrary, _jsonOptions);
+            var functions = StoryFunctionService.OrderByFixedUsage(
+                StoryFunctionService.ReadFunctions(assetLibrary, _jsonOptions));
             FunctionGridView.Items.Clear();
             FunctionExpander.Header = $"函数 [数量：{functions.Count}]";
             if (forcePopulateCards || FunctionExpander.IsExpanded)

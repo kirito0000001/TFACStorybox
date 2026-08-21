@@ -295,7 +295,10 @@ namespace GalExcleTools
 
         private List<FunctionEntry> GetStoryFunctions()
         {
-            return _currentStoryAssetLibrary is null ? [] : StoryFunctionService.ReadFunctions(_currentStoryAssetLibrary, _jsonOptions);
+            return _currentStoryAssetLibrary is null
+                ? []
+                : StoryFunctionService.OrderByFixedUsage(
+                    StoryFunctionService.ReadFunctions(_currentStoryAssetLibrary, _jsonOptions));
         }
 
         private string FormatStoryFunctionChoiceDisplay(FunctionEntry function)
