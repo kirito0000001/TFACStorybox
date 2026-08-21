@@ -70,6 +70,7 @@ namespace GalExcleTools
 
         private void BackToProjectDetailFromTextToolButton_Click(object sender, RoutedEventArgs e)
         {
+            StopProjectVoicePreview();
             if (_currentProject is null)
             {
                 ShowWorkbenchPage();
@@ -94,6 +95,7 @@ namespace GalExcleTools
             }
 
             PlaySelectionSound();
+            StopProjectVoicePreview();
             _selectedTextToolChapter = selected;
             _selectedVoiceChapter = selected;
             RefreshProjectTextToolPage();
@@ -107,6 +109,7 @@ namespace GalExcleTools
             }
 
             PlaySelectionSound();
+            StopProjectVoicePreview();
             var chapters = _projectWorkspaceService.GetChapters(_currentProject)
                 .OrderBy(chapter => chapter.Code, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -114,6 +117,19 @@ namespace GalExcleTools
             _projectTextRows.AddRange(_projectTextDataService.LoadTextRows(_currentProject, chapters));
             _projectVoiceMapState = _projectTextDataService.ReadVoiceMap(_currentProject);
             _projectLocalizationState = _projectTextDataService.ReadLocalization(_currentProject);
+            RefreshProjectTextToolPage();
+        }
+
+        private void ProjectTextToolVoiceFilterButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_projectTextToolMode != ProjectTextToolMode.Voice)
+            {
+                return;
+            }
+
+            PlaySelectionSound();
+            StopProjectVoicePreview();
+            _showOnlyConfiguredVoices = !_showOnlyConfiguredVoices;
             RefreshProjectTextToolPage();
         }
 
@@ -166,6 +182,10 @@ namespace GalExcleTools
             ProjectTextToolSwitchLanguageButton.Visibility = _projectTextToolMode == ProjectTextToolMode.Localization
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+            ProjectTextToolVoiceFilterButton.Visibility = _projectTextToolMode == ProjectTextToolMode.Voice
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            ProjectTextToolVoiceFilterButton.Content = _showOnlyConfiguredVoices ? "显示全部" : "仅看已设置";
             if (_selectedTextToolChapter is null)
             {
                 ProjectTextToolTitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice ? "文本语音" : "文本本地化";
@@ -174,17 +194,26 @@ namespace GalExcleTools
                 return;
             }
 
-            var rows = _projectTextRows
+            var chapterRows = _projectTextRows
                 .Where(row => string.Equals(row.ChapterCode, _selectedTextToolChapter.Code, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+            var rows = _projectTextToolMode == ProjectTextToolMode.Voice && _showOnlyConfiguredVoices
+                ? chapterRows
+                    .Where(row => _projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) &&
+                        !string.IsNullOrWhiteSpace(voicePath))
+                    .ToList()
+                : chapterRows;
             ProjectTextToolTitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice
                 ? $"文本语音 {_selectedTextToolChapter.Name}"
                 : $"文本本地化 {_selectedTextToolChapter.Name}";
             ProjectTextToolSubtitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice
-                ? $"当前章节：{_selectedTextToolChapter.Code}，文本 {rows.Count} 行。右侧点击选择语音文件，仅支持 wav。"
+                ? _showOnlyConfiguredVoices
+                    ? $"当前章节：{_selectedTextToolChapter.Code}，已设置语音 {rows.Count} / 全部 {chapterRows.Count} 行。"
+                    : $"当前章节：{_selectedTextToolChapter.Code}，文本 {chapterRows.Count} 行。右侧点击选择语音文件，仅支持 wav。"
                 : $"当前语言：{_selectedLocalizationLanguage}，章节：{_selectedTextToolChapter.Code}，文本 {rows.Count} 行。";
             ProjectTextToolTablePanel.Children.Add(CreateProjectTextTableHeader(
-                _projectTextToolMode == ProjectTextToolMode.Voice ? "语音文件" : _selectedLocalizationLanguage));
+                _projectTextToolMode == ProjectTextToolMode.Voice ? "语音文件" : _selectedLocalizationLanguage,
+                _projectTextToolMode == ProjectTextToolMode.Voice));
             if (rows.Count == 0)
             {
                 ProjectTextToolTablePanel.Children.Add(CreateProjectTextEmptyRow("这个章节还没有可编辑的文本。"));
@@ -197,7 +226,7 @@ namespace GalExcleTools
                 if (_projectTextToolMode == ProjectTextToolMode.Voice)
                 {
                     var value = _projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) ? voicePath : string.Empty;
-                    ProjectTextToolTablePanel.Children.Add(CreateProjectTextVoiceTableRow(row, value, index + 1, rows.Count));
+                    ProjectTextToolTablePanel.Children.Add(CreateProjectTextVoiceTableRow(row, value, chapterRows.Count));
                 }
                 else
                 {
@@ -219,7 +248,11 @@ namespace GalExcleTools
             return languageMap;
         }
 
-        private async Task SetProjectVoiceRemarkAsync(ProjectTextRow row, int rowNumber, int rowCount, Button? button = null)
+        private async Task SetProjectVoiceRemarkAsync(
+            ProjectTextRow row,
+            int rowCount,
+            Button? button = null,
+            Button? previewButton = null)
         {
             if (_currentProject is null)
             {
@@ -245,7 +278,6 @@ namespace GalExcleTools
             var updatedPath = _projectVoiceAssetService.UpdateRemark(
                 _currentProject,
                 row,
-                rowNumber,
                 rowCount,
                 remarkInput,
                 _projectVoiceMapState);
@@ -254,16 +286,24 @@ namespace GalExcleTools
             if (button is not null)
             {
                 UpdateProjectVoiceButton(button, updatedPath);
+                if (previewButton is not null)
+                {
+                    UpdateProjectVoicePreviewButton(previewButton, updatedPath);
+                }
             }
             else
             {
                 RefreshProjectTextToolPage();
             }
 
-            AppendLog(LogKind.User, $"已更改语音备注：{Path.GetFileName(updatedPath)}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "语音备注已保存",
+                Path.GetFileName(updatedPath),
+                logMessage: $"已更改语音备注：{Path.GetFileName(updatedPath)}");
         }
 
-        private async Task RemoveProjectVoiceAsync(ProjectTextRow row, Button? button = null)
+        private async Task RemoveProjectVoiceAsync(ProjectTextRow row, Button? button = null, Button? previewButton = null)
         {
             if (_currentProject is null)
             {
@@ -288,26 +328,40 @@ namespace GalExcleTools
             }
 
             var removedPath = _projectVoiceAssetService.RemoveVoice(_currentProject, row, _projectVoiceMapState);
+            StopProjectVoicePreview();
             _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
             TouchProjectLastEditedAt(_currentProject);
             if (button is not null)
             {
                 UpdateProjectVoiceButton(button, string.Empty);
+                if (previewButton is not null)
+                {
+                    UpdateProjectVoicePreviewButton(previewButton, string.Empty);
+                }
             }
             else
             {
                 RefreshProjectTextToolPage();
             }
 
-            AppendLog(LogKind.User, $"已移除语音映射：{Path.GetFileName(removedPath ?? voicePath)}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "语音文件已移除",
+                Path.GetFileName(removedPath ?? voicePath),
+                logMessage: $"已移除语音映射：{Path.GetFileName(removedPath ?? voicePath)}");
         }
 
-        private static UIElement CreateProjectTextTableHeader(string valueHeader)
+        private static UIElement CreateProjectTextTableHeader(string valueHeader, bool includeVoicePreview)
         {
-            var grid = CreateProjectTextGrid();
+            var grid = CreateProjectTextGrid(includeVoicePreview);
             grid.Background = new SolidColorBrush(Microsoft.UI.Colors.WhiteSmoke);
-            grid.Children.Add(CreateProjectTextCell("文本", 0, isHeader: true));
-            grid.Children.Add(CreateProjectTextCell(valueHeader, 1, isHeader: true));
+            grid.Children.Add(CreateProjectTextCell("文本", 0, isHeader: true, hasRightBorder: true));
+            grid.Children.Add(CreateProjectTextCell(valueHeader, 1, isHeader: true, hasRightBorder: includeVoicePreview));
+            if (includeVoicePreview)
+            {
+                grid.Children.Add(CreateProjectTextCell("试听", 2, isHeader: true, centerContent: true));
+            }
+
             return grid;
         }
 
@@ -328,11 +382,11 @@ namespace GalExcleTools
             return border;
         }
 
-        private Grid CreateProjectTextVoiceTableRow(ProjectTextRow row, string value, int rowNumber, int rowCount)
+        private Grid CreateProjectTextVoiceTableRow(ProjectTextRow row, string value, int rowCount)
         {
-            var grid = CreateProjectTextGrid();
+            var grid = CreateProjectTextGrid(includeVoicePreview: true);
             grid.Children.Add(CreateProjectTextSourceCell(row));
-            var hasVoice = !string.IsNullOrWhiteSpace(value);
+            var hasVoice = !string.IsNullOrWhiteSpace(value) && File.Exists(value);
             var button = new Button
             {
                 MinWidth = 520,
@@ -340,9 +394,10 @@ namespace GalExcleTools
                 Tag = row.Id
             };
             UpdateProjectVoiceButton(button, hasVoice ? value : string.Empty);
+            var previewButton = CreateProjectVoicePreviewButton(row, hasVoice ? value : string.Empty);
             button.ContextFlyout = GridViewItemFactory.CreateMenu(
-                GridViewItemFactory.CreateMenuItem("更改备注", async (_, _) => await SetProjectVoiceRemarkAsync(row, rowNumber, rowCount, button)),
-                GridViewItemFactory.CreateMenuItem("移除", async (_, _) => await RemoveProjectVoiceAsync(row, button)));
+                GridViewItemFactory.CreateMenuItem("更改备注", async (_, _) => await SetProjectVoiceRemarkAsync(row, rowCount, button, previewButton)),
+                GridViewItemFactory.CreateMenuItem("移除", async (_, _) => await RemoveProjectVoiceAsync(row, button, previewButton)));
             button.Click += async (_, _) =>
             {
                 var selectedPath = await PickReplacementFileAsync([".wav"], PickerLocationId.MusicLibrary);
@@ -351,23 +406,46 @@ namespace GalExcleTools
                     return;
                 }
 
-                if (_currentProject is not null)
+                if (_currentProject is null)
                 {
-                    selectedPath = _projectVoiceAssetService.ImportVoice(
+                    return;
+                }
+
+                var isReplacing = _projectVoiceMapState.Voices.TryGetValue(row.Id, out var existingPath) &&
+                    !string.IsNullOrWhiteSpace(existingPath);
+                try
+                {
+                    var sourceFileName = Path.GetFileName(selectedPath);
+                    var importedPath = _projectVoiceAssetService.ImportVoice(
                         _currentProject,
                         row,
-                        rowNumber,
                         rowCount,
                         selectedPath,
                         _projectVoiceMapState);
                     _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
                     TouchProjectLastEditedAt(_currentProject);
-                }
 
-                UpdateProjectVoiceButton(button, selectedPath);
-                PlaySelectionSound();
+                    UpdateProjectVoiceButton(button, importedPath);
+                    UpdateProjectVoicePreviewButton(previewButton, importedPath);
+                    PlaySelectionSound();
+                    ShowFloatingTip(
+                        InfoBarSeverity.Success,
+                        isReplacing ? "语音文件已更换" : "语音文件已设置",
+                        Path.GetFileName(importedPath),
+                        logMessage: $"{(isReplacing ? "更换" : "设置")}语音文件：{row.Id} <- {sourceFileName}");
+                }
+                catch (Exception ex)
+                {
+                    ShowFloatingTip(
+                        InfoBarSeverity.Error,
+                        isReplacing ? "语音文件更换失败" : "语音文件设置失败",
+                        "错误详情已复制到剪贴板，并写入 Log。",
+                        ex,
+                        $"{(isReplacing ? "更换" : "设置")}语音文件失败：{row.Id}");
+                }
             };
-            grid.Children.Add(CreateProjectTextScrollableCell(button, 1));
+            grid.Children.Add(CreateProjectTextScrollableCell(button, 1, hasRightBorder: true));
+            grid.Children.Add(CreateProjectVoicePreviewCell(previewButton));
             return grid;
         }
 
@@ -407,7 +485,7 @@ namespace GalExcleTools
             return grid;
         }
 
-        private static Grid CreateProjectTextGrid()
+        private static Grid CreateProjectTextGrid(bool includeVoicePreview = false)
         {
             var grid = new Grid
             {
@@ -416,6 +494,11 @@ namespace GalExcleTools
             };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 240 });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 240 });
+            if (includeVoicePreview)
+            {
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
+            }
+
             return grid;
         }
 
@@ -468,17 +551,89 @@ namespace GalExcleTools
             ToolTipService.SetToolTip(button, hasVoice ? voicePath : "未设置语音文件");
         }
 
-        private static Border CreateProjectTextCell(string text, int column, bool isHeader = false)
+        private Button CreateProjectVoicePreviewButton(ProjectTextRow row, string voicePath)
+        {
+            var button = new Button
+            {
+                Width = 40,
+                Height = 36,
+                Padding = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Content = new SymbolIcon(Symbol.Play),
+                Tag = row.Id
+            };
+            UpdateProjectVoicePreviewButton(button, voicePath);
+            button.Click += async (_, _) => await PlayProjectVoicePreviewAsync(row);
+            return button;
+        }
+
+        private static void UpdateProjectVoicePreviewButton(Button button, string voicePath)
+        {
+            var canPreview = !string.IsNullOrWhiteSpace(voicePath) && File.Exists(voicePath);
+            button.IsEnabled = canPreview;
+            ToolTipService.SetToolTip(button, canPreview ? "播放语音测试" : "当前行没有可播放的语音");
+        }
+
+        private async Task PlayProjectVoicePreviewAsync(ProjectTextRow row)
+        {
+            if (!_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) || !File.Exists(voicePath))
+            {
+                ShowFloatingTip(InfoBarSeverity.Warning, "语音无法播放", "当前行没有可用的语音文件。");
+                return;
+            }
+
+            try
+            {
+                var file = await StorageFile.GetFileFromPathAsync(voicePath);
+                _projectVoicePreviewPlayer.Source = MediaSource.CreateFromStorageFile(file);
+                _projectVoicePreviewPlayer.Play();
+                AppendLog(LogKind.Info, $"试听语音：{Path.GetFileName(voicePath)}");
+            }
+            catch (Exception ex)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "语音播放失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    $"试听语音失败：{Path.GetFileName(voicePath)}");
+            }
+        }
+
+        private void StopProjectVoicePreview()
+        {
+            _projectVoicePreviewPlayer.Pause();
+            _projectVoicePreviewPlayer.Source = null;
+        }
+
+        private static Border CreateProjectVoicePreviewCell(Button button)
+        {
+            var border = new Border
+            {
+                Child = button
+            };
+            Grid.SetColumn(border, 2);
+            return border;
+        }
+
+        private static Border CreateProjectTextCell(
+            string text,
+            int column,
+            bool isHeader = false,
+            bool hasRightBorder = false,
+            bool centerContent = false)
         {
             var border = new Border
             {
                 Padding = new Thickness(10, 8, 10, 8),
                 BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = column == 0 ? new Thickness(0, 0, 1, 0) : new Thickness(0),
+                BorderThickness = hasRightBorder ? new Thickness(0, 0, 1, 0) : new Thickness(0),
                 Child = new TextBlock
                 {
                     Text = text,
                     TextWrapping = TextWrapping.Wrap,
+                    HorizontalAlignment = centerContent ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
                     FontWeight = isHeader ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
                     Foreground = Application.Current.Resources[isHeader ? "TextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush"] as Brush
                 }
@@ -487,12 +642,12 @@ namespace GalExcleTools
             return border;
         }
 
-        private static Border CreateProjectTextScrollableCell(FrameworkElement content, int column)
+        private static Border CreateProjectTextScrollableCell(FrameworkElement content, int column, bool hasRightBorder = false)
         {
             var border = new Border
             {
                 BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = column == 0 ? new Thickness(0, 0, 1, 0) : new Thickness(0),
+                BorderThickness = hasRightBorder ? new Thickness(0, 0, 1, 0) : new Thickness(0),
                 Child = new ScrollViewer
                 {
                     HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,

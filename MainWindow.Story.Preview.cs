@@ -44,44 +44,47 @@ namespace GalExcleTools
     {
         private async Task RefreshStoryPreviewAsync()
         {
+            _storyPreviewRefreshCancellation?.Cancel();
+            _storyPreviewRefreshCancellation?.Dispose();
+            var cancellation = new CancellationTokenSource();
+            _storyPreviewRefreshCancellation = cancellation;
+            var cancellationToken = cancellation.Token;
             if (_storyRows.Count == 0)
             {
                 return;
             }
 
-            var row = _storyRows[_currentStoryRowIndex];
-            var normalizedLayers = false;
-            normalizedLayers |= NormalizeStoryDetachedCharacterLayers(row);
-            for (var slotIndex = 0; slotIndex <= 5; slotIndex++)
+            var row = _storyRows[_currentStoryRowIndex].Clone();
+            try
             {
-                var character = ResolveStoryCharacter(row.Get(StoryCharacterSlotService.GetCharacterColumn(slotIndex)));
-                if (character is not null)
-                {
-                    normalizedLayers |= NormalizeStoryRowLayerCompatibility(row, character, slotIndex);
-                }
+                await SetStoryBackgroundAsync(ParseInt(row.Get("BGindex")), cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                await SetStoryCharacterSlotAsync(StoryCharacterSlot1, 1, row.Get("Chara1"), ParseInt(row.Get("Body1")), ParseInt(row.Get("Face1")), ParseInt(row.Get("Adorn1")), ParseInt(row.Get("Vfx1")), cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                await SetStoryCharacterSlotAsync(StoryCharacterSlot2, 2, row.Get("Chara2"), ParseInt(row.Get("Body2")), ParseInt(row.Get("Face2")), ParseInt(row.Get("Adorn2")), ParseInt(row.Get("Vfx2")), cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                await SetStoryCharacterSlotAsync(StoryCharacterSlot3, 3, row.Get("Chara3"), ParseInt(row.Get("Body3")), ParseInt(row.Get("Face3")), ParseInt(row.Get("Adorn3")), ParseInt(row.Get("Vfx3")), cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                await SetStoryCharacterSlotAsync(StoryCharacterSlot4, 4, row.Get("Chara4"), ParseInt(row.Get("Body4")), ParseInt(row.Get("Face4")), ParseInt(row.Get("Adorn4")), ParseInt(row.Get("Vfx4")), cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                await SetStoryCharacterSlotAsync(StoryCharacterSlot5, 5, row.Get("Chara5"), ParseInt(row.Get("Body5")), ParseInt(row.Get("Face5")), ParseInt(row.Get("Adorn5")), ParseInt(row.Get("Vfx5")), cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                await SetStorySpeakerPreviewAsync(row.Get("TalkChar"), ParseInt(row.Get("TalkBody")), ParseInt(row.Get("TalkFace")), ParseInt(row.Get("TalkAdorn")), ParseInt(row.Get("TalkVfx")), cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                UpdateStoryCharacterSlotLayout();
+                UpdateStoryToolbarCurrentInfo();
+                _storyEditorViewModel.AssetStatusText = _currentStoryAssetLibrary is null
+                    ? "当前项目未关联素材库。"
+                    : $"素材库：{_currentStoryAssetLibrary.Name} | 立绘：{(ShowFullCharacterArtCheckBox?.IsChecked == true ? "完整" : "上半身")}";
             }
-
-            if (normalizedLayers && _currentStoryCsvPath is not null)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                PersistCurrentStoryRowsToFiles();
             }
-
-            await SetStoryBackgroundAsync(ParseInt(row.Get("BGindex")));
-            await SetStoryCharacterSlotAsync(StoryCharacterSlot1, 1, row.Get("Chara1"), ParseInt(row.Get("Body1")), ParseInt(row.Get("Face1")), ParseInt(row.Get("Adorn1")), ParseInt(row.Get("Vfx1")));
-            await SetStoryCharacterSlotAsync(StoryCharacterSlot2, 2, row.Get("Chara2"), ParseInt(row.Get("Body2")), ParseInt(row.Get("Face2")), ParseInt(row.Get("Adorn2")), ParseInt(row.Get("Vfx2")));
-            await SetStoryCharacterSlotAsync(StoryCharacterSlot3, 3, row.Get("Chara3"), ParseInt(row.Get("Body3")), ParseInt(row.Get("Face3")), ParseInt(row.Get("Adorn3")), ParseInt(row.Get("Vfx3")));
-            await SetStoryCharacterSlotAsync(StoryCharacterSlot4, 4, row.Get("Chara4"), ParseInt(row.Get("Body4")), ParseInt(row.Get("Face4")), ParseInt(row.Get("Adorn4")), ParseInt(row.Get("Vfx4")));
-            await SetStoryCharacterSlotAsync(StoryCharacterSlot5, 5, row.Get("Chara5"), ParseInt(row.Get("Body5")), ParseInt(row.Get("Face5")), ParseInt(row.Get("Adorn5")), ParseInt(row.Get("Vfx5")));
-            await SetStorySpeakerPreviewAsync(row.Get("TalkChar"), ParseInt(row.Get("TalkBody")), ParseInt(row.Get("TalkFace")), ParseInt(row.Get("TalkAdorn")), ParseInt(row.Get("TalkVfx")));
-            UpdateStoryCharacterSlotLayout();
-            UpdateStoryToolbarCurrentInfo();
-            _storyEditorViewModel.AssetStatusText = _currentStoryAssetLibrary is null
-                ? "当前项目未关联素材库。"
-                : $"素材库：{_currentStoryAssetLibrary.Name} | 立绘：{(ShowFullCharacterArtCheckBox?.IsChecked == true ? "完整" : "上半身")}";
         }
 
-        private async Task SetStoryBackgroundAsync(int index)
+        private async Task SetStoryBackgroundAsync(int index, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (_currentStoryAssetLibrary is null)
             {
                 if (_storyBackgroundPreviewKey != string.Empty)
@@ -115,7 +118,8 @@ namespace GalExcleTools
             }
 
             _storyBackgroundPreviewKey = path;
-            await LoadStoryPreviewImageAsync(StoryBackgroundImage, path);
+            await LoadStoryPreviewImageAsync(StoryBackgroundImage, path, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             if (!string.IsNullOrWhiteSpace(previousPreviewKey) &&
                 !string.Equals(previousPreviewKey, path, StringComparison.OrdinalIgnoreCase))
             {
@@ -126,56 +130,9 @@ namespace GalExcleTools
             }
         }
 
-        private async Task WarmStoryPreviewImageCacheAsync()
+        private async Task SetStoryCharacterSlotAsync(Border slot, int slotIndex, string characterName, int bodyIndex, int faceIndex, int adornIndex, int vfxIndex, CancellationToken cancellationToken)
         {
-            if (_currentStoryAssetLibrary is null || _storyRows.Count == 0)
-            {
-                return;
-            }
-
-            try
-            {
-                var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var backgrounds = BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary));
-                foreach (var row in _storyRows)
-                {
-                    var backgroundIndex = ResolveStoryAssetIndex(ParseInt(row.Get("BGindex")), backgrounds.Count);
-                    if (backgroundIndex is not null)
-                    {
-                        paths.Add(backgrounds[backgroundIndex.Value]);
-                    }
-
-                    for (var slotIndex = 0; slotIndex <= 5; slotIndex++)
-                    {
-                        var character = ResolveStoryCharacter(row.Get(StoryCharacterSlotService.GetCharacterColumn(slotIndex)));
-                        if (character is null)
-                        {
-                            continue;
-                        }
-
-                        var bodyPath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Cloth, row, slotIndex);
-                        var facePath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Face, row, slotIndex);
-                        var adornPath = GetStoryCharacterLayerPath(character, CharacterLayerKind.Adorn, row, slotIndex);
-                        foreach (var path in new[] { bodyPath, facePath, adornPath }.Where(IsPreviewableImagePath))
-                        {
-                            paths.Add(path!);
-                        }
-                    }
-                }
-
-                foreach (var path in paths)
-                {
-                    await GetCachedStoryPreviewImageAsync(path);
-                }
-            }
-            catch (Exception ex)
-            {
-                AppendLog(LogKind.Warning, "故事编辑器预热图片缓存失败。", ex);
-            }
-        }
-
-        private async Task SetStoryCharacterSlotAsync(Border slot, int slotIndex, string characterName, int bodyIndex, int faceIndex, int adornIndex, int vfxIndex)
-        {
+            cancellationToken.ThrowIfCancellationRequested();
             var grid = new Grid();
             slot.Tag = slotIndex;
             slot.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -196,7 +153,8 @@ namespace GalExcleTools
                     adornIndex,
                     vfxIndex,
                     $"{slotIndex}号位",
-                    false);
+                    false,
+                    cancellationToken);
                 return;
             }
             slot.Child = grid;
@@ -249,8 +207,9 @@ namespace GalExcleTools
             grid.Children.Add(label);
         }
 
-        private async Task SetStorySpeakerPreviewAsync(string characterName, int bodyIndex, int faceIndex, int adornIndex, int vfxIndex)
+        private async Task SetStorySpeakerPreviewAsync(string characterName, int bodyIndex, int faceIndex, int adornIndex, int vfxIndex, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             StorySpeakerPreviewSlot.Tag = 0;
             StorySpeakerPreviewSlot.ContextFlyout = CreateStorySpeakerSlotMenu();
             StorySpeakerPreviewSlot.PointerEntered -= StoryCharacterSlot_PointerEntered;
@@ -267,7 +226,8 @@ namespace GalExcleTools
                 adornIndex,
                 vfxIndex,
                 "说话人",
-                true);
+                true,
+                cancellationToken);
         }
 
         private async Task SetStoryCharacterPreviewAsync(
@@ -278,8 +238,10 @@ namespace GalExcleTools
             int adornIndex,
             int vfxIndex,
             string positionLabel,
-            bool compact)
+            bool compact,
+            CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var showFull = ShowFullCharacterArtCheckBox?.IsChecked == true;
             var previewSlotIndex = slot.Tag is int tagIndex ? tagIndex : -1;
             var previewKey = string.Join(
@@ -327,6 +289,7 @@ namespace GalExcleTools
 
             foreach (var imagePath in imagePaths.Where(IsPreviewableImagePath))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var image = new Image
                 {
                     Stretch = Stretch.Uniform,
@@ -348,9 +311,10 @@ namespace GalExcleTools
                 }
 
                 grid.Children.Add(image);
-                await LoadStoryPreviewImageAsync(image, imagePath!);
+                await LoadStoryPreviewImageAsync(image, imagePath!, cancellationToken);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             grid.Children.Add(label);
         }
 

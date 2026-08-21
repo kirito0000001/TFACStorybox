@@ -34,7 +34,6 @@ internal sealed class ProjectVoiceAssetService
     public string ImportVoice(
         ProjectInfo project,
         ProjectTextRow row,
-        int rowNumber,
         int rowCount,
         string sourcePath,
         ProjectVoiceMapState state)
@@ -45,13 +44,12 @@ internal sealed class ProjectVoiceAssetService
         }
 
         var remark = GetDefaultRemark(sourcePath);
-        return WriteVoice(project, row, rowNumber, rowCount, sourcePath, remark, state, copySource: true);
+        return WriteVoice(project, row, rowCount, sourcePath, remark, state, copySource: true);
     }
 
     public string UpdateRemark(
         ProjectInfo project,
         ProjectTextRow row,
-        int rowNumber,
         int rowCount,
         string remark,
         ProjectVoiceMapState state)
@@ -61,7 +59,7 @@ internal sealed class ProjectVoiceAssetService
             throw new FileNotFoundException("当前行还没有可修改的语音文件。");
         }
 
-        return WriteVoice(project, row, rowNumber, rowCount, currentPath, remark, state, copySource: !IsManagedVoicePath(project, currentPath));
+        return WriteVoice(project, row, rowCount, currentPath, remark, state, copySource: !IsManagedVoicePath(project, currentPath));
     }
 
     public string? RemoveVoice(ProjectInfo project, ProjectTextRow row, ProjectVoiceMapState state)
@@ -106,7 +104,6 @@ internal sealed class ProjectVoiceAssetService
     private static string WriteVoice(
         ProjectInfo project,
         ProjectTextRow row,
-        int rowNumber,
         int rowCount,
         string sourcePath,
         string remark,
@@ -115,6 +112,11 @@ internal sealed class ProjectVoiceAssetService
     {
         var folderPath = WorkspacePathUtility.GetProjectChapterVoiceFolderPath(project, row.ChapterCode);
         Directory.CreateDirectory(folderPath);
+
+        if (!int.TryParse(row.RowName, out var rowNumber) || rowNumber < 1)
+        {
+            throw new InvalidOperationException($"文本索引无效，无法生成语音文件名：{row.RowName}");
+        }
 
         var targetPath = BuildTargetPath(folderPath, rowNumber, rowCount, remark);
         var oldPath = state.Voices.TryGetValue(row.Id, out var existingPath) ? existingPath : null;

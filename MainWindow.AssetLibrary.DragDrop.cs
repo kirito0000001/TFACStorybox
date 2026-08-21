@@ -558,16 +558,29 @@ namespace GalExcleTools
                 var importedCount = await importAsync(droppedPaths);
                 if (importedCount > 0)
                 {
-                    AppendLog(LogKind.User, $"拖入导入{logLabel}：{importedCount} 个文件。");
+                    ShowFloatingTip(
+                        InfoBarSeverity.Success,
+                        $"{logLabel}已导入",
+                        $"已拖入导入 {importedCount} 个文件。",
+                        logMessage: $"拖入导入{logLabel}：{importedCount} 个文件。");
                 }
                 else
                 {
-                    AppendLog(LogKind.Warning, $"拖入内容中没有可导入的{logLabel}图片文件。");
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        $"没有导入{logLabel}",
+                        "拖入内容中没有可导入的图片文件。",
+                        logMessage: $"拖入内容中没有可导入的{logLabel}图片文件。");
                 }
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Error, $"拖入导入{logLabel}失败。", ex);
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    $"{logLabel}导入失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    $"拖入导入{logLabel}失败。");
             }
             finally
             {
@@ -800,11 +813,24 @@ namespace GalExcleTools
                     .ToList();
 
                 var importedCount = ImportAudioFiles(kind, droppedMusicPaths);
-                AppendLog(
-                    importedCount > 0 ? LogKind.User : LogKind.Warning,
-                    importedCount > 0
-                        ? $"拖入导入{AudioAssetService.GetDisplayName(kind)}：{importedCount} 个文件。"
-                        : $"拖入内容中没有可导入的 wav {AudioAssetService.GetDisplayName(kind)}文件。");
+                var displayName = AudioAssetService.GetDisplayName(kind);
+                ShowFloatingTip(
+                    importedCount > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                    importedCount > 0 ? $"{displayName}已导入" : $"没有导入{displayName}",
+                    importedCount > 0 ? $"已拖入导入 {importedCount} 个文件。" : "拖入内容中没有可导入的音频文件。",
+                    logMessage: importedCount > 0
+                        ? $"拖入导入{displayName}：{importedCount} 个文件。"
+                        : $"拖入内容中没有可导入的 wav {displayName}文件。");
+            }
+            catch (Exception ex)
+            {
+                var displayName = AudioAssetService.GetDisplayName(kind);
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    $"{displayName}导入失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    $"拖入导入{displayName}失败。");
             }
             finally
             {
@@ -845,16 +871,29 @@ namespace GalExcleTools
                 var importedCount = await ImportBackgroundImagesAsync(droppedImagePaths);
                 if (importedCount > 0)
                 {
-                    AppendLog(LogKind.User, $"拖入导入背景图：{importedCount} 个文件。");
+                    ShowFloatingTip(
+                        InfoBarSeverity.Success,
+                        "背景图已导入",
+                        $"已拖入导入 {importedCount} 个文件。",
+                        logMessage: $"拖入导入背景图：{importedCount} 个文件。");
                 }
                 else
                 {
-                    AppendLog(LogKind.Warning, "拖入内容中没有可导入的背景图文件。");
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "没有导入背景图",
+                        "拖入内容中没有可导入的图片文件。",
+                        logMessage: "拖入内容中没有可导入的背景图文件。");
                 }
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Error, "拖入导入背景图失败。", ex);
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "背景图导入失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "拖入导入背景图失败。");
             }
             finally
             {

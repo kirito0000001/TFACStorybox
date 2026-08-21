@@ -112,7 +112,8 @@ namespace GalExcleTools
 
             try
             {
-                _projectWorkspaceService.CreateChapter(_currentProject, input);
+                var chapter = _projectWorkspaceService.CreateChapter(_currentProject, input);
+                _storyDocumentRepository.Save(chapter, StoryDocument.CreateEmpty());
             }
             catch (IOException ex)
             {
@@ -156,7 +157,15 @@ namespace GalExcleTools
 
             try
             {
-                _projectWorkspaceService.UpdateChapter(_currentProject, chapter, input);
+                var oldExportNames = _storyCsvService.GetLocalSectionCsvPaths(chapter)
+                    .Select(file => Path.GetFileName(file.Path))
+                    .ToList();
+                var updatedChapter = _projectWorkspaceService.UpdateChapter(_currentProject, chapter, input);
+                _storyDocumentRepository.UpdateChapterCode(updatedChapter);
+                foreach (var oldExportName in oldExportNames)
+                {
+                    File.Delete(Path.Combine(updatedChapter.Path, oldExportName));
+                }
             }
             catch (IOException ex)
             {

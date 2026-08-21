@@ -8,11 +8,11 @@ namespace GalExcleTools.Services;
 
 internal sealed class ChapterRepairService
 {
-    private readonly StoryCsvService _storyCsvService;
+    private readonly StoryDocumentRepository _storyDocumentRepository;
 
-    public ChapterRepairService(StoryCsvService storyCsvService)
+    public ChapterRepairService(StoryDocumentRepository storyDocumentRepository)
     {
-        _storyCsvService = storyCsvService;
+        _storyDocumentRepository = storyDocumentRepository;
     }
 
     public static ChapterRepairAssetContext BuildAssetContext(
@@ -52,50 +52,52 @@ internal sealed class ChapterRepairService
         bool repair,
         IProgress<ChapterRepairProgress>? progress)
     {
-        var csvFiles = _storyCsvService.GetLocalSectionCsvPaths(chapter)
-            .Where(file => File.Exists(file.Path))
-            .OrderBy(file => file.Section)
-            .ToList();
+        var document = _storyDocumentRepository.Load(chapter);
+        var documentPath = _storyDocumentRepository.GetDocumentPath(chapter);
+        var sectionCount = document.RowSections.Values.Distinct().Count();
         var issues = new List<ChapterRepairIssue>();
         var changedCsvPaths = new List<string>();
         var fixedCount = 0;
-
-        for (var csvIndex = 0; csvIndex < csvFiles.Count; csvIndex++)
+        for (var rowIndex = 0; rowIndex < document.Rows.Count; rowIndex++)
         {
-            var csvFile = csvFiles[csvIndex];
+            var row = document.Rows[rowIndex];
+            var section = document.RowSections.TryGetValue(row.Get("Name"), out var mappedSection)
+                ? Math.Max(1, mappedSection)
+                : 1;
             progress?.Report(new ChapterRepairProgress(
-                $"正在检查第 {csvFile.Section} 小节 CSV",
-                csvFiles.Count == 0 ? 100 : csvIndex * 90d / csvFiles.Count,
-                csvIndex,
-                csvFiles.Count,
+                $"正在检查第 {section} 小节剧情",
+                document.Rows.Count == 0 ? 100 : rowIndex * 90d / document.Rows.Count,
+                rowIndex,
+                document.Rows.Count,
                 issues.Count,
                 fixedCount,
-                Path.GetFileName(csvFile.Path)));
-
-            var rows = _storyCsvService.ReadRows(csvFile.Path);
+                Path.GetFileName(documentPath)));
             var changed = false;
-            for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            CheckRepairIndex(row, project, chapter, documentPath, rowIndex, "BGindex", "背景图", context.BackgroundCount, repair, issues, ref changed, ref fixedCount);
+            CheckRepairIndex(row, project, chapter, documentPath, rowIndex, "BGM", "BGM", context.BgmCount, repair, issues, ref changed, ref fixedCount);
+            CheckRepairIndex(row, project, chapter, documentPath, rowIndex, "Scene", "环境音", context.SceneCount, repair, issues, ref changed, ref fixedCount);
+            ValidateRepairCharacterLayer(row, project, chapter, documentPath, rowIndex, "TalkChar", "TalkBody", "TalkFace", "TalkAdorn", "TalkVfx", "说话人", allowRawUnknownCharacter: true, context, repair, issues, ref changed, ref fixedCount);
+            for (var slotIndex = 1; slotIndex <= 5; slotIndex++)
             {
-                var row = rows[rowIndex];
-                CheckRepairIndex(row, project, chapter, csvFile.Path, rowIndex, "BGindex", "背景图", context.BackgroundCount, repair, issues, ref changed, ref fixedCount);
-                CheckRepairIndex(row, project, chapter, csvFile.Path, rowIndex, "BGM", "BGM", context.BgmCount, repair, issues, ref changed, ref fixedCount);
-                CheckRepairIndex(row, project, chapter, csvFile.Path, rowIndex, "Scene", "环境音", context.SceneCount, repair, issues, ref changed, ref fixedCount);
-                ValidateRepairCharacterLayer(row, project, chapter, csvFile.Path, rowIndex, "TalkChar", "TalkBody", "TalkFace", "TalkAdorn", "TalkVfx", "说话人", allowRawUnknownCharacter: true, context, repair, issues, ref changed, ref fixedCount);
-                for (var slotIndex = 1; slotIndex <= 5; slotIndex++)
-                {
-                    ValidateRepairCharacterLayer(row, project, chapter, csvFile.Path, rowIndex, $"Chara{slotIndex}", $"Body{slotIndex}", $"Face{slotIndex}", $"Adorn{slotIndex}", $"Vfx{slotIndex}", $"{slotIndex}号位", allowRawUnknownCharacter: false, context, repair, issues, ref changed, ref fixedCount);
-                }
+                ValidateRepairCharacterLayer(row, project, chapter, documentPath, rowIndex, $"Chara{slotIndex}", $"Body{slotIndex}", $"Face{slotIndex}", $"Adorn{slotIndex}", $"Vfx{slotIndex}", $"{slotIndex}号位", allowRawUnknownCharacter: false, context, repair, issues, ref changed, ref fixedCount);
             }
 
             if (changed)
             {
-                _storyCsvService.WriteRows(csvFile.Path, rows);
-                changedCsvPaths.Add(csvFile.Path);
+                if (!changedCsvPaths.Contains(documentPath, StringComparer.OrdinalIgnoreCase))
+                {
+                    changedCsvPaths.Add(documentPath);
+                }
             }
         }
 
-        progress?.Report(new ChapterRepairProgress("章节索引检查完成。", 100, csvFiles.Count, csvFiles.Count, issues.Count, fixedCount, null));
-        return new ChapterRepairResult(project.Name, chapter.Name, chapter.Code, csvFiles.Count, issues.Count, fixedCount, changedCsvPaths, issues);
+        if (repair && changedCsvPaths.Count > 0)
+        {
+            _storyDocumentRepository.Save(chapter, document);
+        }
+
+        progress?.Report(new ChapterRepairProgress("章节索引检查完成。", 100, sectionCount, sectionCount, issues.Count, fixedCount, null));
+        return new ChapterRepairResult(project.Name, chapter.Name, chapter.Code, sectionCount, issues.Count, fixedCount, changedCsvPaths, issues);
     }
 
     private static void ValidateRepairCharacterLayer(

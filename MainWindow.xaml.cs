@@ -58,6 +58,7 @@ namespace GalExcleTools
         private readonly ProjectWorkspaceService _projectWorkspaceService = new();
         private readonly ProjectRootMigrationService _projectRootMigrationService = new();
         private readonly AudioAssetService _audioAssetService = new();
+        private readonly UpdateService _updateService = new();
         private readonly BackgroundImageService _backgroundImageService = new();
         private readonly CharacterLayerAssetService _characterLayerAssetService = new();
         private readonly CharacterFilterService _characterFilterService = new();
@@ -65,9 +66,11 @@ namespace GalExcleTools
         private readonly FolderBackupService _folderBackupService;
         private readonly UnrealSyncService _unrealSyncService = new();
         private readonly StoryCsvService _storyCsvService = new();
-        private readonly StoryStateService _storyStateService = new();
+        private readonly StoryDocumentRepository _storyDocumentRepository;
+        private readonly StorySaveCoordinator _storySaveCoordinator;
+        private readonly StoryCsvExporter _storyCsvExporter;
+        private readonly StoryCsvImporter _storyCsvImporter;
         private readonly StoryEditorService _storyEditorService;
-        private readonly StorySessionService _storySessionService;
         private readonly ProjectTextDataService _projectTextDataService;
         private readonly ProjectVoiceAssetService _projectVoiceAssetService = new();
         private readonly ChapterRepairService _chapterRepairService;
@@ -77,8 +80,10 @@ namespace GalExcleTools
         private readonly IUiSoundService _uiSoundService;
         private readonly StoryDialogService _storyDialogService;
         private readonly FunctionDialogService _functionDialogService;
-        private readonly MediaPlayer _storyBgmPlayer = new();
-        private readonly MediaPlayer _storyScenePlayer = new();
+        private readonly StoryAudioPlaybackService _storyBgmPlayback = new(looping: true);
+        private readonly StoryAudioPlaybackService _storyScenePlayback = new(looping: true);
+        private readonly StoryAudioPlaybackService _storyVoicePlayback = new(looping: false);
+        private readonly MediaPlayer _projectVoicePreviewPlayer = new();
         private readonly ApplicationViewModel _applicationViewModel;
         private SettingsViewModel Settings => _applicationViewModel.Settings;
         private GlobalProgressViewModel GlobalProgress => _applicationViewModel.GlobalProgress;
@@ -159,6 +164,12 @@ namespace GalExcleTools
             set => Workbench.ProjectTextToolMode = value;
         }
 
+        private bool _showOnlyConfiguredVoices
+        {
+            get => Workbench.ShowOnlyConfiguredVoices;
+            set => Workbench.ShowOnlyConfiguredVoices = value;
+        }
+
         private Dictionary<string, BitmapImage> _storyPreviewImageCache => _storyEditorViewModel.PreviewImageCache;
         private Dictionary<int, string> _storyCharacterPreviewKeys => _storyEditorViewModel.CharacterPreviewKeys;
         private int _currentStoryRowIndex
@@ -202,16 +213,10 @@ namespace GalExcleTools
             set => _storyEditorViewModel.IsUpdatingSectionOptions = value;
         }
 
-        private bool _isPersistingStoryRows
+        private string? _currentStoryDocumentPath
         {
-            get => _storyEditorViewModel.IsPersistingRows;
-            set => _storyEditorViewModel.IsPersistingRows = value;
-        }
-
-        private string? _currentStoryCsvPath
-        {
-            get => _storyEditorViewModel.CsvPath;
-            set => _storyEditorViewModel.CsvPath = value;
+            get => _storyEditorViewModel.DocumentPath;
+            set => _storyEditorViewModel.DocumentPath = value;
         }
         private string? _storyBackgroundPreviewKey
         {
@@ -340,30 +345,6 @@ namespace GalExcleTools
             set => AssetLibraryState.PlayingAudioKind = value;
         }
 
-        private string? _storyBgmPath
-        {
-            get => _storyEditorViewModel.BgmPath;
-            set => _storyEditorViewModel.BgmPath = value;
-        }
-
-        private string? _storyScenePath
-        {
-            get => _storyEditorViewModel.ScenePath;
-            set => _storyEditorViewModel.ScenePath = value;
-        }
-
-        private int _storyBgmPlaybackRequestId
-        {
-            get => _storyEditorViewModel.BgmPlaybackRequestId;
-            set => _storyEditorViewModel.BgmPlaybackRequestId = value;
-        }
-
-        private int _storyScenePlaybackRequestId
-        {
-            get => _storyEditorViewModel.ScenePlaybackRequestId;
-            set => _storyEditorViewModel.ScenePlaybackRequestId = value;
-        }
-
         private ProjectInfo? _currentProject
         {
             get => Workbench.CurrentProject;
@@ -425,8 +406,7 @@ namespace GalExcleTools
         private readonly DispatcherQueueTimer _storyPaneAnimationTimer;
         private readonly DispatcherQueueTimer _globalProgressElapsedTimer;
         private double _storyPaneAnimationTargetWidth = 46;
-        private readonly Dictionary<InfoBar, DispatcherQueueTimer> _storyTransientTipTimers = new();
-        private List<StoryEditorUndoState> _storyUndoStack => _storyEditorViewModel.UndoStack;
+        private readonly Dictionary<InfoBar, DispatcherQueueTimer> _floatingTipTimers = new();
         private readonly Stopwatch _globalProgressStopwatch = new();
         private string _globalProgressOperationTitle = string.Empty;
         private bool _isGlobalProgressVisible;
@@ -434,19 +414,28 @@ namespace GalExcleTools
         private CancellationTokenSource? _globalProgressCancellation;
         private CancellationTokenSource? _assetLibraryLoadCancellation;
         private CancellationTokenSource? _characterDetailLoadCancellation;
+        private CancellationTokenSource? _storyPreviewRefreshCancellation;
+        private readonly Queue<string> _storyPreviewImageCacheOrder = new();
+        private const int MaxStoryPreviewImageCacheCount = 48;
         private bool _isWindowActive = true;
         private bool _refreshBackgroundImagesAfterDelay;
+        private bool _storyTextEditUndoCaptured;
+        private StoryChoiceNoteState? _pendingStoryChoiceNotes;
+        private string? _lastStoryVoiceRowId;
         private bool _isStoryDebugModeEnabled
         {
             get => _storyEditorViewModel.IsDebugModeEnabled;
             set => _storyEditorViewModel.IsDebugModeEnabled = value;
         }
         private bool _isChangingShellSelectionInternally;
-        private const int MaxStoryUndoCount = 80;
 
         public MainWindow()
         {
             InitializeComponent();
+            var displayVersion = AppVersionService.GetDisplayVersion();
+            AppTitleVersionText.Text = displayVersion;
+            SettingsAppVersionText.Text = $"版本 {displayVersion}";
+            SettingsVersionNamingText.Text = $"采用 主版本.功能版本.修订版本。{displayVersion} 表示当前功能版本；当天同一批修补合并进同一个版本号。";
             _applicationViewModel = new ApplicationViewModel(
                 new SettingsViewModel(_appSettingsService, _projectRootMigrationService),
                 new GlobalProgressViewModel());
@@ -477,9 +466,11 @@ namespace GalExcleTools
             _applicationViewModel.Settings.ShowFullStoryChapterLengthChanged += (_, _) => UpdateStoryRowIndexInput();
             _storyEditorViewModel.ConfigureCommands(
                 UndoStoryEditorOperation,
+                RedoStoryEditorOperation,
                 NavigatePreviousStoryRow,
                 NavigateNextStoryRow,
-                InsertStoryRowHere,
+                InsertStoryRowBefore,
+                InsertStoryRowAfter,
                 DeleteCurrentStoryRow,
                 () => NavigateStorySection(-1),
                 () => NavigateStorySection(1),
@@ -492,28 +483,66 @@ namespace GalExcleTools
                 RemoveStoryFunctionAsync,
                 ClearStoryFunction,
                 ClearCurrentStoryRow);
+            _storyEditorViewModel.CommandExecutionFailed += (_, exception) =>
+            {
+                _storyEditorViewModel.UndoService.CancelPending();
+                ShowStoryStatus(
+                    InfoBarSeverity.Error,
+                    "剧情编辑操作失败",
+                    exception.Message,
+                    exception,
+                    $"剧情编辑异步命令失败：{exception}");
+            };
             _storyEditorService = new StoryEditorService(_storyCsvService);
-            _storySessionService = new StorySessionService(_storyCsvService, _storyStateService, _storyEditorService);
-            _projectTextDataService = new ProjectTextDataService(_storyCsvService, _storySessionService, _jsonOptions);
-            _chapterRepairService = new ChapterRepairService(_storyCsvService);
+            _storyDocumentRepository = new StoryDocumentRepository(_jsonOptions);
+            _storySaveCoordinator = new StorySaveCoordinator(_storyDocumentRepository);
+            _storyCsvExporter = new StoryCsvExporter(_storyCsvService, _storyDocumentRepository);
+            _storyCsvImporter = new StoryCsvImporter(_storyCsvService, _storyDocumentRepository);
+            _storySaveCoordinator.SaveFailed += (_, exception) => DispatcherQueue.TryEnqueue(() =>
+            {
+                _storyEditorViewModel.SaveStatusText = "保存失败";
+                ShowStoryStatus(
+                    InfoBarSeverity.Error,
+                    "剧情自动保存失败",
+                    exception.Message,
+                    exception,
+                    $"StoryDocument 后台保存失败：{exception}");
+            });
+            _storySaveCoordinator.SaveCompleted += (chapter, savedAt) => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_currentStoryChapter is not null &&
+                    string.Equals(_currentStoryChapter.Path, chapter.Path, StringComparison.OrdinalIgnoreCase))
+                {
+                    _storyEditorViewModel.SaveStatusText = $"已保存 {savedAt.LocalDateTime:HH:mm:ss}";
+                }
+            });
+            _projectTextDataService = new ProjectTextDataService(_storyDocumentRepository, _jsonOptions);
+            _chapterRepairService = new ChapterRepairService(_storyDocumentRepository);
             _storyAssetIndexSyncService = new StoryAssetIndexSyncService(
                 GetProjects,
                 ResolveProjectAssetLibrary,
-                GetProjectStoryCsvPaths,
                 GetChaptersFolderPath,
                 _projectWorkspaceService.ReadChapterInfo,
-                _storyCsvService);
+                _storyDocumentRepository);
             DisableListItemEntranceTransitions();
             Activated += MainWindow_Activated;
             ApplyCustomTitleBar();
             ApplyWindowIcon();
+            AppWindow.Closing += (_, _) =>
+            {
+                _storySaveCoordinator.FlushAsync().GetAwaiter().GetResult();
+                _storyBgmPlayback.Dispose();
+                _storyScenePlayback.Dispose();
+                _storyVoicePlayback.Dispose();
+                _storySaveCoordinator.Dispose();
+            };
             AppWindow.Resize(new SizeInt32(1500, 920));
             ApplyInitialWindowPlacement();
             _refreshDelayTimer = DispatcherQueue.CreateTimer();
             _refreshDelayTimer.Interval = TimeSpan.FromSeconds(1);
             _refreshDelayTimer.Tick += RefreshDelayTimer_Tick;
             _storyEditSaveTimer = DispatcherQueue.CreateTimer();
-            _storyEditSaveTimer.Interval = TimeSpan.FromMilliseconds(650);
+            _storyEditSaveTimer.Interval = TimeSpan.FromMilliseconds(350);
             _storyEditSaveTimer.Tick += StoryEditSaveTimer_Tick;
             _storyPaneAnimationTimer = DispatcherQueue.CreateTimer();
             _storyPaneAnimationTimer.Interval = TimeSpan.FromMilliseconds(16);
@@ -521,12 +550,11 @@ namespace GalExcleTools
             _globalProgressElapsedTimer = DispatcherQueue.CreateTimer();
             _globalProgressElapsedTimer.Interval = TimeSpan.FromSeconds(1);
             _globalProgressElapsedTimer.Tick += GlobalProgressElapsedTimer_Tick;
-            _storyBgmPlayer.IsLoopingEnabled = true;
-            _storyScenePlayer.IsLoopingEnabled = true;
             RegisterAssetLibraryExpanderLazyLoading();
             RegisterCharacterDetailExpanderLazyLoading();
 
             Settings.Load();
+            SyncUpdateControls();
             _uiSoundService.IsEnabled = Settings.UiSoundEnabled;
             UpdateLogOptionEnabledState();
             UpdateAuxiliaryDisplayVisibility();
@@ -535,6 +563,7 @@ namespace GalExcleTools
             EnsureProjectRootDirectory(Settings.ProjectRootPath);
             AppendLog(LogKind.Info, "程序启动，已检查整体项目目录。");
             ShowWorkbenchPage();
+            _ = CheckUpdateOnStartupAsync();
         }
 
         private void MainWindow_Activated(object sender, WindowActivatedEventArgs args)

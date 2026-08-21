@@ -26,6 +26,9 @@ internal sealed record UnrealSyncChangePlan(
     List<UnrealSyncDeleteGroup> DeleteGroups,
     List<UnrealStoryTableSyncEntry> StoryTables,
     List<UnrealAssetIndexTableSyncEntry> AssetIndexTables,
+    bool VoiceMapsChanged,
+    List<UnrealVoiceMapSyncEntry> VoiceMaps,
+    string VoiceMapsHash,
     bool LustrationChanged,
     List<UnrealLustrationSyncEntry> LustrationRows,
     bool PortraitsChanged,
@@ -33,9 +36,12 @@ internal sealed record UnrealSyncChangePlan(
     string LustrationHash,
     string PortraitsHash,
     string AssetIndexTablesHash,
+    Dictionary<string, string> SourceHashes,
+    bool IsFullSync,
     int TotalChangedItems,
     string Summary,
-    List<string> PlanItems)
+    List<string> ChangeItems,
+    List<string> UnchangedItems)
 {
     public bool HasChanges => TotalChangedItems > 0;
 }
@@ -50,13 +56,20 @@ internal sealed record UnrealStoryTableSyncEntry(
     string CsvPath,
     string TableAsset,
     string RowStruct,
-    List<string> LegacyTableAssets);
+    List<string> LegacyTableAssets,
+    string ChapterCode,
+    int Section);
 
 internal sealed record UnrealAssetIndexTableSyncEntry(
     string CsvPath,
     string TableAsset,
     string RowStruct,
     string SourceHash);
+
+internal sealed record UnrealVoiceMapSyncEntry(
+    string TableAsset,
+    List<string?> Waves,
+    int AssignedCount);
 
 internal sealed record UnrealLinearColor(double R, double G, double B, double A);
 
@@ -68,10 +81,61 @@ internal sealed record UnrealLustrationSyncEntry(
     List<string> Face,
     List<string?> Adorn);
 
-internal sealed record UnrealSyncResult(int ExitCode, string ManifestPath, string ScriptPath, string Output);
+internal sealed record UnrealSyncResult(
+    int ExitCode,
+    string ManifestPath,
+    string ScriptPath,
+    string ProgressPath,
+    string ResultPath,
+    string Output,
+    UnrealSyncExecutionReport? Report);
+
+internal sealed class UnrealSyncExecutionReport
+{
+    public int ProtocolVersion { get; set; }
+
+    public bool Completed { get; set; }
+
+    public bool Success { get; set; }
+
+    public int ImportedCount { get; set; }
+
+    public int DeletedCount { get; set; }
+
+    public int StoryTableCount { get; set; }
+
+    public int AssetIndexTableCount { get; set; }
+
+    public bool VoiceMapsUpdated { get; set; }
+
+    public bool LustrationUpdated { get; set; }
+
+    public bool PortraitsUpdated { get; set; }
+
+    public List<string> Errors { get; set; } = [];
+
+    public List<string> Warnings { get; set; } = [];
+}
+
+internal sealed class UnrealSyncProgressFile
+{
+    public int ProtocolVersion { get; set; }
+
+    public string? Stage { get; set; }
+
+    public string? Message { get; set; }
+
+    public double Percent { get; set; }
+
+    public int Completed { get; set; }
+
+    public int Total { get; set; }
+}
 
 internal sealed class UnrealSyncState
 {
+    public int StateVersion { get; set; }
+
     public DateTimeOffset LastSyncedAt { get; set; }
 
     public string? LustrationHash { get; set; }
@@ -79,4 +143,8 @@ internal sealed class UnrealSyncState
     public string? PortraitsHash { get; set; }
 
     public string? AssetIndexTablesHash { get; set; }
+
+    public string? VoiceMapsHash { get; set; }
+
+    public Dictionary<string, string> SourceHashes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

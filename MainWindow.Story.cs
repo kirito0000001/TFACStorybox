@@ -42,12 +42,12 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private void OpenStoryEditorFromUi(ChapterInfo chapter)
+        private async void OpenStoryEditorFromUi(ChapterInfo chapter)
         {
             ChapterInfoBar.IsOpen = false;
             try
             {
-                ShowStoryEditorPage(chapter);
+                await ShowStoryEditorPageAsync(chapter);
             }
             catch (Exception ex)
             {
@@ -56,7 +56,7 @@ namespace GalExcleTools
             }
         }
 
-        private void ShowStoryEditorPage(ChapterInfo chapter)
+        private async Task ShowStoryEditorPageAsync(ChapterInfo chapter)
         {
             if (_currentProject is null)
             {
@@ -66,13 +66,21 @@ namespace GalExcleTools
 
             SaveCurrentStoryRow();
             _storyEditSaveTimer?.Stop();
+            await _storySaveCoordinator.FlushAsync();
             _currentStoryChapter = chapter;
             _currentStoryAssetLibrary = ResolveProjectAssetLibrary(_currentProject);
-            _currentStoryCsvPath = _storyCsvService.GetChapterCsvPath(chapter);
+            _currentStoryDocumentPath = _storyDocumentRepository.GetDocumentPath(chapter);
             ClearStoryUndoStack();
             UpdateStoryDebugModeUi();
             _storyBackgroundPreviewKey = null;
+            _lastStoryVoiceRowId = null;
             _storyCharacterPreviewKeys.Clear();
+            _storyPreviewRefreshCancellation?.Cancel();
+            _lastStoryVoiceRowId = null;
+            _storyPreviewRefreshCancellation?.Dispose();
+            _storyPreviewRefreshCancellation = null;
+            _storyPreviewImageCache.Clear();
+            _storyPreviewImageCacheOrder.Clear();
             _storyBgmPlaybackSuppressed = false;
             ApplyStoryTextFontSizeToUi();
             UpdateStoryEditorHeader();
@@ -80,10 +88,14 @@ namespace GalExcleTools
                 ? "当前项目未关联素材库。"
                 : $"素材库：{_currentStoryAssetLibrary.Name}";
 
-            LoadStoryRowsFromSectionFiles(chapter);
-            NormalizeStoryCharacterCodes();
-            SynchronizeStorySectionState();
-            PersistCurrentStoryRowsToFiles();
+            LoadStoryDocument(chapter);
+            var storyDataMigrated = NormalizeStoryCharacterCodes();
+            storyDataMigrated |= SynchronizeStorySectionState();
+            storyDataMigrated |= NormalizeStoryChoiceFunctionPrefixes(out var migratedChoiceNotes);
+            if (storyDataMigrated)
+            {
+                QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
+            }
 
             _currentStoryRowIndex = Math.Clamp(chapter.LastEditedRowIndex, 0, _storyRows.Count - 1);
             _storyEditorViewModel.RefreshCommandStates();
@@ -107,16 +119,17 @@ namespace GalExcleTools
             PlayPageEntrance(StoryEditorPage);
             StoryEditorBackButton.Focus(FocusState.Programmatic);
             StoryEditorPage.Focus(FocusState.Programmatic);
-            _ = WarmStoryPreviewImageCacheAsync();
             AppendLog(LogKind.User, $"打开章节编辑器：{chapter.Name}（{chapter.Code}）");
         }
 
-        private void CloseStoryEditorButton_Click(object sender, RoutedEventArgs e)
+        private async void CloseStoryEditorButton_Click(object sender, RoutedEventArgs e)
         {
             PlayNegativeSound();
             SaveCurrentStoryRow();
             SaveCurrentChapterProgress();
             _storyEditSaveTimer?.Stop();
+            await _storySaveCoordinator.FlushAsync();
+            _storyPreviewRefreshCancellation?.Cancel();
             StopStoryEditorAudio();
             if (_currentProject is not null)
             {
@@ -137,41 +150,84 @@ namespace GalExcleTools
 
         private void UpdateStoryDebugModeUi()
         {
-            if (InsertStoryRowHereButton is not null)
+            if (StorySpeakerTextBox is not null)
             {
-                InsertStoryRowHereButton.Visibility = _isStoryDebugModeEnabled ? Visibility.Collapsed : Visibility.Visible;
+                StorySpeakerTextBox.IsReadOnly = _isStoryDebugModeEnabled;
+            }
+
+            if (StoryTextTextBox is not null)
+            {
+                StoryTextTextBox.IsReadOnly = _isStoryDebugModeEnabled;
+            }
+
+            if (InsertStoryRowBeforeButton is not null)
+            {
+                InsertStoryRowBeforeButton.Visibility = _isStoryDebugModeEnabled ? Visibility.Collapsed : Visibility.Visible;
+            }
+
+            if (InsertStoryRowAfterButton is not null)
+            {
+                InsertStoryRowAfterButton.Visibility = _isStoryDebugModeEnabled ? Visibility.Collapsed : Visibility.Visible;
             }
 
             _storyEditorViewModel.RefreshCommandStates();
         }
 
-        private StoryEditorUndoState? CaptureStoryUndoState(string description)
+        private bool CanEditStoryData()
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!_isStoryDebugModeEnabled)
             {
-                return null;
+                return true;
             }
 
-            var state = new StoryEditorUndoState(
-                CloneStoryRows(_storyRows),
-                new Dictionary<string, int>(_storyRowSections, StringComparer.OrdinalIgnoreCase),
-                Math.Clamp(_currentStoryRowIndex, 0, _storyRows.Count - 1),
-                description,
-                _currentStoryChapter is null ? null : StoryStateService.CloneChoiceNotes(_storyStateService.ReadChoiceNotes(_currentStoryChapter)));
-            _storyUndoStack.Add(state);
-            if (_storyUndoStack.Count > MaxStoryUndoCount)
+            ShowStoryStatus(InfoBarSeverity.Informational, "调试模式只读", "关闭调试模式后才能修改剧情数据。");
+            return false;
+        }
+
+        private void CaptureStoryUndoState(string description)
+        {
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
-                _storyUndoStack.RemoveAt(0);
+                return;
+            }
+
+            _storyEditorViewModel.UndoService.Begin(
+                _storyEditorViewModel.Document,
+                _currentStoryRowIndex,
+                description);
+        }
+
+        private void CaptureStoryRowUndoState(string description)
+        {
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
+            {
+                return;
+            }
+
+            _storyEditorViewModel.UndoService.BeginRowEdit(
+                _storyEditorViewModel.Document,
+                _currentStoryRowIndex,
+                description);
+        }
+
+        private void CommitStoryUndoState()
+        {
+            if (_storyEditorViewModel.UndoService.Commit(
+                    _storyEditorViewModel.Document,
+                    _currentStoryRowIndex))
+            {
+                var change = _storyEditorViewModel.UndoService.LastUndoChange;
+                AppendLog(
+                    LogKind.User,
+                    $"编辑器操作：{change?.Description}（变化行 {change?.ChangedRowCount ?? 0}）");
             }
 
             UpdateStoryUndoState();
-            AppendLog(LogKind.User, $"编辑器操作：{description}");
-            return state;
         }
 
         private void ClearStoryUndoStack()
         {
-            _storyUndoStack.Clear();
+            _storyEditorViewModel.UndoService.Clear();
             UpdateStoryUndoState();
         }
 
@@ -182,62 +238,79 @@ namespace GalExcleTools
 
         private void UndoStoryEditorOperation()
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
 
-            if (_storyUndoStack.Count == 0)
+            _storyEditSaveTimer?.Stop();
+            SaveCurrentStoryRow();
+            CommitStoryUndoState();
+            if (!_storyEditorViewModel.UndoService.TryUndo(
+                    _storyEditorViewModel.Document,
+                    _currentStoryRowIndex,
+                    out var application) || application is null)
             {
                 ShowStoryStatus(InfoBarSeverity.Informational, "没有可撤回操作", "当前章节编辑器还没有可撤回的操作。");
                 return;
             }
 
-            _storyEditSaveTimer?.Stop();
-            var state = _storyUndoStack[^1];
-            _storyUndoStack.RemoveAt(_storyUndoStack.Count - 1);
-            _storyRows.Clear();
-            _storyRows.AddRange(CloneStoryRows(state.Rows));
-            _storyRowSections.Clear();
-            foreach (var pair in state.Sections)
-            {
-                _storyRowSections[pair.Key] = Math.Max(1, pair.Value);
-            }
-
-            _currentStoryRowIndex = Math.Clamp(state.RowIndex, 0, Math.Max(0, _storyRows.Count - 1));
+            _currentStoryRowIndex = application.RowIndex;
             _isStoryRowDirty = false;
-            if (_currentStoryChapter is not null && state.ChoiceNotes is not null)
-            {
-                _storyStateService.WriteChoiceNotes(_currentStoryChapter, StoryStateService.CloneChoiceNotes(state.ChoiceNotes));
-                RemoveUnusedStoryChoiceNotes(state.ChoiceNotes.Choices.Keys);
-            }
-
-            ApplyStorySectionsInRowOrder(GetStorySectionsInRowOrder());
-            PersistCurrentStoryRowsToFiles();
+            _storyTextEditUndoCaptured = false;
+            QueueCurrentStoryDocumentSave();
             SaveCurrentChapterProgress();
             ClearStoryFunctionTips();
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
             LoadStoryRowIntoUi();
             UpdateStoryUndoState();
             _storyEditorViewModel.RefreshCommandStates();
-            ShowStoryStatus(InfoBarSeverity.Success, "已撤回", state.Description);
-            AppendLog(LogKind.User, $"撤回编辑器操作：{state.Description}");
+            ShowStoryStatus(InfoBarSeverity.Success, "已撤回", application.Description);
+            AppendLog(LogKind.User, $"撤回编辑器操作：{application.Description}");
         }
 
-        private static List<StoryRow> CloneStoryRows(IEnumerable<StoryRow> rows)
+        private void RedoStoryEditorOperation()
         {
-            return StoryEditorService.CloneRows(rows);
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
+            {
+                return;
+            }
+
+            if (!_storyEditorViewModel.UndoService.TryRedo(
+                    _storyEditorViewModel.Document,
+                    _currentStoryRowIndex,
+                    out var application) || application is null)
+            {
+                ShowStoryStatus(InfoBarSeverity.Informational, "没有可重做操作", "当前章节编辑器还没有可重做的操作。");
+                return;
+            }
+
+            _storyEditSaveTimer?.Stop();
+            _currentStoryRowIndex = application.RowIndex;
+            _isStoryRowDirty = false;
+            _storyTextEditUndoCaptured = false;
+            QueueCurrentStoryDocumentSave();
+            SaveCurrentChapterProgress();
+            ClearStoryFunctionTips();
+            RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
+            LoadStoryRowIntoUi();
+            UpdateStoryUndoState();
+            _storyEditorViewModel.RefreshCommandStates();
+            ShowStoryStatus(InfoBarSeverity.Success, "已重做", application.Description);
+            AppendLog(LogKind.User, $"重做编辑器操作：{application.Description}");
         }
 
         private void LoadStoryRowIntoUi()
         {
             if (_storyRows.Count == 0)
             {
+                StopStoryVoicePlayback();
                 return;
             }
 
             ClearStoryFunctionTips();
             _isLoadingStoryRow = true;
+            _storyTextEditUndoCaptured = false;
             try
             {
                 var row = _storyRows[_currentStoryRowIndex];
@@ -247,7 +320,6 @@ namespace GalExcleTools
                 var section = GetCurrentStorySection();
                 EnsureStorySectionOptions(section);
                 SelectStorySection(section);
-                NormalizeCurrentStoryChoiceFunctionPrefix();
                 UpdateStoryEditorHeader();
                 UpdateStoryToolbarCurrentInfo();
                 _isStoryRowDirty = false;
@@ -258,93 +330,13 @@ namespace GalExcleTools
             }
 
             _ = RefreshStoryPreviewAsync();
+            var activeRowId = _storyRows[_currentStoryRowIndex].StableId;
+            if (!string.Equals(_lastStoryVoiceRowId, activeRowId, StringComparison.OrdinalIgnoreCase))
+            {
+                _lastStoryVoiceRowId = activeRowId;
+                _ = PlayCurrentStoryVoiceFromUiAsync();
+            }
             _ = ApplyCurrentStoryRowMediaAndFunctionAsync();
-        }
-
-        private bool SaveCurrentStoryRow()
-        {
-            if (_isLoadingStoryRow || _currentStoryCsvPath is null || _storyRows.Count == 0)
-            {
-                return false;
-            }
-
-            var sectionChanged = SetCurrentStorySectionIfChanged(GetSelectedStorySection());
-            if (!_isStoryRowDirty && !sectionChanged)
-            {
-                return false;
-            }
-
-            var row = _storyRows[_currentStoryRowIndex];
-            var changed = false;
-            var speakerName = NormalizeStoryCharacterNameForCsv(_storyEditorViewModel.SpeakerText);
-            if (!string.Equals(row.Get("TalkChar"), speakerName, StringComparison.Ordinal))
-            {
-                row.Set("TalkChar", speakerName);
-                changed = true;
-            }
-
-            if (!string.Equals(row.Get("Tesxt"), _storyEditorViewModel.StoryText, StringComparison.Ordinal))
-            {
-                row.Set("Tesxt", _storyEditorViewModel.StoryText);
-                changed = true;
-            }
-
-            changed |= NormalizeStoryDetachedCharacterLayers(row);
-
-            if (changed)
-            {
-                PersistCurrentStoryRowsToFiles();
-                _isStoryRowDirty = false;
-                SaveCurrentChapterProgress();
-                _ = RefreshStoryPreviewAsync();
-            }
-
-            if (sectionChanged)
-            {
-                PersistCurrentStoryRowsToFiles();
-                SaveCurrentChapterProgress();
-            }
-
-            _isStoryRowDirty = false;
-            return changed || sectionChanged;
-        }
-
-        private void ScheduleStoryRowSave()
-        {
-            if (_isLoadingStoryRow)
-            {
-                return;
-            }
-
-            if (_storyEditSaveTimer is null)
-            {
-                return;
-            }
-
-            if (!_isStoryRowDirty)
-            {
-                CaptureStoryUndoState("编辑当前句文本");
-            }
-
-            _isStoryRowDirty = true;
-            _storyEditSaveTimer.Stop();
-            _storyEditSaveTimer.Start();
-        }
-
-        private void StoryEditSaveTimer_Tick(DispatcherQueueTimer sender, object args)
-        {
-            sender.Stop();
-            SaveCurrentStoryRow();
-        }
-
-        private void StorySpeakerTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            ScheduleStoryRowSave();
-        }
-
-        private void StoryTextTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            ScheduleStoryRowSave();
         }
 
         private void UpdateStoryRowIndexInput()
@@ -445,6 +437,7 @@ namespace GalExcleTools
 
             _currentStoryRowIndex = targetIndex;
             SaveCurrentChapterProgress();
+            _storyEditorViewModel.RefreshCommandStates();
             if (rebuildPersistentState)
             {
                 RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
@@ -519,50 +512,56 @@ namespace GalExcleTools
             SaveCurrentStoryRow();
             if (_currentStoryRowIndex >= _storyRows.Count - 1)
             {
-                if (_isStoryDebugModeEnabled)
-                {
-                    ShowStoryStatus(InfoBarSeverity.Informational, "调试模式", "已经是最后一句，调试模式下不会新建句子。");
-                    return;
-                }
-
-                CaptureStoryUndoState("新建下一句");
+                ShowStoryStatus(InfoBarSeverity.Informational, "已经是最后一句", "“下一句”只负责导航，不会自动创建新句子。");
+                _storyEditorViewModel.RefreshCommandStates();
+                return;
             }
 
-            var result = _storyEditorService.MoveNextOrCreate(_storyRows, _storyRowSections, _currentStoryRowIndex);
+            var result = _storyEditorService.MoveNext(_storyRows, _storyRowSections, _currentStoryRowIndex);
             _currentStoryRowIndex = result.RowIndex;
             SaveCurrentChapterProgress();
             _storyEditorViewModel.RefreshCommandStates();
-            if (result.Changed)
-            {
-                PersistCurrentStoryRowsToFiles();
-            }
-
             LoadStoryRowIntoUi();
         }
 
-        private void InsertStoryRowHere()
+        private void InsertStoryRowBefore()
         {
-            if (_storyRows.Count == 0 || _currentStoryCsvPath is null)
+            InsertStoryRow(insertAfter: false);
+        }
+
+        private void InsertStoryRowAfter()
+        {
+            InsertStoryRow(insertAfter: true);
+        }
+
+        private void InsertStoryRow(bool insertAfter)
+        {
+            if (_storyRows.Count == 0 || _currentStoryDocumentPath is null)
             {
                 return;
             }
 
             if (_isStoryDebugModeEnabled)
             {
-                ShowStoryStatus(InfoBarSeverity.Informational, "调试模式", "调试模式下已隐藏原地新建。");
+                ShowStoryStatus(InfoBarSeverity.Informational, "调试模式", "调试模式下已隐藏插入功能。");
                 return;
             }
 
             SaveCurrentStoryRow();
-            CaptureStoryUndoState("原地新建一句");
-            var result = _storyEditorService.InsertAtCurrent(_storyRows, _storyRowSections, _currentStoryRowIndex);
+            CaptureStoryUndoState(insertAfter ? "向右插入一句" : "向左插入一句");
+            var result = insertAfter
+                ? _storyEditorService.InsertAfterCurrent(_storyRows, _storyRowSections, _currentStoryRowIndex)
+                : _storyEditorService.InsertAtCurrent(_storyRows, _storyRowSections, _currentStoryRowIndex);
             _currentStoryRowIndex = result.RowIndex;
-            PersistCurrentStoryRowsToFiles();
+            QueueCurrentStoryDocumentSave();
             SaveCurrentChapterProgress();
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
             _storyEditorViewModel.RefreshCommandStates();
             LoadStoryRowIntoUi();
-            ShowStoryStatus(InfoBarSeverity.Success, "已原地新建", "新句子已插入当前位置，后面的剧情已顺延。");
+            ShowStoryStatus(
+                InfoBarSeverity.Success,
+                insertAfter ? "已右插入" : "已左插入",
+                insertAfter ? "新句子已插入原句右侧。" : "新句子已插入原句左侧，后面的剧情已顺延。");
         }
 
         private void StoryEditorPage_PointerPressed(object sender, PointerRoutedEventArgs e)
@@ -587,7 +586,7 @@ namespace GalExcleTools
 
         private void DeleteCurrentStoryRow()
         {
-            if (_storyRows.Count == 0 || _currentStoryCsvPath is null)
+            if (!CanEditStoryData() || _storyRows.Count == 0 || _currentStoryDocumentPath is null)
             {
                 return;
             }
@@ -596,8 +595,8 @@ namespace GalExcleTools
             CaptureStoryUndoState("删除当前句");
             var result = _storyEditorService.DeleteCurrent(_storyRows, _storyRowSections, _currentStoryRowIndex, removedChoices);
             _currentStoryRowIndex = result.RowIndex;
-            PersistCurrentStoryRowsToFiles();
-            RemoveUnusedStoryChoiceNotes(result.RemovedChoiceValues);
+            var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes(result.RemovedChoiceValues);
+            QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
             SaveCurrentChapterProgress();
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
             _storyEditorViewModel.RefreshCommandStates();

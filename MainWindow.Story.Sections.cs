@@ -44,24 +44,22 @@ namespace GalExcleTools
     {
         private void StorySectionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_isLoadingStoryRow || _isUpdatingStorySectionOptions || _currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (_isLoadingStoryRow || _isUpdatingStorySectionOptions || _currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
 
             var selectedSection = GetSelectedStorySection();
-            if (selectedSection != GetCurrentStorySection())
+            if (selectedSection == GetCurrentStorySection())
             {
-                CaptureStoryUndoState("调整当前句小节");
+                return;
             }
 
-            if (SetCurrentStorySectionIfChanged(selectedSection))
+            var targetIndex = Enumerable.Range(0, _storyRows.Count)
+                .FirstOrDefault(index => GetStorySectionAtRowIndex(index) == selectedSection, -1);
+            if (targetIndex >= 0)
             {
-                NormalizeCurrentStoryChoiceFunctionPrefix();
-                PersistCurrentStoryRowsToFiles();
-                UpdateStoryRowIndexInput();
-                UpdateStoryEditorHeader();
-                UpdateStoryToolbarCurrentInfo();
+                NavigateToStoryRow(targetIndex, rebuildPersistentState: true);
             }
         }
 
@@ -94,31 +92,30 @@ namespace GalExcleTools
 
         private void AddStorySection()
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData() || _currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
 
-            var nextSection = Math.Max(StorySectionComboBox.Items.Count, _storyRowSections.Values.DefaultIfEmpty(1).Max()) + 1;
-            CaptureStoryUndoState("新增小节");
-            EnsureStorySectionOptions(nextSection);
-            _isUpdatingStorySectionOptions = true;
-            try
+            SaveCurrentStoryRow();
+            if (!_storyEditorService.CanSplitSectionAtCurrent(_storyRows, _storyRowSections, _currentStoryRowIndex))
             {
-                SelectStorySection(nextSection);
-            }
-            finally
-            {
-                _isUpdatingStorySectionOptions = false;
+                ShowStoryStatus(InfoBarSeverity.Informational, "无法拆分小节", "当前句已经是小节第一句，或章节中没有可拆分的前置句子。");
+                return;
             }
 
-            SetCurrentStorySection(nextSection);
-            NormalizeCurrentStoryChoiceFunctionPrefix();
-            PersistCurrentStoryRowsToFiles();
+            CaptureStoryUndoState("从当前句拆分新小节");
+            _storyEditorService.SplitSectionAtCurrent(_storyRows, _storyRowSections, _currentStoryRowIndex);
+            var nextSection = GetCurrentStorySection();
+            EnsureStorySectionOptions(_storyRowSections.Values.DefaultIfEmpty(1).Max());
+            SelectStorySection(nextSection);
+            NormalizeStoryChoiceFunctionPrefixes(out var migratedChoiceNotes);
+            QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
             UpdateStoryRowIndexInput();
             UpdateStoryEditorHeader();
             UpdateStoryToolbarCurrentInfo();
             _storyEditorViewModel.RefreshCommandStates();
+            ShowStoryStatus(InfoBarSeverity.Success, "已拆分小节", $"当前句现在是第 {nextSection} 小节的第一句。");
         }
 
         private void SelectStorySection(int section)
@@ -175,94 +172,9 @@ namespace GalExcleTools
             return changed;
         }
 
-        private void LoadStoryRowsFromSectionFiles(ChapterInfo chapter)
+        private bool SynchronizeStorySectionState()
         {
-            _storyRows.Clear();
-            _storyRowSections.Clear();
-            var result = _storySessionService.LoadRowsFromSectionFiles(chapter);
-            _storyRows.AddRange(result.Rows);
-            foreach (var pair in result.Sections)
-            {
-                _storyRowSections[pair.Key] = pair.Value;
-            }
-
-            _storyEditorViewModel.RefreshCollectionState();
-            _storyEditorViewModel.RefreshCommandStates();
-
-            if (result.RemovedEmptySectionCount > 0)
-            {
-                ShowStoryStatus(InfoBarSeverity.Informational, "已清理空小节", $"检测并删除 {result.RemovedEmptySectionCount} 个空小节 CSV。");
-            }
-        }
-
-        private void ImportLooseStorySectionCsvFiles(ChapterInfo chapter)
-        {
-            if (_currentStoryCsvPath is null || !Directory.Exists(chapter.Path))
-            {
-                return;
-            }
-
-            var looseCsvPaths = _storySessionService.GetLooseSectionCsvPaths(chapter);
-            if (looseCsvPaths.Count == 0)
-            {
-                return;
-            }
-
-            var importedCount = ImportStorySectionCsvFiles(chapter, looseCsvPaths, deleteSourceFiles: true);
-            if (importedCount > 0)
-            {
-                EnsureStorySectionOptions(_storyRowSections.Values.DefaultIfEmpty(1).Max());
-                ShowStoryStatus(InfoBarSeverity.Informational, "已导入小节 CSV", $"检测并导入 {importedCount} 个章节小节。");
-            }
-        }
-
-        private int ImportStorySectionCsvFiles(ChapterInfo chapter, IReadOnlyList<string> csvPaths, bool deleteSourceFiles)
-        {
-            var result = _storySessionService.ImportSectionCsvFiles(chapter, csvPaths, deleteSourceFiles);
-            foreach (var log in result.Logs)
-            {
-                AppendLog(log.Kind, log.Message);
-            }
-
-            if (result.Changed)
-            {
-                if (_currentStoryChapter is not null && PathsEqual(_currentStoryChapter.Path, chapter.Path))
-                {
-                    LoadStoryRowsFromSectionFiles(chapter);
-                    SynchronizeStorySectionState();
-                    WriteStorySectionState(chapter.Path, _storyRowSections);
-                }
-            }
-
-            return result.ImportedCount;
-        }
-
-        private void PersistCurrentStoryRowsToFiles(bool showStatus = false)
-        {
-            if (_isPersistingStoryRows || _currentStoryChapter is null || _currentStoryCsvPath is null || _storyRows.Count == 0)
-            {
-                return;
-            }
-
-            _isPersistingStoryRows = true;
-            try
-            {
-                var result = _storySessionService.PersistRowsToSectionFiles(_currentStoryChapter, _currentStoryCsvPath, _storyRows, _storyRowSections);
-
-                if (showStatus)
-                {
-                    ShowStoryStatus(InfoBarSeverity.Success, "小节 CSV 已更新", $"已按 {result.ActiveCsvCount} 个小节文件保存。");
-                }
-            }
-            finally
-            {
-                _isPersistingStoryRows = false;
-            }
-        }
-
-        private void SynchronizeStorySectionState()
-        {
-            _storyEditorService.SynchronizeSections(_storyRows, _storyRowSections);
+            return _storyEditorService.NormalizeContiguousSections(_storyRows, _storyRowSections);
         }
 
         private List<int> GetStorySectionsInRowOrder()
@@ -273,57 +185,6 @@ namespace GalExcleTools
         private void ApplyStorySectionsInRowOrder(IReadOnlyList<int> sections)
         {
             _storyEditorService.ApplySectionsInRowOrder(_storyRows, _storyRowSections, sections);
-        }
-
-        private void WriteStorySectionState()
-        {
-            if (_currentStoryChapter is null)
-            {
-                return;
-            }
-
-            WriteStorySectionState(_currentStoryChapter.Path, _storyRowSections);
-        }
-
-        private void WriteStorySectionState(string chapterPath, IReadOnlyDictionary<string, int> sections)
-        {
-            _storyStateService.WriteSectionState(chapterPath, sections);
-        }
-
-        private async void ExportStorySectionsButton_Click(object sender, RoutedEventArgs e)
-        {
-            await ExportStorySectionsAsync(true);
-        }
-
-        private void SynchronizeStorySectionCsvExports(bool showStatus = false)
-        {
-            _ = ExportStorySectionsAsync(showStatus);
-        }
-
-        private Task ExportStorySectionsAsync(bool showStatus = false)
-        {
-            if (_currentProject is null || _currentStoryChapter is null || _currentStoryCsvPath is null || _storyRows.Count == 0)
-            {
-                return Task.CompletedTask;
-            }
-
-            PersistCurrentStoryRowsToFiles(showStatus);
-            return Task.CompletedTask;
-        }
-
-        private static string BuildSectionCsvBaseName(string chapterCode)
-        {
-            return StoryCsvService.BuildSectionCsvBaseName(chapterCode);
-        }
-
-        private static string BuildSectionCsvChapterBaseName(string chapterCode)
-        {
-            return StoryCsvService.BuildSectionCsvChapterBaseName(chapterCode);
-        }
-
-        private static string BuildSectionCsvFileBaseName(string chapterCode, int section)
-        {
-            return StoryCsvService.BuildSectionCsvFileBaseName(chapterCode, section);
         }
 
         private string BuildNextStoryChoiceFunctionIndicator()

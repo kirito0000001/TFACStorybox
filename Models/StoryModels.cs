@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace GalExcleTools;
 
-internal sealed record StoryAssetChoice(int Index, string Name);
+internal sealed record StoryAssetChoice(int Index, string Name, string? PreviewPath = null);
 
 internal sealed record StoryObjectChoice(
     string Key,
@@ -20,32 +21,25 @@ internal sealed record StoryCharacterSlotClipboard(
 
 internal sealed record StoryAssetClipboard(string FieldName, string Value);
 
-internal sealed record StoryEditorUndoState(
-    List<StoryRow> Rows,
-    Dictionary<string, int> Sections,
-    int RowIndex,
-    string Description,
-    StoryChoiceNoteState? ChoiceNotes);
-
 internal sealed record StoryRowsEditResult(int RowIndex, bool Changed, IReadOnlyList<string> RemovedChoiceValues);
-
-internal sealed record StoryRowsLoadResult(
-    List<StoryRow> Rows,
-    Dictionary<string, int> Sections,
-    int RemovedEmptySectionCount);
 
 internal sealed record StorySectionImportResult(
     int ImportedCount,
     bool Changed,
     IReadOnlyList<StorySessionLogEntry> Logs);
 
-internal sealed record StoryRowsPersistResult(int ActiveCsvCount);
-
 internal sealed record StorySessionLogEntry(LogKind Kind, string Message);
 
 internal sealed class StoryRow
 {
     private readonly Dictionary<string, string> _cells = new(StringComparer.Ordinal);
+
+    public string StableId { get; set; } = CreateStableId();
+
+    public static string CreateStableId()
+    {
+        return Guid.NewGuid().ToString("N");
+    }
 
     public string Get(string column)
     {
@@ -65,18 +59,26 @@ internal sealed class StoryRow
             clone.Set(pair.Key, pair.Value);
         }
 
+        clone.StableId = StableId;
+
         return clone;
     }
-}
-
-internal sealed class StorySectionState
-{
-    public Dictionary<string, int> Rows { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 internal sealed class StoryChoiceNoteState
 {
     public Dictionary<string, List<string>> Choices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public StoryChoiceNoteState Clone()
+    {
+        var clone = new StoryChoiceNoteState();
+        foreach (var pair in Choices)
+        {
+            clone.Choices[pair.Key] = pair.Value.ToList();
+        }
+
+        return clone;
+    }
 }
 
 internal sealed record StoryCsvCompatibility(
@@ -90,6 +92,7 @@ internal sealed record StorySectionCsvFile(string Path, int Section);
 
 internal sealed record ProjectTextRow(
     string Id,
+    string StableRowId,
     string ChapterCode,
     string ChapterName,
     int Section,

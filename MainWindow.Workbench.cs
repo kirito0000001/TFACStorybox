@@ -176,11 +176,20 @@ namespace GalExcleTools
                     progress => Task.Run(() => _folderBackupService.CreateBackup(project.Path, ProjectBackupsFolderName, project.Code, note, progress, GetGlobalProgressCancellationToken())));
                 LoadProjects();
                 RequestDelayedRefresh();
-                AppendLog(LogKind.User, $"备份项目：{project.Name} -> {backup.Path}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "项目已备份",
+                    backup.DisplayName,
+                    logMessage: $"备份项目：{project.Name} -> {backup.Path}");
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Error, "备份项目失败。", ex);
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "项目备份失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "备份项目失败。");
             }
         }
 
@@ -204,7 +213,11 @@ namespace GalExcleTools
 
                 if (string.IsNullOrWhiteSpace(exportFile.Path))
                 {
-                    AppendLog(LogKind.Warning, "导出项目失败：请选择本机文件夹里的保存位置。");
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "项目未导出",
+                        "请选择本机文件夹里的保存位置。",
+                        logMessage: "导出项目失败：请选择本机文件夹里的保存位置。");
                     return;
                 }
 
@@ -212,11 +225,20 @@ namespace GalExcleTools
                     "正在导出项目",
                     project.Name,
                     progress => Task.Run(() => _folderBackupService.ExportToZip(project.Path, exportFile.Path, progress, GetGlobalProgressCancellationToken())));
-                AppendLog(LogKind.User, $"导出项目：{project.Name} -> {export.Path}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "项目已导出",
+                    Path.GetFileName(export.Path),
+                    logMessage: $"导出项目：{project.Name} -> {export.Path}");
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Error, "导出项目失败。", ex);
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "项目导出失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "导出项目失败。");
             }
         }
 
@@ -227,7 +249,11 @@ namespace GalExcleTools
                 var backups = _folderBackupService.GetBackups(project.Path, ProjectBackupsFolderName);
                 if (backups.Count == 0)
                 {
-                    AppendLog(LogKind.Warning, $"项目没有可还原的备份：{project.Name}");
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "没有项目备份",
+                        project.Name,
+                        logMessage: $"项目没有可还原的备份：{project.Name}");
                     return;
                 }
 
@@ -244,13 +270,22 @@ namespace GalExcleTools
                 await HideGlobalProgressAfterDelayAsync();
                 LoadProjects();
                 RequestDelayedRefresh();
-                AppendLog(LogKind.User, $"还原项目：{project.Name} <- {selectedBackup.Path}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "项目已还原",
+                    selectedBackup.DisplayName,
+                    logMessage: $"还原项目：{project.Name} <- {selectedBackup.Path}");
             }
             catch (Exception ex)
             {
                 CompleteGlobalProgress("项目还原失败", ex.Message);
                 await HideGlobalProgressAfterDelayAsync();
-                AppendLog(LogKind.Error, "还原项目失败。", ex);
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "项目还原失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "还原项目失败。");
             }
         }
 
@@ -272,11 +307,20 @@ namespace GalExcleTools
                 LoadProjects();
                 LoadAssetLibraryOptions();
                 RequestDelayedRefresh();
-                AppendLog(LogKind.User, $"备份素材库：{assetLibrary.Name} -> {backup.Path}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "素材库已备份",
+                    backup.DisplayName,
+                    logMessage: $"备份素材库：{assetLibrary.Name} -> {backup.Path}");
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Error, "备份素材库失败。", ex);
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "素材库备份失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "备份素材库失败。");
             }
         }
 
@@ -300,7 +344,11 @@ namespace GalExcleTools
 
                 if (string.IsNullOrWhiteSpace(exportFile.Path))
                 {
-                    AppendLog(LogKind.Warning, "导出素材库失败：请选择本机文件夹里的保存位置。");
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "素材库未导出",
+                        "请选择本机文件夹里的保存位置。",
+                        logMessage: "导出素材库失败：请选择本机文件夹里的保存位置。");
                     return;
                 }
 
@@ -308,11 +356,20 @@ namespace GalExcleTools
                     "正在导出素材库",
                     assetLibrary.Name,
                     progress => Task.Run(() => _folderBackupService.ExportToZip(assetLibrary.Path, exportFile.Path, progress, GetGlobalProgressCancellationToken())));
-                AppendLog(LogKind.User, $"导出素材库：{assetLibrary.Name} -> {export.Path}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "素材库已导出",
+                    Path.GetFileName(export.Path),
+                    logMessage: $"导出素材库：{assetLibrary.Name} -> {export.Path}");
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Error, "导出素材库失败。", ex);
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "素材库导出失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "导出素材库失败。");
             }
         }
 
@@ -323,7 +380,11 @@ namespace GalExcleTools
                 var backups = _folderBackupService.GetBackups(assetLibrary.Path, AssetLibraryBackupsFolderName);
                 if (backups.Count == 0)
                 {
-                    AppendLog(LogKind.Warning, $"素材库没有可还原的备份：{assetLibrary.Name}");
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "没有素材库备份",
+                        assetLibrary.Name,
+                        logMessage: $"素材库没有可还原的备份：{assetLibrary.Name}");
                     return;
                 }
 
@@ -342,13 +403,22 @@ namespace GalExcleTools
                 LoadProjects();
                 LoadAssetLibraryOptions();
                 RequestDelayedRefresh();
-                AppendLog(LogKind.User, $"还原素材库：{assetLibrary.Name} <- {selectedBackup.Path}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "素材库已还原",
+                    selectedBackup.DisplayName,
+                    logMessage: $"还原素材库：{assetLibrary.Name} <- {selectedBackup.Path}");
             }
             catch (Exception ex)
             {
                 CompleteGlobalProgress("素材库还原失败", ex.Message);
                 await HideGlobalProgressAfterDelayAsync();
-                AppendLog(LogKind.Error, "还原素材库失败。", ex);
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "素材库还原失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "还原素材库失败。");
             }
         }
 
@@ -357,11 +427,20 @@ namespace GalExcleTools
             return DashboardCardFactory.CreateAddCard(title, subtitle, tappedHandler);
         }
 
-        private async Task LoadStoryPreviewImageAsync(Image image, string imagePath)
+        private async Task LoadStoryPreviewImageAsync(
+            Image image,
+            string imagePath,
+            CancellationToken cancellationToken = default)
         {
             try
             {
-                image.Source = await GetCachedStoryPreviewImageAsync(imagePath);
+                var bitmap = await GetCachedStoryPreviewImageAsync(imagePath, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                image.Source = bitmap;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch
             {
@@ -369,8 +448,11 @@ namespace GalExcleTools
             }
         }
 
-        private async Task<BitmapImage> GetCachedStoryPreviewImageAsync(string imagePath)
+        private async Task<BitmapImage> GetCachedStoryPreviewImageAsync(
+            string imagePath,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (_storyPreviewImageCache.TryGetValue(imagePath, out var cached))
             {
                 return cached;
@@ -378,9 +460,20 @@ namespace GalExcleTools
 
             var file = await StorageFile.GetFileFromPathAsync(imagePath);
             using var stream = await file.OpenReadAsync();
-            var bitmap = new BitmapImage();
+            var bitmap = new BitmapImage
+            {
+                DecodePixelWidth = 1280
+            };
             await bitmap.SetSourceAsync(stream);
+            cancellationToken.ThrowIfCancellationRequested();
+            while (_storyPreviewImageCache.Count >= MaxStoryPreviewImageCacheCount &&
+                   _storyPreviewImageCacheOrder.TryDequeue(out var oldestPath))
+            {
+                _storyPreviewImageCache.Remove(oldestPath);
+            }
+
             _storyPreviewImageCache[imagePath] = bitmap;
+            _storyPreviewImageCacheOrder.Enqueue(imagePath);
             return bitmap;
         }
 

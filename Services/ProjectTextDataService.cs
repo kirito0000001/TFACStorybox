@@ -12,17 +12,14 @@ internal sealed class ProjectTextDataService
     private const string VoiceMapFileName = "story.voice-map.json";
     private const string LocalizationFileName = "story.localization.json";
 
-    private readonly StoryCsvService _storyCsvService;
-    private readonly StorySessionService _storySessionService;
+    private readonly StoryDocumentRepository _storyDocumentRepository;
     private readonly JsonSerializerOptions _jsonOptions;
 
     public ProjectTextDataService(
-        StoryCsvService storyCsvService,
-        StorySessionService storySessionService,
+        StoryDocumentRepository storyDocumentRepository,
         JsonSerializerOptions jsonOptions)
     {
-        _storyCsvService = storyCsvService;
-        _storySessionService = storySessionService;
+        _storyDocumentRepository = storyDocumentRepository;
         _jsonOptions = jsonOptions;
     }
 
@@ -31,10 +28,10 @@ internal sealed class ProjectTextDataService
         var rows = new List<ProjectTextRow>();
         foreach (var chapter in chapters.OrderBy(chapter => chapter.Code, StringComparer.OrdinalIgnoreCase))
         {
-            var loadResult = _storySessionService.LoadRowsFromSectionFiles(chapter);
-            for (var i = 0; i < loadResult.Rows.Count; i++)
+            var document = _storyDocumentRepository.Load(chapter);
+            for (var i = 0; i < document.Rows.Count; i++)
             {
-                var row = loadResult.Rows[i];
+                var row = document.Rows[i];
                 var text = row.Get("Tesxt");
                 if (string.IsNullOrWhiteSpace(text))
                 {
@@ -44,11 +41,12 @@ internal sealed class ProjectTextDataService
                 var rowName = string.IsNullOrWhiteSpace(row.Get("Name"))
                     ? StoryCsvService.CreateRowName(i)
                     : row.Get("Name");
-                var section = loadResult.Sections.TryGetValue(rowName, out var mappedSection)
+                var section = document.RowSections.TryGetValue(rowName, out var mappedSection)
                     ? mappedSection
                     : 1;
                 rows.Add(new ProjectTextRow(
-                    BuildTextRowId(chapter.Code, section, rowName),
+                    BuildStableTextRowId(chapter.Code, row.StableId),
+                    row.StableId,
                     chapter.Code,
                     chapter.Name,
                     section,
@@ -74,12 +72,50 @@ internal sealed class ProjectTextDataService
 
     public ProjectVoiceMapState ReadVoiceMap(ProjectInfo project)
     {
-        return ReadJson<ProjectVoiceMapState>(GetVoiceMapPath(project)) ?? new ProjectVoiceMapState();
+        var storedState = ReadJson<ProjectVoiceMapState>(GetVoiceMapPath(project)) ?? new ProjectVoiceMapState();
+        return ResolveVoiceMapPaths(project, storedState);
     }
 
     public void WriteVoiceMap(ProjectInfo project, ProjectVoiceMapState state)
     {
-        WriteJson(GetVoiceMapPath(project), state);
+        WriteJson(GetVoiceMapPath(project), CreatePortableVoiceMap(project, state));
+    }
+
+    private static ProjectVoiceMapState ResolveVoiceMapPaths(ProjectInfo project, ProjectVoiceMapState storedState)
+    {
+        var resolvedState = new ProjectVoiceMapState();
+        foreach (var pair in storedState.Voices)
+        {
+            resolvedState.Voices[pair.Key] = string.IsNullOrWhiteSpace(pair.Value) || Path.IsPathRooted(pair.Value)
+                ? pair.Value
+                : Path.GetFullPath(Path.Combine(project.Path, pair.Value));
+        }
+
+        return resolvedState;
+    }
+
+    private static ProjectVoiceMapState CreatePortableVoiceMap(ProjectInfo project, ProjectVoiceMapState state)
+    {
+        var portableState = new ProjectVoiceMapState();
+        var projectRoot = Path.GetFullPath(project.Path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var projectPrefix = projectRoot + Path.DirectorySeparatorChar;
+
+        foreach (var pair in state.Voices)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Value))
+            {
+                portableState.Voices[pair.Key] = pair.Value;
+                continue;
+            }
+
+            var fullPath = Path.GetFullPath(pair.Value);
+            portableState.Voices[pair.Key] = fullPath.StartsWith(projectPrefix, StringComparison.OrdinalIgnoreCase)
+                ? Path.GetRelativePath(project.Path, fullPath)
+                : pair.Value;
+        }
+
+        return portableState;
     }
 
     public ProjectLocalizationState ReadLocalization(ProjectInfo project)
@@ -92,9 +128,14 @@ internal sealed class ProjectTextDataService
         WriteJson(GetLocalizationPath(project), state);
     }
 
-    public static string BuildTextRowId(string chapterCode, int section, string rowName)
+    public static string BuildExportRowKey(string chapterCode, int section, string rowName)
     {
         return $"{chapterCode}#{Math.Max(1, section)}#{rowName}";
+    }
+
+    public static string BuildStableTextRowId(string chapterCode, string stableRowId)
+    {
+        return $"{chapterCode}#id#{stableRowId}";
     }
 
     private static string GetVoiceMapPath(ProjectInfo project)
@@ -127,6 +168,15 @@ internal sealed class ProjectTextDataService
     private void WriteJson<T>(string path, T value)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(value, _jsonOptions));
+        var tempPath = path + $".{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(value, _jsonOptions));
+            File.Move(tempPath, path, true);
+        }
+        finally
+        {
+            File.Delete(tempPath);
+        }
     }
 }

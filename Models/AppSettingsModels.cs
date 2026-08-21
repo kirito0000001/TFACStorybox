@@ -24,6 +24,16 @@ internal sealed class AppSettings
 
     public bool ShowFullStoryChapterLength { get; set; }
 
+    public UpdateChannel UpdateChannel { get; set; } = UpdateChannel.Stable;
+
+    public bool UpdateAutoCheckEnabled { get; set; } = true;
+
+    public int UpdateConnectionTimeoutSeconds { get; set; } = 60;
+
+    public DateTimeOffset? UpdateLastCheckAt { get; set; }
+
+    public string? UpdateLastStatus { get; set; }
+
     public string? UnrealEnginePath { get; set; }
 
     public string? UnrealProjectPath { get; set; }

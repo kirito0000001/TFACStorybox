@@ -47,7 +47,7 @@ namespace GalExcleTools
             var backupFolder = GetUnrealBackupFolder(context);
             var result = await _dialogService.ShowAsync(new DialogRequest(
                 "同步前备份虚幻项目？",
-                $"建议在写入虚幻项目前先生成一个不带缓存的干净压缩包。\n默认位置：{backupFolder}",
+                $"建议先备份本次同步会影响的 Narrative 目录、Config 和 .uproject 文件。仅保留最近 5 份。\n默认位置：{backupFolder}",
                 "备份并同步",
                 "取消",
                 "直接同步"));
@@ -59,9 +59,9 @@ namespace GalExcleTools
             };
         }
 
-        private async Task<bool?> ShowRunningUnrealEditorDialogAsync()
+        private async Task<bool?> ShowRunningUnrealEditorDialogAsync(UnrealSyncContext context)
         {
-            var runningEditors = GetRunningUnrealEditorProcesses();
+            var runningEditors = GetRunningUnrealEditorProcesses(context);
             if (runningEditors.Count == 0)
             {
                 return false;
@@ -69,8 +69,8 @@ namespace GalExcleTools
 
             var processText = string.Join("\n", runningEditors.Select(process => $"{process.ProcessName}  PID {process.Id}"));
             var result = await _dialogService.ShowAsync(new DialogRequest(
-                "检测到 Unreal Editor 正在运行",
-                $"建议先关闭当前打开的虚幻编辑器，再执行同步。否则编辑器中已加载的资产可能不会刷新，后续保存还可能覆盖同步结果。\n\n{processText}",
+                "检测到当前项目正在 Unreal Editor 中运行",
+                $"建议先关闭当前绑定项目的虚幻编辑器，再执行同步。其他 Unreal 项目不会被关闭。否则已加载的资产可能不会刷新，后续保存还可能覆盖同步结果。\n\n{processText}",
                 "关闭后同步",
                 "取消",
                 "继续同步"));

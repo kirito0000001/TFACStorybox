@@ -47,10 +47,16 @@ internal sealed record AssetIndexWarning(
     string Message);
 
 internal sealed record RelatedStoryCsvFile(
-    string ProjectName,
-    string ChapterName,
-    string ChapterCode,
-    string CsvPath);
+    ProjectInfo Project,
+    ChapterInfo Chapter,
+    string CsvPath)
+{
+    public string ProjectName => Project.Name;
+
+    public string ChapterName => Chapter.Name;
+
+    public string ChapterCode => Chapter.Code;
+}
 
 internal sealed record StoryIndexRowContext(
     RelatedStoryCsvFile CsvFile,

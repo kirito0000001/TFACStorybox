@@ -195,7 +195,7 @@ namespace GalExcleTools
                 $"背景图：源文件 {backgroundCount} 个，引擎内已有 {existingBackgroundCount} 个 .uasset。",
                 $"音乐：源文件 {musicCount} 个，引擎内已有 {existingMusicCount} 个 .uasset。",
                 $"环境音/特殊音效：源文件 {sceneCount + soundEffectCount} 个，引擎内已有 {existingSceneCount} 个 .uasset。",
-                $"文本语音：源文件 {voiceCount} 个，引擎内已有 {existingVoiceCount} 个 .uasset，将只同步 wav 到 Voice 文件夹。",
+                $"文本语音：源文件 {voiceCount} 个，引擎内已有 {existingVoiceCount} 个 .uasset；同步后会按剧情行号刷新 MusicPlayer 语音映射。",
                 $"素材索引表：背景 {backgroundCount}、BGM {musicCount}、环境音 {sceneCount}、特殊音效 {soundEffectCount}，将同步到 ExcelTexts 的 4 张 DataTable。",
                 $"CSV 表格：{csvCount} 个，将导入到 ExcelTexts。",
                 $"立绘图层：{characterLayerCount} 个，将按 Lustration/角色/图层目录导入。",
@@ -243,6 +243,7 @@ namespace GalExcleTools
                 AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(context.AssetLibrary)),
                 AudioAssetService.GetFilePaths(GetSoundEffectFolderPath(context.AssetLibrary)),
                 ProjectVoiceAssetService.GetVoiceFilePaths(context.Project),
+                _projectTextDataService.ReadVoiceMap(context.Project),
                 allStoryTables,
                 assetIndexTableCacheFolder,
                 GetPortraitPreviewPathsByLayerFileName);
@@ -250,7 +251,7 @@ namespace GalExcleTools
 
         private List<string> GetProjectStoryCsvPaths(ProjectInfo project)
         {
-            return _unrealSyncService.GetProjectStoryCsvPaths(project, _projectWorkspaceService.GetChapters(project));
+            return _unrealSyncService.GetProjectStoryCsvPaths(_projectWorkspaceService.GetChapters(project));
         }
 
         private List<CharacterInfo> GetCharactersForAssetLibrary(AssetLibraryInfo assetLibrary)

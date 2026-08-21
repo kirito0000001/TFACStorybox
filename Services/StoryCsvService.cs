@@ -11,51 +11,9 @@ namespace GalExcleTools.Services;
 
 internal sealed class StoryCsvService
 {
-    public static readonly string[] Columns =
-    [
-        "Name",
-        "Tesxt",
-        "Custom",
-        "BGindex",
-        "BGM",
-        "Scene",
-        "TalkChar",
-        "TalkBody",
-        "TalkFace",
-        "TalkAdorn",
-        "TalkVfx",
-        "Chara1",
-        "Body1",
-        "Face1",
-        "Adorn1",
-        "Vfx1",
-        "Chara2",
-        "Body2",
-        "Face2",
-        "Adorn2",
-        "Vfx2",
-        "Chara3",
-        "Body3",
-        "Face3",
-        "Adorn3",
-        "Vfx3",
-        "Chara4",
-        "Body4",
-        "Face4",
-        "Adorn4",
-        "Vfx4",
-        "Chara5",
-        "Body5",
-        "Face5",
-        "Adorn5",
-        "Vfx5"
-    ];
+    public static readonly string[] Columns = StorySchema.Columns;
 
-    public static readonly HashSet<string> NumericColumns =
-        new(Columns.Where(column =>
-            column is "BGindex" or "BGM" or "Scene" or
-                "TalkBody" or "TalkFace" or "TalkAdorn" or "TalkVfx" ||
-            Regex.IsMatch(column, "^(Body|Face|Adorn|Vfx)\\d+$")), StringComparer.Ordinal);
+    public static readonly HashSet<string> NumericColumns = StorySchema.NumericColumns;
 
     public StoryCsvCompatibility InspectCompatibility(string csvPath)
     {
@@ -80,14 +38,7 @@ internal sealed class StoryCsvService
 
     public StoryRow CreateDefaultRow(int index = 0)
     {
-        var row = new StoryRow();
-        foreach (var column in Columns)
-        {
-            row.Set(column, NumericColumns.Contains(column) ? "0" : string.Empty);
-        }
-
-        row.Set("Name", CreateRowName(index));
-        return row;
+        return StoryDocument.CreateEmptyRow(index);
     }
 
     public List<StoryRow> ReadRows(string csvPath)
@@ -155,34 +106,21 @@ internal sealed class StoryCsvService
 
     public string GetChapterCsvPath(ChapterInfo chapter)
     {
-        var expectedCsv = Path.Combine(chapter.Path, $"{chapter.Code}.csv");
-        if (File.Exists(expectedCsv))
-        {
-            return expectedCsv;
-        }
-
-        var legacyStoryCsv = Directory
-            .EnumerateFiles(chapter.Path, "*.story.csv")
-            .OrderBy(Path.GetFileName)
-            .FirstOrDefault();
-        if (legacyStoryCsv is not null)
-        {
-            if (!File.Exists(expectedCsv))
-            {
-                File.Move(legacyStoryCsv, expectedCsv);
-            }
-
-            return expectedCsv;
-        }
-
-        return expectedCsv;
+        return Path.Combine(chapter.Path, $"{chapter.Code}.csv");
     }
 
     public string GetSectionCsvPath(ChapterInfo chapter, int section)
     {
-        return section <= 1
-            ? GetChapterCsvPath(chapter)
-            : Path.Combine(chapter.Path, $"{BuildSectionCsvFileBaseName(chapter.Code, section)}.csv");
+        var mainCsvPath = GetChapterCsvPath(chapter);
+        if (section <= 1)
+        {
+            return mainCsvPath;
+        }
+
+        var candidate = Path.Combine(chapter.Path, $"{BuildSectionCsvFileBaseName(chapter.Code, section)}.csv");
+        return PathsEqual(candidate, mainCsvPath)
+            ? Path.Combine(chapter.Path, $"{SanitizeUnrealAssetName(chapter.Code)}-S{section - 1:00}.csv")
+            : candidate;
     }
 
     public List<StorySectionCsvFile> GetLocalSectionCsvPaths(ChapterInfo chapter)
@@ -197,11 +135,6 @@ internal sealed class StoryCsvService
         foreach (var csvPath in Directory.EnumerateFiles(chapter.Path, "*.csv", SearchOption.TopDirectoryOnly)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
-            if (Path.GetFileName(csvPath).EndsWith(".story.csv", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
             if (PathsEqual(csvPath, mainCsvPath))
             {
                 result.Add(new StorySectionCsvFile(csvPath, 1));
@@ -231,29 +164,21 @@ internal sealed class StoryCsvService
             return false;
         }
 
-        var fileName = Path.GetFileName(csvPath);
-        var baseName = BuildSectionCsvBaseName(chapter.Code);
-        var sectionBaseName = BuildSectionCsvChapterBaseName(chapter.Code);
-        if (fileName.StartsWith($"{baseName}_小节", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (Regex.IsMatch(
-            Path.GetFileNameWithoutExtension(csvPath),
-            $"^{Regex.Escape(sectionBaseName)}[-_](?<index>\\d+)$",
-            RegexOptions.IgnoreCase))
-        {
-            return true;
-        }
-
-        return !fileName.EndsWith(".story.csv", StringComparison.OrdinalIgnoreCase) &&
-            !fileName.StartsWith($"{sectionBaseName}_", StringComparison.OrdinalIgnoreCase);
+        return TryParseStorySectionFromFileName(chapter, csvPath) is null;
     }
 
     public int? TryParseStorySectionFromFileName(ChapterInfo chapter, string csvPath)
     {
         var fileName = Path.GetFileNameWithoutExtension(csvPath);
+        var collisionSafeMatch = Regex.Match(
+            fileName,
+            $"^{Regex.Escape(SanitizeUnrealAssetName(chapter.Code))}-S(?<index>\\d+)$",
+            RegexOptions.IgnoreCase);
+        if (collisionSafeMatch.Success)
+        {
+            return ParseInt(collisionSafeMatch.Groups["index"].Value) + 1;
+        }
+
         var currentPrefix = BuildSectionCsvChapterBaseName(chapter.Code);
         var currentMatch = Regex.Match(
             fileName,
@@ -264,18 +189,7 @@ internal sealed class StoryCsvService
             return ParseInt(currentMatch.Groups["index"].Value) + 1;
         }
 
-        var oldPrefix = BuildSectionCsvBaseName(chapter.Code);
-        var oldMatch = Regex.Match(
-            fileName,
-            $"^{Regex.Escape(oldPrefix)}_小节(?<index>\\d+)$",
-            RegexOptions.IgnoreCase);
-        if (oldMatch.Success)
-        {
-            return Math.Max(1, ParseInt(oldMatch.Groups["index"].Value));
-        }
-
-        var anyOldSectionSuffix = Regex.Match(fileName, @"_小节(?<index>\d+)$", RegexOptions.IgnoreCase);
-        return anyOldSectionSuffix.Success ? Math.Max(1, ParseInt(anyOldSectionSuffix.Groups["index"].Value)) : null;
+        return null;
     }
 
     public static string BuildSectionCsvBaseName(string chapterCode)

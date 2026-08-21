@@ -75,7 +75,11 @@ namespace GalExcleTools
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshBackgroundImageCards(_currentAssetLibrary);
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已设置背景图备注：{Path.GetFileName(imagePath)}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "背景图备注已保存",
+                Path.GetFileName(updatedPath ?? imagePath),
+                logMessage: $"已设置背景图备注：{Path.GetFileName(imagePath)}");
             return updatedPath;
         }
 
@@ -110,7 +114,11 @@ namespace GalExcleTools
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshBackgroundImageCards(_currentAssetLibrary);
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已删除背景图：{Path.GetFileName(imagePath)}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "背景图已删除",
+                Path.GetFileName(imagePath),
+                logMessage: $"已删除背景图：{Path.GetFileName(imagePath)}");
             return true;
         }
 
@@ -121,38 +129,56 @@ namespace GalExcleTools
                 return false;
             }
 
-            var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
-            if (sourcePath is null)
-            {
-                return false;
-            }
-
-            if (!BackgroundImageService.IsValidSourcePath(sourcePath))
-            {
-                AppendLog(LogKind.Warning, $"替换背景图失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
-                return false;
-            }
-
-            _isNormalizingBackgroundImages = true;
             try
             {
-                await ImportBackgroundImageAsPngAsync(sourcePath, imagePath);
-            }
-            finally
-            {
-                _isNormalizingBackgroundImages = false;
-            }
+                var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+                if (sourcePath is null)
+                {
+                    return false;
+                }
 
-            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshBackgroundImageCards(_currentAssetLibrary);
-            RequestDelayedRefresh();
-            if (_viewingBackgroundImagePath is not null && PathsEqual(_viewingBackgroundImagePath, imagePath))
-            {
-                await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, imagePath);
-            }
+                if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+                {
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "背景图未替换",
+                        $"不支持文件 {Path.GetFileName(sourcePath)}。",
+                        logMessage: $"替换背景图失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                    return false;
+                }
 
-            AppendLog(LogKind.User, $"已替换背景图素材：{Path.GetFileName(imagePath)} <- {Path.GetFileName(sourcePath)}");
-            return true;
+                _isNormalizingBackgroundImages = true;
+                try
+                {
+                    await ImportBackgroundImageAsPngAsync(sourcePath, imagePath);
+                }
+                finally
+                {
+                    _isNormalizingBackgroundImages = false;
+                }
+
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+                RefreshBackgroundImageCards(_currentAssetLibrary);
+                RequestDelayedRefresh();
+                if (_viewingBackgroundImagePath is not null && PathsEqual(_viewingBackgroundImagePath, imagePath))
+                {
+                    await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, imagePath);
+                }
+
+                var logMessage = $"已替换背景图素材：{Path.GetFileName(imagePath)} <- {Path.GetFileName(sourcePath)}";
+                ShowFloatingTip(InfoBarSeverity.Success, "背景图已替换", Path.GetFileName(imagePath), logMessage: logMessage);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "背景图替换失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    $"替换背景图失败：{Path.GetFileName(imagePath)}");
+                return false;
+            }
         }
 
         private async Task<string?> PromptRemarkAsync(string title, string currentRemark, string placeholderText)
@@ -219,7 +245,11 @@ namespace GalExcleTools
                 : null;
             ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已设置服装备注：{Path.GetFileName(clothPath)}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "服装备注已保存",
+                Path.GetFileName(updatedPath ?? clothPath),
+                logMessage: $"已设置服装备注：{Path.GetFileName(clothPath)}");
             return updatedPath;
         }
 
@@ -258,7 +288,7 @@ namespace GalExcleTools
 
             ReloadCharacterDetailLayersPreservingScroll();
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已删除服装：{Path.GetFileName(clothPath)}");
+            ShowFloatingTip(InfoBarSeverity.Success, "服装已删除", Path.GetFileName(clothPath), logMessage: $"已删除服装：{Path.GetFileName(clothPath)}");
             return true;
         }
 
@@ -307,7 +337,11 @@ namespace GalExcleTools
                 : null;
             ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已设置表情备注：{Path.GetFileName(facePath)}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "表情备注已保存",
+                Path.GetFileName(updatedPath ?? facePath),
+                logMessage: $"已设置表情备注：{Path.GetFileName(facePath)}");
             return updatedPath;
         }
 
@@ -349,7 +383,7 @@ namespace GalExcleTools
 
             ReloadCharacterDetailLayersPreservingScroll();
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已删除表情：{Path.GetFileName(facePath)}");
+            ShowFloatingTip(InfoBarSeverity.Success, "表情已删除", Path.GetFileName(facePath), logMessage: $"已删除表情：{Path.GetFileName(facePath)}");
             return true;
         }
 
@@ -385,7 +419,11 @@ namespace GalExcleTools
             var clothPaths = CharacterLayerAssetService.GetImagePaths(clothFolderPath);
             if (clothPaths.Count == 0)
             {
-                AppendLog(LogKind.Warning, $"还没有服装，暂时无法设置{logLabel}可用范围。");
+                ShowFloatingTip(
+                    InfoBarSeverity.Warning,
+                    $"无法设置{logLabel}",
+                    "请先导入至少一套服装。",
+                    logMessage: $"还没有服装，暂时无法设置{logLabel}可用范围。");
                 return;
             }
 
@@ -418,7 +456,11 @@ namespace GalExcleTools
                 CostumeHashes = checkedHashes.Count == clothPaths.Count ? [] : checkedHashes
             });
             await UpdateCharacterLayerPreviewAsync();
-            AppendLog(LogKind.User, $"已设置{logLabel}可用范围：{layerFileName}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                $"{logLabel}范围已保存",
+                layerFileName,
+                logMessage: $"已设置{logLabel}可用范围：{layerFileName}");
         }
 
         private async Task<string?> SetCharacterAdornRemarkAsync(string adornPath)
@@ -466,7 +508,11 @@ namespace GalExcleTools
                 : null;
             ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已设置装饰备注：{Path.GetFileName(adornPath)}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "装饰备注已保存",
+                Path.GetFileName(updatedPath ?? adornPath),
+                logMessage: $"已设置装饰备注：{Path.GetFileName(adornPath)}");
             return updatedPath;
         }
 
@@ -508,7 +554,7 @@ namespace GalExcleTools
 
             ReloadCharacterDetailLayersPreservingScroll();
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已删除装饰：{Path.GetFileName(adornPath)}");
+            ShowFloatingTip(InfoBarSeverity.Success, "装饰已删除", Path.GetFileName(adornPath), logMessage: $"已删除装饰：{Path.GetFileName(adornPath)}");
             return true;
         }
 
@@ -519,46 +565,65 @@ namespace GalExcleTools
                 return false;
             }
 
-            var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
-            if (sourcePath is null)
+            var displayName = GetCharacterLayerDisplayName(layerKind);
+            try
             {
+                var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+                if (sourcePath is null)
+                {
+                    return false;
+                }
+
+                if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+                {
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        $"{displayName}未替换",
+                        $"不支持文件 {Path.GetFileName(sourcePath)}。",
+                        logMessage: $"替换{displayName}失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                    return false;
+                }
+
+                var restoreHorizontalOffset = CharacterDetailScrollViewer.HorizontalOffset;
+                var restoreVerticalOffset = CharacterDetailScrollViewer.VerticalOffset;
+                File.Copy(sourcePath, layerPath, overwrite: true);
+
+                if (_currentAssetLibrary is not null)
+                {
+                    TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+                }
+
+                SetSelectedCharacterLayer(layerKind, layerPath);
+                ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
+                await UpdateCharacterLayerPreviewAsync();
+                RequestDelayedRefresh();
+
+                if (_viewingCharacterLayer is { } viewingLayer &&
+                    viewingLayer.Kind == layerKind &&
+                    PathsEqual(viewingLayer.Path, layerPath))
+                {
+                    await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, layerPath);
+                }
+
+                if (_isViewingCharacterComposite)
+                {
+                    await LoadCharacterCompositeViewerImagesAsync();
+                }
+
+                var logMessage = $"已替换{displayName}素材：{Path.GetFileName(layerPath)} <- {Path.GetFileName(sourcePath)}";
+                ShowFloatingTip(InfoBarSeverity.Success, $"{displayName}已替换", Path.GetFileName(layerPath), logMessage: logMessage);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    $"{displayName}替换失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    $"替换{displayName}失败：{Path.GetFileName(layerPath)}");
                 return false;
             }
-
-            if (!BackgroundImageService.IsValidSourcePath(sourcePath))
-            {
-                AppendLog(LogKind.Warning, $"替换{GetCharacterLayerDisplayName(layerKind)}失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
-                return false;
-            }
-
-            var restoreHorizontalOffset = CharacterDetailScrollViewer.HorizontalOffset;
-            var restoreVerticalOffset = CharacterDetailScrollViewer.VerticalOffset;
-            File.Copy(sourcePath, layerPath, overwrite: true);
-
-            if (_currentAssetLibrary is not null)
-            {
-                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            }
-
-            SetSelectedCharacterLayer(layerKind, layerPath);
-            ReloadCharacterDetailLayersPreservingScroll(restoreHorizontalOffset, restoreVerticalOffset);
-            await UpdateCharacterLayerPreviewAsync();
-            RequestDelayedRefresh();
-
-            if (_viewingCharacterLayer is { } viewingLayer &&
-                viewingLayer.Kind == layerKind &&
-                PathsEqual(viewingLayer.Path, layerPath))
-            {
-                await ThumbnailFactory.LoadThumbnailFromFileAsync(BackgroundImageViewerImage, layerPath);
-            }
-
-            if (_isViewingCharacterComposite)
-            {
-                await LoadCharacterCompositeViewerImagesAsync();
-            }
-
-            AppendLog(LogKind.User, $"已替换{GetCharacterLayerDisplayName(layerKind)}素材：{Path.GetFileName(layerPath)} <- {Path.GetFileName(sourcePath)}");
-            return true;
         }
 
         private async Task SetCharacterPortraitPreviewAsync(CharacterLayerKind layerKind, string layerPath)
@@ -576,7 +641,11 @@ namespace GalExcleTools
 
             if (!BackgroundImageService.IsValidSourcePath(sourcePath))
             {
-                AppendLog(LogKind.Warning, $"设置{GetCharacterLayerDisplayName(layerKind)}小预览失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Warning,
+                    "小预览未设置",
+                    $"不支持文件 {Path.GetFileName(sourcePath)}。",
+                    logMessage: $"设置{GetCharacterLayerDisplayName(layerKind)}小预览失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
                 return;
             }
 
@@ -597,7 +666,12 @@ namespace GalExcleTools
             }
 
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已设置{GetCharacterLayerDisplayName(layerKind)}小预览：{Path.GetFileName(layerPath)} <- {Path.GetFileName(sourcePath)}");
+            var displayName = GetCharacterLayerDisplayName(layerKind);
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                $"{displayName}小预览已设置",
+                Path.GetFileName(layerPath),
+                logMessage: $"已设置{displayName}小预览：{Path.GetFileName(layerPath)} <- {Path.GetFileName(sourcePath)}");
         }
 
         private async Task SetCharacterAdornAvailabilityAsync(string adornPath)
@@ -654,7 +728,12 @@ namespace GalExcleTools
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshAudioCards(_currentAssetLibrary, kind);
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已设置{AudioAssetService.GetDisplayName(kind)}备注：{Path.GetFileName(musicPath)}");
+            var displayName = AudioAssetService.GetDisplayName(kind);
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                $"{displayName}备注已保存",
+                Path.GetFileName(renamedPath ?? musicPath),
+                logMessage: $"已设置{displayName}备注：{Path.GetFileName(musicPath)}");
             return renamedPath;
         }
 
@@ -694,7 +773,12 @@ namespace GalExcleTools
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshAudioCards(_currentAssetLibrary, kind);
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已删除{AudioAssetService.GetDisplayName(kind)}：{Path.GetFileName(musicPath)}");
+            var displayName = AudioAssetService.GetDisplayName(kind);
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                $"{displayName}已删除",
+                Path.GetFileName(musicPath),
+                logMessage: $"已删除{displayName}：{Path.GetFileName(musicPath)}");
             return true;
         }
 
@@ -705,42 +789,61 @@ namespace GalExcleTools
                 return false;
             }
 
-            var sourcePath = await PickReplacementFileAsync(AudioAssetService.Extensions, PickerLocationId.MusicLibrary);
-            if (sourcePath is null)
-            {
-                return false;
-            }
-
-            if (!AudioAssetService.IsValidAudioPath(sourcePath))
-            {
-                AppendLog(LogKind.Warning, $"替换{AudioAssetService.GetDisplayName(kind)}失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
-                return false;
-            }
-
-            SetAudioNormalizing(kind, true);
+            var displayName = AudioAssetService.GetDisplayName(kind);
             try
             {
-                File.Copy(sourcePath, musicPath, overwrite: true);
-                AudioAssetService.DeleteIgnoredSidecarFiles(kind, GetAudioFolderPath(_currentAssetLibrary, kind));
-            }
-            finally
-            {
-                SetAudioNormalizing(kind, false);
-            }
+                var sourcePath = await PickReplacementFileAsync(AudioAssetService.Extensions, PickerLocationId.MusicLibrary);
+                if (sourcePath is null)
+                {
+                    return false;
+                }
 
-            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshAudioCards(_currentAssetLibrary, kind);
-            RequestDelayedRefresh();
-            if (_playingMusicPath is not null && PathsEqual(_playingMusicPath, musicPath))
-            {
-                MusicPlayerElement.MediaPlayer.Pause();
-                var file = await StorageFile.GetFileFromPathAsync(musicPath);
-                MusicPlayerElement.Source = MediaSource.CreateFromStorageFile(file);
-                MusicPlayPauseButton.Content = "播放";
-            }
+                if (!AudioAssetService.IsValidAudioPath(sourcePath))
+                {
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        $"{displayName}未替换",
+                        $"不支持文件 {Path.GetFileName(sourcePath)}。",
+                        logMessage: $"替换{displayName}失败：不支持的文件类型 {Path.GetFileName(sourcePath)}");
+                    return false;
+                }
 
-            AppendLog(LogKind.User, $"已替换{AudioAssetService.GetDisplayName(kind)}素材：{Path.GetFileName(musicPath)} <- {Path.GetFileName(sourcePath)}");
-            return true;
+                SetAudioNormalizing(kind, true);
+                try
+                {
+                    File.Copy(sourcePath, musicPath, overwrite: true);
+                    AudioAssetService.DeleteIgnoredSidecarFiles(kind, GetAudioFolderPath(_currentAssetLibrary, kind));
+                }
+                finally
+                {
+                    SetAudioNormalizing(kind, false);
+                }
+
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+                RefreshAudioCards(_currentAssetLibrary, kind);
+                RequestDelayedRefresh();
+                if (_playingMusicPath is not null && PathsEqual(_playingMusicPath, musicPath))
+                {
+                    MusicPlayerElement.MediaPlayer.Pause();
+                    var file = await StorageFile.GetFileFromPathAsync(musicPath);
+                    MusicPlayerElement.Source = MediaSource.CreateFromStorageFile(file);
+                    MusicPlayPauseButton.Content = "播放";
+                }
+
+                var logMessage = $"已替换{displayName}素材：{Path.GetFileName(musicPath)} <- {Path.GetFileName(sourcePath)}";
+                ShowFloatingTip(InfoBarSeverity.Success, $"{displayName}已替换", Path.GetFileName(musicPath), logMessage: logMessage);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    $"{displayName}替换失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    $"替换{displayName}失败：{Path.GetFileName(musicPath)}");
+                return false;
+            }
         }
 
         private async Task NormalizeMusicFilesAsync(string musicFolderPath, IReadOnlyList<string>? orderedPaths = null)

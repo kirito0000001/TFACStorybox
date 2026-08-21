@@ -42,66 +42,94 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private void NormalizeCurrentStoryChoiceFunctionPrefix()
+        private bool NormalizeStoryChoiceFunctionPrefixes(out StoryChoiceNoteState? migratedChoiceNotes)
         {
+            migratedChoiceNotes = null;
             if (_currentStoryChapter is null || _storyRows.Count == 0)
             {
-                return;
-            }
-
-            var row = _storyRows[_currentStoryRowIndex];
-            var functions = StoryFunctionService.SplitFunctionValues(row.Get("Custom")).ToList();
-            if (functions.Count == 0)
-            {
-                return;
+                return false;
             }
 
             var chapterBaseCode = RemoveProjectCodePrefix(StoryCsvService.RemoveChapterSectionSuffix(_currentStoryChapter.Code), _currentProject?.Code);
             if (string.IsNullOrWhiteSpace(chapterBaseCode))
             {
-                return;
+                return false;
             }
 
-            var targetPrefix = BuildCurrentStoryChapterSectionChoicePrefix();
             var changed = false;
-            var oldChoices = new List<string>();
-            var newChoices = new List<string>();
-            for (var i = 0; i < functions.Count; i++)
+            var choiceRemap = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            for (var rowIndex = 0; rowIndex < _storyRows.Count; rowIndex++)
             {
-                var match = Regex.Match(
-                    functions[i],
-                    $"^{Regex.Escape(chapterBaseCode)}-(?<section>\\d{{2}})-Choice(?<index>\\d+)$",
-                    RegexOptions.IgnoreCase);
-                if (!match.Success)
+                var row = _storyRows[rowIndex];
+                var functions = StoryFunctionService.SplitFunctionValues(row.Get("Custom")).ToList();
+                var rowChanged = false;
+                var targetPrefix = StoryFunctionService.BuildChapterSectionChoicePrefix(
+                    _currentStoryChapter.Code,
+                    GetStorySectionAtRowIndex(rowIndex),
+                    _currentProject?.Code);
+                for (var functionIndex = 0; functionIndex < functions.Count; functionIndex++)
+                {
+                    var match = Regex.Match(
+                        functions[functionIndex],
+                        $"^{Regex.Escape(chapterBaseCode)}-(?<section>\\d{{2}})-Choice(?<index>\\d+)$",
+                        RegexOptions.IgnoreCase);
+                    if (!match.Success)
+                    {
+                        continue;
+                    }
+
+                    var normalized = $"{targetPrefix}{match.Groups["index"].Value}";
+                    if (string.Equals(functions[functionIndex], normalized, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var oldChoice = functions[functionIndex];
+                    if (!choiceRemap.TryGetValue(oldChoice, out var targets))
+                    {
+                        targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        choiceRemap[oldChoice] = targets;
+                    }
+
+                    targets.Add(normalized);
+                    functions[functionIndex] = normalized;
+                    rowChanged = true;
+                }
+
+                if (rowChanged)
+                {
+                    row.Set("Custom", string.Join("/", functions));
+                    changed = true;
+                }
+            }
+
+            if (!changed || _currentStoryChapter is null)
+            {
+                return changed;
+            }
+
+            var noteState = _storyEditorViewModel.Document.ChoiceNotes.Clone();
+            var notesChanged = false;
+            foreach (var pair in choiceRemap)
+            {
+                if (!noteState.Choices.TryGetValue(pair.Key, out var notes))
                 {
                     continue;
                 }
 
-                var normalized = $"{targetPrefix}{match.Groups["index"].Value}";
-                if (string.Equals(functions[i], normalized, StringComparison.OrdinalIgnoreCase))
+                foreach (var newChoice in pair.Value)
                 {
-                    continue;
+                    if (!noteState.Choices.ContainsKey(newChoice))
+                    {
+                        noteState.Choices[newChoice] = notes.ToList();
+                    }
                 }
 
-                oldChoices.Add(functions[i]);
-                newChoices.Add(normalized);
-                functions[i] = normalized;
-                changed = true;
+                notesChanged |= noteState.Choices.Remove(pair.Key);
             }
 
-            if (!changed)
-            {
-                return;
-            }
-
-            row.Set("Custom", string.Join("/", functions));
-            PersistCurrentStoryRowsToFiles();
-            for (var i = 0; i < oldChoices.Count; i++)
-            {
-                CopyStoryChoiceNotes(oldChoices[i], newChoices[i]);
-            }
-
-            RemoveUnusedStoryChoiceNotes(oldChoices);
+            migratedChoiceNotes = notesChanged ? noteState : null;
+            return true;
         }
 
         private void UpdateStoryEditorHeader()
@@ -139,10 +167,9 @@ namespace GalExcleTools
         {
             return StoryFunctionService.FormatAssetStatus(label, rawIndex, choices, ResolveStoryAssetIndex);
         }
-
         private void ClearStoryFunction()
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData() || _currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -154,8 +181,8 @@ namespace GalExcleTools
             }
 
             _storyRows[_currentStoryRowIndex].Set("Custom", string.Empty);
-            PersistCurrentStoryRowsToFiles();
-            RemoveUnusedStoryChoiceNotes(removedChoices);
+            var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes(removedChoices);
+            QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
             UpdateStoryToolbarCurrentInfo();
             ClearStoryFunctionTips();
             ShowStoryStatus(InfoBarSeverity.Success, "函数已清空", "当前句的 Custom 字段已清空。");
@@ -163,7 +190,7 @@ namespace GalExcleTools
 
         private void ClearCurrentStoryRow()
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData() || _currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -171,11 +198,12 @@ namespace GalExcleTools
             var currentName = _storyRows[_currentStoryRowIndex].Get("Name");
             var removedChoices = GetCurrentStoryChoiceValues();
             CaptureStoryUndoState("清空当前行数据");
-            var row = _storyCsvService.CreateDefaultRow();
+            var row = StoryDocument.CreateEmptyRow();
+            row.StableId = _storyRows[_currentStoryRowIndex].StableId;
             row.Set("Name", currentName);
             _storyRows[_currentStoryRowIndex] = row;
-            PersistCurrentStoryRowsToFiles();
-            RemoveUnusedStoryChoiceNotes(removedChoices);
+            var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes(removedChoices);
+            QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
             ClearStoryFunctionTips();
             StopStoryEditorAudio();
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
@@ -185,7 +213,7 @@ namespace GalExcleTools
 
         private async Task ChooseStoryFunctionAsync()
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData() || _currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -210,17 +238,21 @@ namespace GalExcleTools
                 return;
             }
 
+            _pendingStoryChoiceNotes = null;
+            CaptureStoryUndoState("添加函数");
             var functionValue = await BuildStoryFunctionValueAsync(function);
             if (functionValue is null)
             {
+                _storyEditorViewModel.UndoService.CancelPending();
+                _pendingStoryChoiceNotes = null;
                 return;
             }
 
             var row = _storyRows[_currentStoryRowIndex];
             var currentValue = row.Get("Custom").Trim();
-            CaptureStoryUndoState("添加函数");
             row.Set("Custom", string.IsNullOrWhiteSpace(currentValue) ? functionValue : $"{currentValue}/{functionValue}");
-            PersistCurrentStoryRowsToFiles();
+            QueueCurrentStoryDocumentSave(choiceNotes: _pendingStoryChoiceNotes);
+            _pendingStoryChoiceNotes = null;
             UpdateStoryToolbarCurrentInfo();
             ShowStoryStatus(InfoBarSeverity.Success, "函数已填写", functionValue);
             await ApplyCurrentStoryRowMediaAndFunctionAsync();
@@ -228,7 +260,7 @@ namespace GalExcleTools
 
         private async Task RemoveStoryFunctionAsync()
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData() || _currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -253,8 +285,8 @@ namespace GalExcleTools
             CaptureStoryUndoState("移除函数");
             functions.RemoveAt(selectedIndex);
             row.Set("Custom", string.Join("/", functions));
-            PersistCurrentStoryRowsToFiles();
-            RemoveUnusedStoryChoiceNotes([removed]);
+            var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes([removed]);
+            QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
             UpdateStoryToolbarCurrentInfo();
             ClearStoryFunctionTips();
             ShowStoryStatus(InfoBarSeverity.Success, "函数已移除", removed);
@@ -412,8 +444,7 @@ namespace GalExcleTools
             {
                 sectionCount = Math.Max(
                     sectionCount,
-                    _storyCsvService.GetLocalSectionCsvPaths(_currentStoryChapter)
-                        .Select(file => file.Section)
+                    _storyRowSections.Values
                         .DefaultIfEmpty(1)
                         .Max());
             }
@@ -428,11 +459,11 @@ namespace GalExcleTools
                 return;
             }
 
-            var state = _storyStateService.ReadChoiceNotes(_currentStoryChapter);
+            var state = _storyEditorViewModel.Document.ChoiceNotes.Clone();
             state.Choices[choiceIndicator] = optionNotes
                 .Select(NormalizeFunctionChoiceNote)
                 .ToList();
-            _storyStateService.WriteChoiceNotes(_currentStoryChapter, state);
+            _pendingStoryChoiceNotes = state;
         }
 
         private List<string> GetCurrentStoryChoiceValues()
@@ -473,7 +504,7 @@ namespace GalExcleTools
                 return result;
             }
 
-            var state = _storyStateService.ReadChoiceNotes(_currentStoryChapter);
+            var state = _storyEditorViewModel.Document.ChoiceNotes;
             foreach (var pair in state.Choices)
             {
                 if (!string.IsNullOrWhiteSpace(pair.Key))
@@ -487,22 +518,11 @@ namespace GalExcleTools
             return result;
         }
 
-        private void CopyStoryChoiceNotes(string oldChoice, string newChoice)
-        {
-            if (_currentStoryChapter is null ||
-                string.Equals(oldChoice, newChoice, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            _storyStateService.CopyChoiceNotes(_currentStoryChapter, oldChoice, newChoice);
-        }
-
-        private void RemoveUnusedStoryChoiceNotes(IEnumerable<string> removedFunctions)
+        private StoryChoiceNoteState? RemoveUnusedStoryChoiceNotes(IEnumerable<string> removedFunctions)
         {
             if (_currentStoryChapter is null)
             {
-                return;
+                return null;
             }
 
             var removedChoices = removedFunctions
@@ -511,12 +531,17 @@ namespace GalExcleTools
                 .ToList();
             if (removedChoices.Count == 0)
             {
-                return;
+                return null;
             }
 
-            _storyStateService.RemoveChoiceNotes(
-                _currentStoryChapter,
-                removedChoices.Where(choice => !StoryChoiceExistsInRows(choice)));
+            var state = _storyEditorViewModel.Document.ChoiceNotes.Clone();
+            var changed = false;
+            foreach (var choice in removedChoices.Where(choice => !StoryChoiceExistsInRows(choice)))
+            {
+                changed |= state.Choices.Remove(choice);
+            }
+
+            return changed ? state : null;
         }
 
         private bool StoryChoiceExistsInRows(string choice)
@@ -547,7 +572,7 @@ namespace GalExcleTools
 
         private async Task ChooseStoryAssetIndexAsync(string title, string fieldName, List<StoryAssetChoice> choices)
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData() || _currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -570,9 +595,14 @@ namespace GalExcleTools
                 return;
             }
 
-            CaptureStoryUndoState($"更换{StoryAssetFieldService.GetDisplayName(fieldName)}");
-            _storyRows[_currentStoryRowIndex].Set(fieldName, selectedChoice.Index.ToString());
-            PersistCurrentStoryRowsToFiles();
+            var displayName = StoryAssetFieldService.GetDisplayName(fieldName);
+            CaptureStoryUndoState($"连续更换{displayName}");
+            var changedCount = StoryAssetFieldService.ReplaceForwardContiguousIndex(
+                _storyRows,
+                _currentStoryRowIndex,
+                fieldName,
+                selectedChoice.Index);
+            QueueCurrentStoryDocumentSave();
             UpdateStoryToolbarCurrentInfo();
             await RefreshStoryPreviewAsync();
             if (fieldName == "BGM")
@@ -583,6 +613,12 @@ namespace GalExcleTools
             {
                 await PlayCurrentStorySceneFromUiAsync();
             }
+
+            var endRowNumber = _currentStoryRowIndex + changedCount;
+            ShowStoryStatus(
+                InfoBarSeverity.Success,
+                $"{displayName}已连续更换",
+                $"共修改 {changedCount} 句（第 {_currentStoryRowIndex + 1}-{endRowNumber} 句）。");
         }
 
     }

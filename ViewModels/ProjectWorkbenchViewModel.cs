@@ -12,6 +12,7 @@ internal sealed class ProjectWorkbenchViewModel : ObservableObject
     private ChapterInfo? _selectedTextToolChapter;
     private string _selectedLocalizationLanguage = "English";
     private ProjectTextToolMode _projectTextToolMode = ProjectTextToolMode.Voice;
+    private bool _showOnlyConfiguredVoices;
     private bool _isCreatingChapter;
 
     public string? SelectedProjectThumbnailPath
@@ -62,6 +63,12 @@ internal sealed class ProjectWorkbenchViewModel : ObservableObject
     {
         get => _projectTextToolMode;
         set => SetProperty(ref _projectTextToolMode, value);
+    }
+
+    public bool ShowOnlyConfiguredVoices
+    {
+        get => _showOnlyConfiguredVoices;
+        set => SetProperty(ref _showOnlyConfiguredVoices, value);
     }
 
     public bool IsCreatingChapter

@@ -14,8 +14,6 @@ internal static class WorkspacePathUtility
     private const string FunctionIndexFileName = "functions.json";
     private const string CharacterFilterFolderName = "角色滤镜";
     private const string CharacterFilterIndexFileName = "vfx-filters.json";
-    private const string StorySectionsFileName = "story.sections.json";
-    private const string StoryChoiceNotesFileName = "story.choice-notes.json";
     private const string ChaptersFolderName = "Chapters";
     private const string UnrealBackupsFolderName = "UnrealBackups";
 
@@ -32,16 +30,6 @@ internal static class WorkspacePathUtility
     public static string GetChaptersFolderPath(ProjectInfo project)
     {
         return Path.Combine(project.Path, ChaptersFolderName);
-    }
-
-    public static string GetStorySectionsPath(ChapterInfo chapter)
-    {
-        return Path.Combine(chapter.Path, StorySectionsFileName);
-    }
-
-    public static string GetStoryChoiceNotesPath(ChapterInfo chapter)
-    {
-        return Path.Combine(chapter.Path, StoryChoiceNotesFileName);
     }
 
     public static string GetProjectVoiceFolderPath(ProjectInfo project)

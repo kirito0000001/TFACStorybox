@@ -76,32 +76,49 @@ namespace GalExcleTools
             return editorPath;
         }
 
-        private static List<Process> GetRunningUnrealEditorProcesses()
+        private static List<Process> GetRunningUnrealEditorProcesses(UnrealSyncContext context)
         {
-            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            var result = new List<Process>();
+            var projectPath = Path.GetFullPath(context.UnrealProjectPath);
+            try
             {
-                "UnrealEditor",
-                "UnrealEditor-Cmd"
-            };
-
-            return Process.GetProcesses()
-                .Where(process =>
+                var locatorType = Type.GetTypeFromProgID("WbemScripting.SWbemLocator")
+                    ?? throw new InvalidOperationException("当前系统不支持 WMI 进程查询。");
+                dynamic locator = Activator.CreateInstance(locatorType)!;
+                dynamic services = locator.ConnectServer(".", "root\\cimv2");
+                dynamic processes = services.ExecQuery(
+                    "SELECT ProcessId, Name, CommandLine FROM Win32_Process " +
+                    "WHERE Name = 'UnrealEditor.exe' OR Name = 'UnrealEditor-Cmd.exe'");
+                foreach (dynamic processInfo in processes)
                 {
+                    var commandLine = Convert.ToString(processInfo.CommandLine, CultureInfo.InvariantCulture);
+                    if (string.IsNullOrWhiteSpace(commandLine) ||
+                        !commandLine.Contains(projectPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     try
                     {
-                        return names.Contains(process.ProcessName);
+                        result.Add(Process.GetProcessById(Convert.ToInt32(processInfo.ProcessId, CultureInfo.InvariantCulture)));
                     }
                     catch
                     {
-                        return false;
+                        // The process may have exited after the WMI snapshot was created.
                     }
-                })
-                .ToList();
+                }
+            }
+            catch
+            {
+                // Failing closed prevents an unrelated Unreal project from being terminated.
+            }
+
+            return result;
         }
 
-        private static void CloseRunningUnrealEditors()
+        private static void CloseRunningUnrealEditors(UnrealSyncContext context)
         {
-            foreach (var process in GetRunningUnrealEditorProcesses())
+            foreach (var process in GetRunningUnrealEditorProcesses(context))
             {
                 try
                 {
@@ -121,7 +138,7 @@ namespace GalExcleTools
             }
         }
 
-        private static string CreateCleanUnrealProjectBackup(UnrealSyncContext context, CancellationToken cancellationToken = default)
+        private static string CreateUnrealSyncBackup(UnrealSyncContext context, CancellationToken cancellationToken = default)
         {
             var unrealProjectRoot = Path.GetDirectoryName(context.UnrealProjectPath)
                 ?? throw new InvalidOperationException("无法定位虚幻项目根目录。");
@@ -130,27 +147,42 @@ namespace GalExcleTools
 
             var projectName = Path.GetFileNameWithoutExtension(context.UnrealProjectPath);
             var backupPath = Path.Combine(backupFolder, $"{projectName}_{DateTime.Now:yyyyMMdd_HHmmss}.zip");
-            var excludedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ".vs",
-                "Binaries",
-                "DerivedDataCache",
-                "Intermediate",
-                "Saved"
-            };
-
             using var archive = ZipFile.Open(backupPath, ZipArchiveMode.Create);
-            foreach (var filePath in Directory.EnumerateFiles(unrealProjectRoot, "*", SearchOption.AllDirectories))
+            var filesToBackup = new List<string> { context.UnrealProjectPath };
+            var configFolder = Path.Combine(unrealProjectRoot, "Config");
+            if (Directory.Exists(configFolder))
+            {
+                filesToBackup.AddRange(Directory.EnumerateFiles(configFolder, "*", SearchOption.AllDirectories));
+            }
+            if (Directory.Exists(context.TargetContentFolderPath))
+            {
+                filesToBackup.AddRange(Directory.EnumerateFiles(context.TargetContentFolderPath, "*", SearchOption.AllDirectories));
+            }
+            var musicPlayerBlueprintPath = UnrealSyncService.UnrealObjectPathToContentFilePath(
+                context,
+                UnrealSyncService.MusicPlayerBlueprintAssetPath);
+            if (File.Exists(musicPlayerBlueprintPath))
+            {
+                filesToBackup.Add(musicPlayerBlueprintPath);
+            }
+
+            foreach (var filePath in filesToBackup.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var relativePath = Path.GetRelativePath(unrealProjectRoot, filePath);
-                var segments = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (segments.Any(excludedFolders.Contains))
-                {
-                    continue;
-                }
-
                 archive.CreateEntryFromFile(filePath, relativePath.Replace('\\', '/'), CompressionLevel.Optimal);
+            }
+
+            archive.Dispose();
+            var retainedBackups = Directory
+                .EnumerateFiles(backupFolder, $"{projectName}_*.zip", SearchOption.TopDirectoryOnly)
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .Take(5)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var oldBackupPath in Directory.EnumerateFiles(backupFolder, $"{projectName}_*.zip", SearchOption.TopDirectoryOnly)
+                         .Where(path => !retainedBackups.Contains(path)))
+            {
+                File.Delete(oldBackupPath);
             }
 
             return backupPath;

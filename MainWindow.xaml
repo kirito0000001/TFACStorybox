@@ -89,7 +89,7 @@
                 </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="0">
                     <TextBlock Text="TFAC剧情箱-轮椅版" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="2.1.0" Style="{StaticResource SubtleTextStyle}" />
+                    <TextBlock x:Name="AppTitleVersionText" Style="{StaticResource SubtleTextStyle}" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -364,6 +364,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <Button
                             Width="36"
@@ -378,8 +379,14 @@
                             <TextBlock x:Name="ProjectTextToolSubtitleText" Style="{StaticResource SubtleTextStyle}" />
                         </StackPanel>
                         <Button x:Name="ProjectTextToolSwitchLanguageButton" Grid.Column="2" Content="切换语言" Click="SwitchProjectTextToolLanguageButton_Click" />
-                        <Button Grid.Column="3" Content="重新加载" Click="ReloadProjectTextToolButton_Click" />
-                        <Button Grid.Column="4" Content="切换章节" Click="SwitchProjectTextToolChapterButton_Click" />
+                        <Button
+                            x:Name="ProjectTextToolVoiceFilterButton"
+                            Grid.Column="3"
+                            Content="仅看已设置"
+                            Click="ProjectTextToolVoiceFilterButton_Click"
+                            ToolTipService.ToolTip="切换语音显示范围" />
+                        <Button Grid.Column="4" Content="重新加载" Click="ReloadProjectTextToolButton_Click" />
+                        <Button Grid.Column="5" Content="切换章节" Click="SwitchProjectTextToolChapterButton_Click" />
                     </Grid>
 
                     <Border Grid.Row="1" Style="{StaticResource PanelBorderStyle}">
@@ -395,6 +402,7 @@
                     RowSpacing="12"
                     IsTabStop="True"
                     PointerPressed="StoryEditorPage_PointerPressed"
+                    PreviewKeyDown="StoryEditorPage_PreviewKeyDown"
                     KeyDown="StoryEditorPage_KeyDown">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -419,7 +427,8 @@
                         </Button>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <TextBlock x:Name="StoryEditorTitleText" Text="{Binding Title, Mode=OneWay}" Style="{StaticResource SectionTitleStyle}" />
-                            <TextBlock x:Name="StoryEditorCsvPathText" Text="{Binding CsvPathText, Mode=OneWay}" Style="{StaticResource SubtleTextStyle}" />
+                            <TextBlock x:Name="StoryEditorDocumentPathText" Text="{Binding DocumentPathText, Mode=OneWay}" Style="{StaticResource SubtleTextStyle}" />
+                            <TextBlock Text="{Binding SaveStatusText, Mode=OneWay}" Style="{StaticResource SubtleTextStyle}" />
                         </StackPanel>
                         <StackPanel
                             x:Name="StoryTransientTipsPanel"
@@ -458,7 +467,27 @@
                                     VerticalScrollBarVisibility="Auto">
                                     <StackPanel Spacing="12">
                                         <TextBlock Text="章节工具栏" Foreground="#202020" FontSize="18" FontWeight="SemiBold" />
-                                        <Button x:Name="StoryUndoButton" Content="撤回上一步" Height="36" HorizontalAlignment="Stretch" Command="{Binding UndoCommand}" IsEnabled="{Binding CanUndo, Mode=OneWay}" />
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button
+                                                x:Name="StoryUndoButton"
+                                                Content="撤回"
+                                                Height="36"
+                                                HorizontalAlignment="Stretch"
+                                                Command="{Binding UndoCommand}"
+                                                IsEnabled="{Binding CanUndo, Mode=OneWay}" />
+                                            <Button
+                                                x:Name="StoryRedoButton"
+                                                Grid.Column="1"
+                                                Content="重做"
+                                                Height="36"
+                                                HorizontalAlignment="Stretch"
+                                                Command="{Binding RedoCommand}"
+                                                IsEnabled="{Binding CanRedo, Mode=OneWay}" />
+                                        </Grid>
                                         <Grid Height="40" ColumnSpacing="12">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -589,7 +618,10 @@
                                     x:Name="StorySpeakerTextBox"
                                     Header="当前说话人"
                                     Text="{Binding SpeakerText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                    TextChanged="StorySpeakerTextBox_TextChanged" />
+                                    TextChanged="StorySpeakerTextBox_TextChanged"
+                                    BeforeTextChanging="StoryTextEditor_BeforeTextChanging"
+                                    GotFocus="StoryTextEditor_GotFocus"
+                                    LostFocus="StoryTextEditor_LostFocus" />
                                 <Border
                                     x:Name="StorySpeakerPreviewSlot"
                                     Width="190"
@@ -614,7 +646,10 @@
                                 FontSize="20"
                                 MinHeight="118"
                                 Text="{Binding StoryText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                TextChanged="StoryTextTextBox_TextChanged" />
+                                TextChanged="StoryTextTextBox_TextChanged"
+                                BeforeTextChanging="StoryTextEditor_BeforeTextChanging"
+                                GotFocus="StoryTextEditor_GotFocus"
+                                LostFocus="StoryTextEditor_LostFocus" />
                             <StackPanel Grid.Column="2" Spacing="10" VerticalAlignment="Bottom">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
                                     <TextBlock Text="第" Foreground="#202020" FontSize="20" VerticalAlignment="Center" />
@@ -653,10 +688,15 @@
                                         Height="32"
                                         Padding="0"
                                         Content="+"
-                                        Command="{Binding AddSectionCommand}" />
+                                        Command="{Binding AddSectionCommand}"
+                                        ToolTipService.ToolTip="从当前句开始拆分一个新小节" />
                                 </Grid>
                                 <Grid ColumnSpacing="8" RowSpacing="8">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
@@ -664,10 +704,35 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
-                                    <Button Content="上一句" Command="{Binding PreviousRowCommand}" />
-                                    <Button Grid.Column="1" Content="下一句" Command="{Binding NextRowCommand}" />
-                                    <Button x:Name="InsertStoryRowHereButton" Grid.Row="1" Content="原地新增" Command="{Binding InsertRowCommand}" />
-                                    <Button Grid.Row="1" Grid.Column="1" Content="删除此句" Command="{Binding DeleteRowCommand}" />
+                                    <Button Grid.ColumnSpan="3" Content="上一句" Command="{Binding PreviousRowCommand}" />
+                                    <Button Grid.Column="3" Grid.ColumnSpan="3" Content="下一句" Command="{Binding NextRowCommand}" />
+                                    <Button
+                                        x:Name="InsertStoryRowBeforeButton"
+                                        Grid.Row="1"
+                                        Grid.ColumnSpan="2"
+                                        MinWidth="0"
+                                        Padding="6,4"
+                                        Content="左插入"
+                                        Command="{Binding InsertRowCommand}"
+                                        ToolTipService.ToolTip="在当前句之前插入新句" />
+                                    <Button
+                                        x:Name="InsertStoryRowAfterButton"
+                                        Grid.Row="1"
+                                        Grid.Column="2"
+                                        Grid.ColumnSpan="2"
+                                        MinWidth="0"
+                                        Padding="6,4"
+                                        Content="右插入"
+                                        Command="{Binding InsertAfterRowCommand}"
+                                        ToolTipService.ToolTip="在当前句之后插入新句" />
+                                    <Button
+                                        Grid.Row="1"
+                                        Grid.Column="4"
+                                        Grid.ColumnSpan="2"
+                                        MinWidth="0"
+                                        Padding="6,4"
+                                        Content="删除此句"
+                                        Command="{Binding DeleteRowCommand}" />
                                 </Grid>
                             </StackPanel>
                         </Grid>
@@ -2078,6 +2143,63 @@ public:
                         </StackPanel>
                     </Expander>
 
+                    <Expander Header="应用更新">
+                        <StackPanel Padding="18" Spacing="12">
+                            <Grid MinHeight="44" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="自动检查更新" />
+                                    <TextBlock Text="Release 版启动后自动检查；AX 编译的 Debug 开发版不会自动检查。" Style="{StaticResource SubtleTextStyle}" />
+                                </StackPanel>
+                                <ToggleSwitch
+                                    Grid.Column="1"
+                                    IsOn="{Binding Settings.UpdateAutoCheckEnabled, Mode=TwoWay}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="更新通道" />
+                                    <TextBlock Text="{Binding Settings.UpdateChannelText, Mode=OneWay}" Style="{StaticResource SubtleTextStyle}" />
+                                </StackPanel>
+                                <ComboBox
+                                    x:Name="UpdateChannelComboBox"
+                                    Grid.Column="1"
+                                    SelectionChanged="UpdateChannelComboBox_SelectionChanged">
+                                    <ComboBoxItem Content="正式版" />
+                                    <ComboBoxItem Content="测试版" />
+                                </ComboBox>
+                            </Grid>
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Settings.UpdateConnectionTimeoutText, Mode=OneWay}" VerticalAlignment="Center" />
+                                <NumberBox
+                                    Grid.Column="1"
+                                    Width="110"
+                                    Minimum="10"
+                                    Maximum="180"
+                                    SpinButtonPlacementMode="Compact"
+                                    Value="{Binding Settings.UpdateConnectionTimeoutSeconds, Mode=TwoWay}" />
+                            </Grid>
+                            <TextBlock Text="默认使用 Gitee；连接失败、没有 Release 或缺少有效清单时自动回退 GitHub。" Style="{StaticResource SubtleTextStyle}" />
+                            <TextBlock Text="{Binding Settings.UpdateLastCheckText, Mode=OneWay}" Style="{StaticResource SubtleTextStyle}" />
+                            <TextBlock Text="{Binding Settings.UpdateLastStatus, Mode=OneWay}" TextWrapping="Wrap" Style="{StaticResource SubtleTextStyle}" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="检查更新" Click="CheckUpdateButton_Click" />
+                                <Button Content="测试连接" Click="TestUpdateConnectionButton_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Expander>
+
                     <Expander>
                         <Expander.Header>
                             <TextBlock Text="素材库显示" Style="{StaticResource SectionTitleStyle}" />
@@ -2135,7 +2257,7 @@ public:
                             <StackPanel Spacing="4">
                                 <TextBlock Text="关于" Style="{StaticResource SectionTitleStyle}" FontSize="20" />
                                 <TextBlock Text="TFAC剧情箱-轮椅版" FontWeight="SemiBold" FontSize="18" TextWrapping="Wrap" />
-                                <TextBlock Text="版本 2.1.0" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock x:Name="SettingsAppVersionText" Style="{StaticResource SubtleTextStyle}" />
                             </StackPanel>
                             <TextBlock
                                 Text="面向视觉小说项目的剧情表、素材库、章节修复与 Unreal 同步工具。目标是把高频编辑动作做得更轻，把危险同步动作做得更可见。"
@@ -2143,7 +2265,7 @@ public:
                             <StackPanel Spacing="8">
                                 <TextBlock Text="版本命名" Style="{StaticResource SectionTitleStyle}" />
                                 <TextBlock
-                                    Text="采用 主版本.功能版本.修订版本。2.1.0 表示当前进入小预览功能版本；当天同一批修补合并进同一个版本号。"
+                                    x:Name="SettingsVersionNamingText"
                                     Style="{StaticResource SubtleTextStyle}" />
                             </StackPanel>
                             <StackPanel Spacing="8">
@@ -2187,6 +2309,16 @@ public:
                 </Border>
             </Grid>
         </NavigationView>
+
+        <StackPanel
+            x:Name="FloatingTipsPanel"
+            Grid.Row="1"
+            MaxWidth="520"
+            Margin="0,18,28,0"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            Canvas.ZIndex="330"
+            Spacing="6" />
 
         <Border
             x:Name="GlobalProgressHost"

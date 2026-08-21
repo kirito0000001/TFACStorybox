@@ -345,7 +345,34 @@ namespace GalExcleTools
 
         private void UpdateChapterProjectCodePrefix(string projectPath, string oldProjectCode, string newProjectCode)
         {
+            var projectBeforeRename = _projectWorkspaceService.ReadProjectInfo(projectPath);
+            var oldExports = _projectWorkspaceService.GetChapters(projectBeforeRename)
+                .ToDictionary(
+                    chapter => chapter.Code,
+                    chapter => _storyCsvService.GetLocalSectionCsvPaths(chapter)
+                        .Select(file => Path.GetFileName(file.Path))
+                        .ToList(),
+                    StringComparer.OrdinalIgnoreCase);
             var renamedCount = _projectWorkspaceService.UpdateChapterProjectCodePrefix(projectPath, oldProjectCode, newProjectCode);
+            var updatedProject = _projectWorkspaceService.ReadProjectInfo(projectPath);
+            foreach (var chapter in _projectWorkspaceService.GetChapters(updatedProject))
+            {
+                _storyDocumentRepository.UpdateChapterCode(chapter);
+                var oldCode = oldExports.Keys.FirstOrDefault(code =>
+                    string.Equals(
+                        code.Replace(oldProjectCode, newProjectCode, StringComparison.OrdinalIgnoreCase),
+                        chapter.Code,
+                        StringComparison.OrdinalIgnoreCase));
+                if (oldCode is null)
+                {
+                    continue;
+                }
+
+                foreach (var oldExportName in oldExports[oldCode])
+                {
+                    File.Delete(Path.Combine(chapter.Path, oldExportName));
+                }
+            }
             if (renamedCount > 0)
             {
                 AppendLog(LogKind.User, $"同步章节项目代号前缀：{oldProjectCode} -> {newProjectCode}，共 {renamedCount} 个章节。");
@@ -387,13 +414,21 @@ namespace GalExcleTools
             }
             catch (IOException ex)
             {
-                AppendLog(LogKind.Warning, $"无法重命名项目：{ex.Message}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Warning,
+                    "项目未重命名",
+                    ex.Message,
+                    logMessage: $"无法重命名项目：{ex.Message}");
                 return;
             }
 
             LoadProjects();
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"重命名项目：{project.Name} → {newName}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "项目已重命名",
+                $"{project.Name} -> {newName}",
+                logMessage: $"重命名项目：{project.Name} -> {newName}");
         }
 
         private async Task DeleteProjectAsync(ProjectInfo project)
@@ -407,7 +442,7 @@ namespace GalExcleTools
             _projectWorkspaceService.DeleteProject(project);
             LoadProjects();
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"删除项目：{project.Name}");
+            ShowFloatingTip(InfoBarSeverity.Success, "项目已删除", project.Name, logMessage: $"删除项目：{project.Name}");
         }
 
         private async Task ChangeProjectAssetLibraryAsync(ProjectInfo project)
@@ -415,7 +450,11 @@ namespace GalExcleTools
             var assetLibraries = GetAssetLibraries().OrderBy(library => library.Name).ToList();
             if (assetLibraries.Count == 0)
             {
-                AppendLog(LogKind.Warning, "无法更改目标素材库：当前没有可选择的素材库。");
+                ShowFloatingTip(
+                    InfoBarSeverity.Warning,
+                    "无法更改素材库",
+                    "当前没有可选择的素材库。",
+                    logMessage: "无法更改目标素材库：当前没有可选择的素材库。");
                 return;
             }
 
@@ -438,7 +477,11 @@ namespace GalExcleTools
             _projectWorkspaceService.SetProjectAssetLibrary(project, selectedLibrary);
             LoadProjects();
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"项目 {project.Name} 的目标素材库改为：{selectedLibrary.Name}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "目标素材库已更改",
+                selectedLibrary.Name,
+                logMessage: $"项目 {project.Name} 的目标素材库改为：{selectedLibrary.Name}");
         }
 
         private async Task SaveProjectSettingsAsync(ProjectInfo project, string name, string code)
@@ -458,7 +501,11 @@ namespace GalExcleTools
             }
             catch (IOException ex)
             {
-                AppendLog(LogKind.Warning, $"无法保存项目设置：{ex.Message}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Warning,
+                    "项目设置未保存",
+                    ex.Message,
+                    logMessage: $"无法保存项目设置：{ex.Message}");
                 return;
             }
 
@@ -481,7 +528,11 @@ namespace GalExcleTools
             LoadProjects();
             RequestDelayedRefresh();
             await Task.CompletedTask;
-            AppendLog(LogKind.User, $"保存项目设置：{updatedProject.Name}（{updatedProject.Code}）");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "项目设置已保存",
+                $"{updatedProject.Name}（{updatedProject.Code}）",
+                logMessage: $"保存项目设置：{updatedProject.Name}（{updatedProject.Code}）");
         }
 
         private async Task RenameAssetLibraryAsync(AssetLibraryInfo assetLibrary)
@@ -506,7 +557,11 @@ namespace GalExcleTools
             }
             catch (IOException ex)
             {
-                AppendLog(LogKind.Warning, $"无法重命名素材库：{ex.Message}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Warning,
+                    "素材库未重命名",
+                    ex.Message,
+                    logMessage: $"无法重命名素材库：{ex.Message}");
                 return;
             }
 
@@ -520,7 +575,11 @@ namespace GalExcleTools
             LoadProjects();
             LoadAssetLibraryOptions();
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"重命名素材库：{oldName} → {newName}");
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "素材库已重命名",
+                $"{oldName} -> {newName}",
+                logMessage: $"重命名素材库：{oldName} -> {newName}");
         }
 
         private async Task DeleteAssetLibraryAsync(AssetLibraryInfo assetLibrary)
@@ -545,7 +604,7 @@ namespace GalExcleTools
             }
 
             RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"删除素材库：{assetLibrary.Name}");
+            ShowFloatingTip(InfoBarSeverity.Success, "素材库已删除", assetLibrary.Name, logMessage: $"删除素材库：{assetLibrary.Name}");
         }
 
         private async Task<string?> ShowNameInputDialogAsync(string title, string header, string currentName)

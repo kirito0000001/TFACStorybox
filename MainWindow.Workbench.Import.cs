@@ -72,7 +72,11 @@ namespace GalExcleTools
                 if (archivePaths.Count == 0)
                 {
                     WorkspaceStatusText.Text = "没有可导入的项目包：请拖入项目导出的 .zip 文件。";
-                    AppendLog(LogKind.Warning, "项目导入失败：拖入内容里没有 .zip 项目包。");
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "没有导入项目",
+                        "请拖入项目导出的 .zip 文件。",
+                        logMessage: "项目导入失败：拖入内容里没有 .zip 项目包。");
                     return;
                 }
 
@@ -96,14 +100,30 @@ namespace GalExcleTools
                 LoadProjects();
                 RequestDelayedRefresh();
                 WorkspaceStatusText.Text = $"已导入 {importedProjects.Count} 个项目：{string.Join("、", importedProjects.Select(project => project.Name).Take(3))}";
-                AppendLog(LogKind.User, $"拖动导入项目：{string.Join("；", importedProjects.Select(project => $"{project.Name} -> {project.Path}"))}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "项目已导入",
+                    $"已导入 {importedProjects.Count} 个项目。",
+                    logMessage: $"拖动导入项目：{string.Join("；", importedProjects.Select(project => $"{project.Name} -> {project.Path}"))}");
             }
             catch (Exception ex)
             {
                 CompleteGlobalProgress(ex is OperationCanceledException ? "项目导入已取消" : "项目导入失败", ex.Message);
                 await HideGlobalProgressAfterDelayAsync();
                 WorkspaceStatusText.Text = $"导入项目失败：{ex.Message}";
-                AppendLog(LogKind.Error, "拖动导入项目失败。", ex);
+                if (ex is OperationCanceledException)
+                {
+                    ShowFloatingTip(InfoBarSeverity.Warning, "项目导入已取消", "没有继续写入项目包。", logMessage: "拖动导入项目已取消。");
+                }
+                else
+                {
+                    ShowFloatingTip(
+                        InfoBarSeverity.Error,
+                        "项目导入失败",
+                        "错误详情已复制到剪贴板，并写入 Log。",
+                        ex,
+                        "拖动导入项目失败。");
+                }
             }
         }
 
@@ -137,7 +157,11 @@ namespace GalExcleTools
                 if (archivePaths.Count == 0)
                 {
                     AssetLibraryStatusText.Text = "没有可导入的素材库包：请拖入素材库导出的 .zip 文件。";
-                    AppendLog(LogKind.Warning, "素材库导入失败：拖入内容里没有 .zip 素材库包。");
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "没有导入素材库",
+                        "请拖入素材库导出的 .zip 文件。",
+                        logMessage: "素材库导入失败：拖入内容里没有 .zip 素材库包。");
                     return;
                 }
 
@@ -163,14 +187,30 @@ namespace GalExcleTools
                 LoadAssetLibraryOptions();
                 RequestDelayedRefresh();
                 AssetLibraryStatusText.Text = $"已导入 {importedLibraries.Count} 个素材库：{string.Join("、", importedLibraries.Select(library => library.Name).Take(3))}";
-                AppendLog(LogKind.User, $"拖动导入素材库：{string.Join("；", importedLibraries.Select(library => $"{library.Name} -> {library.Path}"))}");
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "素材库已导入",
+                    $"已导入 {importedLibraries.Count} 个素材库。",
+                    logMessage: $"拖动导入素材库：{string.Join("；", importedLibraries.Select(library => $"{library.Name} -> {library.Path}"))}");
             }
             catch (Exception ex)
             {
                 CompleteGlobalProgress(ex is OperationCanceledException ? "素材库导入已取消" : "素材库导入失败", ex.Message);
                 await HideGlobalProgressAfterDelayAsync();
                 AssetLibraryStatusText.Text = $"导入素材库失败：{ex.Message}";
-                AppendLog(LogKind.Error, "拖动导入素材库失败。", ex);
+                if (ex is OperationCanceledException)
+                {
+                    ShowFloatingTip(InfoBarSeverity.Warning, "素材库导入已取消", "没有继续写入素材库包。", logMessage: "拖动导入素材库已取消。");
+                }
+                else
+                {
+                    ShowFloatingTip(
+                        InfoBarSeverity.Error,
+                        "素材库导入失败",
+                        "错误详情已复制到剪贴板，并写入 Log。",
+                        ex,
+                        "拖动导入素材库失败。");
+                }
             }
         }
 
@@ -268,19 +308,18 @@ namespace GalExcleTools
                 return false;
             }
 
-            _projectWorkspaceService.CreateImportedChapter(_currentProject, importInput);
-
-            var targetCsvPath = Path.Combine(chapterPath, $"{chapterCode}.csv");
-            _storyCsvService.WriteRows(targetCsvPath, rows);
-
-            var sections = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var row in rows)
+            var chapter = _projectWorkspaceService.CreateImportedChapter(_currentProject, importInput);
+            var document = new StoryDocument();
+            for (var index = 0; index < rows.Count; index++)
             {
-                sections[row.Get("Name")] = 1;
+                rows[index].StableId = StoryRow.CreateStableId();
+                rows[index].Set("Name", (index + 1).ToString());
+                document.Rows.Add(rows[index]);
+                document.RowSections[rows[index].Get("Name")] = 1;
             }
 
-            WriteStorySectionState(chapterPath, sections);
-            AppendLog(LogKind.User, $"导入章节 CSV：{sourceCsvPath} -> {targetCsvPath}");
+            _storyDocumentRepository.Save(chapter, document);
+            AppendLog(LogKind.User, $"导入章节 CSV 为 StoryDocument：{sourceCsvPath} -> {_storyDocumentRepository.GetDocumentPath(chapter)}");
             return true;
         }
 

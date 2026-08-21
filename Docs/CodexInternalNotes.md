@@ -99,29 +99,25 @@ should guide edits but should not be treated as user-facing product copy.
 - Do not put transient tips into normal layout columns if they can resize the stage, text box, or background canvas.
 - Before finishing tip-related changes, search for `InfoBar`, `ShowStoryStatus`, `ShowStoryFunctionTriggeredStatus`, and `???`.
 
-## Story CSV Rule
+## Story Document Rule
 
-- `StoryCsvColumns` is the source of truth for columns.
-- Keep the Unreal typo `Tesxt`.
+- `story.document.json` is the only editable source of truth for a chapter.
+- `StorySchema.Columns` defines the Unreal export fields; keep the Unreal typo `Tesxt` only as an export contract.
 - `StoryRow` stores cell values by column name. Use `row.Get(...)` and `row.Set(...)`.
-- The first column is internal `Name`; generated CSV writes the first header as `---`.
-- Imports should accept compatible old headers such as `Name`, blank, or `---`.
-- Do not call `WriteStoryRows(...)` directly from editor actions unless implementing a helper.
-- Normal story editor persistence should go through `PersistCurrentStoryRowsToFiles(...)`.
-- Editor actions should update the in-memory row first, persist through the shared path, refresh only affected preview/status, and save progress if needed.
-- Data edits should create undo snapshots with short user-operation labels before writing CSV.
+- Normal editor persistence goes through `StorySaveCoordinator`; it must never write CSV.
+- Editor actions update `StoryDocument` first, enqueue an atomic JSON save, refresh affected UI, and record a compact `StoryChangeSet`.
+- CSV is generated only by `StoryCsvExporter` before Unreal difference detection or an explicit export command.
+- Unreal sync must flush pending JSON saves before exporting and hashing CSV.
 - External reloads such as asset-index sync must clear the undo stack.
 
-## Section CSV Rule
+## Story CSV Export Rule
 
-- Sections are real chapter CSV files, not a hidden master file.
-- The editor presents all section rows as one continuous story while preserving each row's section.
-- Section metadata is mirrored in `story.sections.json`, but physical CSV files are the user-visible source.
+- Sections live inside `story.document.json`; CSV files are derived Unreal import files.
 - Section 1 uses the chapter code file, for example `WHK-M2-00.csv`.
 - Later sections increment the final section segment, for example `WHK-M2-01.csv`.
 - Multi-section chapters sync to Unreal under a folder without the final section suffix, for example `WHK-M2`.
-- Empty section CSV files should be deleted on load/save except for the required first section placeholder.
-- Chapter right-click section import must preserve separate sections instead of appending rows into the main CSV.
+- Blank lines and blank sections remain valid document data and must survive export.
+- Explicit CSV import appends each selected file as a new StoryDocument section with new stable row IDs.
 
 ## Story Function Rule
 
@@ -135,7 +131,7 @@ should guide edits but should not be treated as user-facing product copy.
 - `BGM_Stop` has priority over BGM index playback.
 - `BGM_Start` clears the suppressed state and allows current-row BGM playback.
 - Trigger-option function cards use category `触发选项` and indicator format `{ChapterSectionCode}-Choice{N}`.
-- Option remarks are for viewing only and must stay in chapter-local `story.choice-notes.json`.
+- Option remarks are for viewing only and remain inside the chapter `story.document.json`.
 
 ## Asset Index Rule
 
@@ -209,8 +205,7 @@ should guide edits but should not be treated as user-facing product copy.
 - Story editor action buttons that are not meaningful in the current row should be hidden with `Visibility.Collapsed`, not left visible as disabled controls.
 - If a button's visibility depends on row data, update both the visibility property and command `CanExecute` from the same ViewModel state during `UpdateStoryToolbarCurrentInfo`.
 - Project text voice and localization use project-detail entry cards; do not embed their full tables directly in the project detail page.
-- Opening a voice/localization card should show `ProjectTextToolPage`, with source text read from chapter section CSV files; the source text column is read-only and must not write back to Story CSV.
-- Project text rows must be loaded through `StorySessionService.LoadRowsFromSectionFiles(...)`, the same aggregation path as the story editor.
+- Opening a voice/localization card should show `ProjectTextToolPage`, with source text read from `StoryDocumentRepository`; the source text column remains read-only.
 - Project text tool tables use a fixed two-column split; each cell owns its horizontal scrolling so users can compare source text and voice/localization values without moving the whole table sideways.
 - Project text voice selection copies wav files into project `Voice/<ChapterCode>/` and renames the copied file as `Vo-<rowIndex>-<remark>.wav`; the row-index digit width is based on the chapter text row count, and changing the remark must rename the managed wav file.
 - Unreal sync for project text voice only imports wav files into `Narrative/Voice`; do not generate a global `ExcelTexts/VoiceMap` DataTable or per-section voice DataTables unless the integration design changes again.
@@ -218,7 +213,7 @@ should guide edits but should not be treated as user-facing product copy.
 - File-system statistics and byte formatting belong in `FileSystemUtility`; do not add page-local size formatters.
 - When adding a new page to the page-visibility switch blocks, check the page's own open method so it does not set itself visible and then collapse itself later in the same method.
 - Project text voice mappings are stored in project `Tools/story.voice-map.json`; localization mappings are stored in project `Tools/story.localization.json`.
-- Text mapping row ids are `ChapterCode#Section#RowName`, so all section CSV files can be merged into one table while preserving stable row identity.
+- Text mapping row ids are `ChapterCode#id#StableRowId`; exported CSV row numbers never own voice or localization identity.
 - Put asset library metadata as the first section on the asset library detail page.
 - When portrait preview is enabled, character cards and Cloth/Face/Adorn layer cards must show a bottom-right yellow warning badge when their preview mapping is missing.
 - Clicking the warning badge should show a user-visible warning message, not only write to the log.
@@ -233,7 +228,10 @@ should guide edits but should not be treated as user-facing product copy.
 - Character folders and metadata: `CharacterWorkspaceService`.
 - Character layer files and scopes: `CharacterLayerAssetService`.
 - Character filters: `CharacterFilterService`.
-- Story CSV and sections: `StoryCsvService`, `StoryStateService`, `StorySessionService`.
+- Story domain and undo: `StoryDocument`, `StoryUndoService`, `StorySchema`.
+- Story JSON persistence: `StoryDocumentRepository`, `StorySaveCoordinator`.
+- Story CSV integration: `StoryCsvExporter`, `StoryCsvImporter`.
+- Story audio playback: `StoryAudioPlaybackService`.
 - Story editor row operations: `StoryEditorService`.
 - Story functions and dialogs: `StoryFunctionService`, `StoryDialogService`, `FunctionDialogService`.
 - Story index sync and repair: `StoryAssetIndexSyncService`, `ChapterRepairService`.

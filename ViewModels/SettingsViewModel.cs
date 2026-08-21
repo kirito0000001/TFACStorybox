@@ -25,6 +25,9 @@ internal sealed class SettingsViewModel : ObservableObject
     private double _assetLibraryScrollSpeedMultiplier = 1.5;
     private double _storyTextFontSize = 20;
     private bool _showFullStoryChapterLength;
+    private UpdateChannel _updateChannel = UpdateChannel.Stable;
+    private bool _updateAutoCheckEnabled = true;
+    private double _updateConnectionTimeoutSeconds = 60;
     private bool _isLoadingSettings;
 
     public SettingsViewModel(
@@ -242,6 +245,73 @@ internal sealed class SettingsViewModel : ObservableObject
         }
     }
 
+    public UpdateChannel UpdateChannel
+    {
+        get => _updateChannel;
+        set
+        {
+            if (SetProperty(ref _updateChannel, value))
+            {
+                _settings.UpdateChannel = value;
+                OnPropertyChanged(nameof(UpdateChannelText));
+                SaveUnlessLoading();
+            }
+        }
+    }
+
+    public string UpdateChannelText => UpdateChannel == UpdateChannel.Beta
+        ? "测试版 / Beta"
+        : "正式版 / Stable";
+
+    public bool UpdateAutoCheckEnabled
+    {
+        get => _updateAutoCheckEnabled;
+        set
+        {
+            if (SetProperty(ref _updateAutoCheckEnabled, value))
+            {
+                _settings.UpdateAutoCheckEnabled = value;
+                SaveUnlessLoading();
+            }
+        }
+    }
+
+    public double UpdateConnectionTimeoutSeconds
+    {
+        get => _updateConnectionTimeoutSeconds;
+        set
+        {
+            var normalized = Math.Clamp(Math.Round(value), 10, 180);
+            if (SetProperty(ref _updateConnectionTimeoutSeconds, normalized))
+            {
+                _settings.UpdateConnectionTimeoutSeconds = (int)normalized;
+                OnPropertyChanged(nameof(UpdateConnectionTimeoutText));
+                SaveUnlessLoading();
+            }
+        }
+    }
+
+    public int UpdateConnectionTimeoutSecondsValue => (int)UpdateConnectionTimeoutSeconds;
+
+    public string UpdateConnectionTimeoutText => $"连接超时：{UpdateConnectionTimeoutSecondsValue} 秒";
+
+    public string UpdateLastCheckText => _settings.UpdateLastCheckAt is null
+        ? "最近检查：尚未检查"
+        : $"最近检查：{_settings.UpdateLastCheckAt.Value.LocalDateTime:yyyy-MM-dd HH:mm}";
+
+    public string UpdateLastStatus => string.IsNullOrWhiteSpace(_settings.UpdateLastStatus)
+        ? "更新状态：尚未检查。"
+        : _settings.UpdateLastStatus;
+
+    public void SetUpdateStatus(string message)
+    {
+        _settings.UpdateLastCheckAt = DateTimeOffset.Now;
+        _settings.UpdateLastStatus = message;
+        Save();
+        OnPropertyChanged(nameof(UpdateLastCheckText));
+        OnPropertyChanged(nameof(UpdateLastStatus));
+    }
+
     public void Load()
     {
         _settings = _settingsService.Load();
@@ -333,10 +403,21 @@ internal sealed class SettingsViewModel : ObservableObject
             AssetLibraryScrollSpeedMultiplier = settings.AssetLibraryScrollSpeedMultiplier;
             StoryTextFontSize = Math.Clamp(settings.StoryTextFontSize, 16, 32);
             ShowFullStoryChapterLength = settings.ShowFullStoryChapterLength;
+            UpdateChannel = Enum.IsDefined(settings.UpdateChannel) ? settings.UpdateChannel : UpdateChannel.Stable;
+            UpdateAutoCheckEnabled = settings.UpdateAutoCheckEnabled;
+            UpdateConnectionTimeoutSeconds = Math.Clamp(settings.UpdateConnectionTimeoutSeconds, 10, 180);
         }
         finally
         {
             _isLoadingSettings = false;
+        }
+    }
+
+    private void SaveUnlessLoading()
+    {
+        if (!_isLoadingSettings)
+        {
+            Save();
         }
     }
 

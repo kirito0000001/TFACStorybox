@@ -2,6 +2,15 @@
 
 ## 版本更新
 
+### 2.3.0
+
+`2.3.0` 是 Unreal 同步可靠性、语音工作流和剧情编辑体验的功能版本。
+
+- Unreal 同步改为结构化结果和真实阶段进度，使用源文件 SHA-256 检测变化，并校验资产实际保存结果。
+- 修复剧情表与素材索引表保存失败仍被记录为成功的问题，补充保存重试和旧同步状态迁移。
+- 完善文本语音导入、试听、筛选、相对路径存储，以及剧情编辑中的语音播放。
+- 基础素材支持从当前句向后连续替换，直到遇到不同素材为止。
+
 ### 2.1.0
 
 `2.1.0` 是 2026-05-26 小预览与文本工具功能版本。
@@ -39,7 +48,7 @@
 - 引入底部全局进度条，长时间操作集中显示阶段、耗时、百分比和补充信息。
 - 补充项目、素材库、章节的备份、还原、导出和拖入导入流程。
 - 完善 Unreal 同步页，支持路径校验、差异计划、同步完成提示和日志结果收集。
-- Story 编辑器支持真实小节 CSV、选项备注、函数触发提示、内部复制粘贴和撤回。
+- Story 编辑器使用原子 StoryDocument、稳定行 ID、选项备注、函数触发提示、内部复制粘贴和撤回/重做。
 - 角色立绘支持服装、表情、装饰、滤镜分层管理，并在 Story 编辑器中按兼容范围预览。
 - 开始并完成第二轮结构整理，代码已拆分到 `Models`、`Services`、`ViewModels` 和 `Views`。
 
@@ -51,9 +60,9 @@
 
 ## 工具介绍
 
-TFAC剧情箱-轮椅版是一个面向 Unreal Engine 视觉小说 / 剧情项目的 WinUI 3 桌面工具。它把项目、素材库、章节剧情 CSV、角色立绘分层、函数触发和 Unreal 同步整理到一个文件优先的工作台里，让策划填表、素材维护和引擎导入尽量保持同一套索引规则。
+TFAC剧情箱-轮椅版是一个面向 Unreal Engine 视觉小说 / 剧情项目的 WinUI 3 桌面工具。它以 StoryDocument 保存章节编辑数据，在同步前生成 Unreal CSV，并把项目、素材库、角色立绘分层、函数触发和 Unreal 同步整理到同一套稳定索引规则中。
 
-当前版本：`2.1.0`
+当前版本：`2.3.0`
 
 ## 核心功能
 
@@ -61,8 +70,8 @@ TFAC剧情箱-轮椅版是一个面向 Unreal Engine 视觉小说 / 剧情项目
 - 素材库：管理背景图、音乐、环境音、特殊音效、函数卡、角色滤镜和分层立绘。
 - 音频素材：仅加载 `.wav` 文件，加载音频分类时会自动清理 Adobe Audition 生成的 `.pkf` 元数据文件。
 - 文本工具：按章节维护文本语音和文本本地化，剧情文本只读，映射数据保存在项目 `Tools` 目录。
-- Story 编辑器：编辑 Unreal `FStoryStruct` 对应的剧情 CSV，支持分小节、行导航、自动保存、背景 / BGM / 环境音 / 角色预览。
-- 函数与选项：维护剧情函数，支持触发选项备注，选项备注存储在章节本地 `story.choice-notes.json`。
+- Story 编辑器：编辑 Unreal `FStoryStruct` 对应的 StoryDocument，支持分小节、稳定行、后台自动保存、背景 / BGM / 环境音 / 角色预览。
+- 函数与选项：维护剧情函数与触发选项备注，和剧情行一起保存在章节 `story.document.json`。
 - 角色立绘：按 `DN_Cloth`、`FC_Face`、`AD_Adorn`、`VFX` 分层管理，支持导入、排序、备注、服装适用范围和小预览。
 - 备份与导入导出：项目、素材库、章节都支持右键备份 / 还原；项目和素材库支持导出 `.zip` 与拖入导入。
 - Unreal 同步：校验 Unreal 路径，生成差异同步计划，可备份 Unreal 项目，调用 Unreal Editor 命令行导入素材、剧情表和立绘信息。
@@ -97,10 +106,9 @@ GalExcelProject/
     Chapters/
       WHK-M2-00/
         chapter.meta.json
-        WHK-M2-00.csv
-        WHK-M2-01.csv
-        story.sections.json
-        story.choice-notes.json
+        story.document.json
+        WHK-M2-00.csv          # Unreal 同步/显式导出时生成
+        WHK-M2-01.csv          # Unreal 同步/显式导出时生成
 
   素材库-我的素材库/
     Tools/asset-library.meta.json
@@ -122,15 +130,16 @@ GalExcelProject/
 
 ## Story 数据规则
 
-- Story CSV 字段以 Unreal 结构体为准，并保留历史字段拼写 `Tesxt`。
+- `story.document.json` 是章节唯一可编辑主数据；普通编辑不会重写 CSV。
+- Story CSV 是 Unreal 派生文件，字段以 Unreal 结构体为准，并保留字段拼写 `Tesxt`。
 - 第一列为 Unreal 行名列，工具内部按 `Name` 处理，导出时写作 `---`。
 - 行名使用纯数字，例如 `1`、`2`、`3`。
 - 背景、BGM、环境音、服装、表情、滤镜索引从 `0` 开始。
 - `Adorn=0` 表示无装饰，装饰资源从故事索引 `1` 开始引用。
 - `Chara1` 到 `Chara5` 保存角色英文代号；`TalkChar` 可保存角色英文代号，也可保留无法识别的原始输入。
 - `Custom` 可用 `/` 分隔多个函数。
-- 选项备注只用于查看，保存在章节本地 `story.choice-notes.json`，不会写入 Story CSV。
-- 小节是真实章节 CSV 文件，例如 `WHK-M2-00.csv`、`WHK-M2-01.csv`，并由 `story.sections.json` 记录编辑器状态。
+- 选项备注、小节边界和稳定行 ID 都保存在 `story.document.json`。
+- 小节 CSV 例如 `WHK-M2-00.csv`、`WHK-M2-01.csv`，只在 Unreal 同步或显式导出时生成。
 
 ## Unreal 同步
 
@@ -206,14 +215,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "D:\UnrealMap\GalExcleTools\
 
 - 发布 `Release / win-x64`
 - 输出到 `D:\DabaoV`
-- 文件夹命名类似 `TFAC剧情箱-轮椅版V2.1.0`
+- 文件夹命名类似 `TFAC剧情箱-轮椅版V2.3.0`
 - 产物包含程序文件夹和根目录快捷方式
 - 不额外生成压缩包或安装器 `.exe`
 
 可选参数示例：
 
 ```powershell
-.\Scripts\Package-App.ps1 -Runtime win-arm64 -OutputRoot "D:\DabaoV" -Version "2.1.0" -Clean
+.\Scripts\Package-App.ps1 -Runtime win-arm64 -OutputRoot "D:\DabaoV" -Version "2.3.0" -Clean
 ```
 
 ## 开发环境

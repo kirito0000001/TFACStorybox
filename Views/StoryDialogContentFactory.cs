@@ -167,6 +167,56 @@ internal static class StoryDialogContentFactory
             420);
     }
 
+    public static ToolTip CreateLazyImagePreviewToolTip(string previewPath)
+    {
+        var image = new Image
+        {
+            Width = 360,
+            Height = 220,
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed
+        };
+        var toolTip = new ToolTip
+        {
+            Content = new Border
+            {
+                Padding = new Thickness(8),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(238, 30, 30, 30)),
+                CornerRadius = new CornerRadius(6),
+                Child = image
+            }
+        };
+        var previewRequestId = 0;
+
+        toolTip.Opened += async (_, _) =>
+        {
+            var requestId = ++previewRequestId;
+            if (await LoadPreviewImageAsync(image, previewPath) &&
+                requestId == previewRequestId &&
+                toolTip.IsOpen)
+            {
+                image.Visibility = Visibility.Visible;
+                return;
+            }
+
+            image.Source = null;
+            if (requestId == previewRequestId)
+            {
+                toolTip.IsOpen = false;
+            }
+        };
+        toolTip.Closed += (_, _) =>
+        {
+            previewRequestId++;
+            image.Source = null;
+            image.Visibility = Visibility.Collapsed;
+        };
+
+        return toolTip;
+    }
+
     private static async Task<ToolTip> CreateStoryChoicePreviewToolTipAsync(IReadOnlyList<string> previewPaths)
     {
         var grid = new Grid
@@ -200,7 +250,7 @@ internal static class StoryDialogContentFactory
         };
     }
 
-    private static async Task LoadPreviewImageAsync(Image image, string imagePath)
+    private static async Task<bool> LoadPreviewImageAsync(Image image, string imagePath)
     {
         try
         {
@@ -209,10 +259,12 @@ internal static class StoryDialogContentFactory
             var bitmap = new BitmapImage();
             await bitmap.SetSourceAsync(stream);
             image.Source = bitmap;
+            return true;
         }
         catch
         {
             image.Source = null;
+            return false;
         }
     }
 

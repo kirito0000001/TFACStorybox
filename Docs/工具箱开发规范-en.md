@@ -52,6 +52,8 @@ If a new event handler exceeds a small bridge, stop and extract the work before 
 - ViewModels should accept services through constructors. Avoid constructing domain services deep inside event handlers.
 - Keep status text in ViewModels when the text reflects feature state; keep transient animation text in the global progress host.
 - `MainWindow` partials may temporarily bridge old controls, but persistent state must land in the relevant module ViewModel: workbench, asset library, story editor, Unreal sync, and settings stay separate.
+- Last-edited module state must be written through the shared module definition or enum, not scattered raw strings. The home-page Continue entry may only read persisted settings and workspace files; it must not depend on transient window memory.
+- Modules with delayed saving must provide a close-time flush path. Window close, page changes, returning home, and Continue should commit the active ViewModel state before refreshing character cards and last-edited module state.
 
 ## 4. Service Rules
 
@@ -61,6 +63,8 @@ If a new event handler exceeds a small bridge, stop and extract the work before 
 - Progress records should include at least `Message`, `Percent`, and optional `Detail`. Use `IsIndeterminate` when the total is unknown.
 - Service methods should return result records with counts, paths, warnings, and changed item summaries instead of mutating UI state.
 - Destructive operations must verify the new state before deleting the old state. For migrations, copy first, verify size/hash, save settings, then delete old data.
+- Character index files and module data files must stay synchronized. Cross-page fields such as display name, code, and completion state should update character metadata after saving, while detailed skills, buffs, and sequence-frame settings remain in that character's toolbox JSON rather than global settings or window fields.
+- Module Services that save toolbox JSON must preserve other module sections. Never overwrite the whole file with a local default object for one module.
 
 ## 5. Global Progress Standard
 

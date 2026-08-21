@@ -141,6 +141,29 @@ namespace GalExcleTools
             }
         }
 
+        private void StoryEditorPage_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (_currentStoryDocumentPath is null ||
+                _storyRows.Count == 0 ||
+                _isStoryDebugModeEnabled ||
+                !IsControlKeyDown())
+            {
+                return;
+            }
+
+            if (e.Key == Windows.System.VirtualKey.Y ||
+                (e.Key == Windows.System.VirtualKey.Z && IsShiftKeyDown()))
+            {
+                RedoStoryEditorOperation();
+                e.Handled = true;
+            }
+            else if (e.Key == Windows.System.VirtualKey.Z)
+            {
+                UndoStoryEditorOperation();
+                e.Handled = true;
+            }
+        }
+
         private async void StoryEditorPage_KeyDown(object sender, KeyRoutedEventArgs e)
         {
             if (e.Key == Windows.System.VirtualKey.F12)
@@ -150,20 +173,13 @@ namespace GalExcleTools
                 return;
             }
 
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
 
             if (IsControlKeyDown())
             {
-                if (e.Key == Windows.System.VirtualKey.Z)
-                {
-                    UndoStoryEditorOperation();
-                    e.Handled = true;
-                    return;
-                }
-
                 if (_hoveredStoryCharacterSlotIndex is int hoveredSlotIndex)
                 {
                     switch (e.Key)
@@ -254,9 +270,15 @@ namespace GalExcleTools
                 .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
         }
 
+        private static bool IsShiftKeyDown()
+        {
+            return InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift)
+                .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        }
+
         private void CopyStoryCharacterSlot(int slotIndex)
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -268,7 +290,12 @@ namespace GalExcleTools
 
         private async Task PasteStoryCharacterSlotAsync(int slotIndex)
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData())
+            {
+                return;
+            }
+
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -289,14 +316,14 @@ namespace GalExcleTools
             StoryCharacterSlotService.ApplyClipboard(row, slotIndex, _storyCharacterSlotClipboard);
             NormalizeStoryDetachedCharacterLayers(row);
             SyncStorySpeakerTextIfNeeded(slotIndex, row.Get(StoryCharacterSlotService.GetCharacterColumn(slotIndex)));
-            PersistCurrentStoryRowsToFiles();
+            QueueCurrentStoryDocumentSave();
             ShowStoryStatus(InfoBarSeverity.Success, "已粘贴立绘数据", $"{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}：{StoryCharacterSlotService.FormatClipboard(_storyCharacterSlotClipboard)}");
             await RefreshStoryPreviewAsync();
         }
 
         private void CopyStoryAssetField(string fieldName)
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -308,7 +335,12 @@ namespace GalExcleTools
 
         private async Task PasteStoryAssetFieldAsync(string fieldName)
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData())
+            {
+                return;
+            }
+
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -333,7 +365,7 @@ namespace GalExcleTools
 
             CaptureStoryUndoState($"粘贴{StoryAssetFieldService.GetDisplayName(fieldName)}");
             StoryAssetFieldService.ApplyClipboard(row, fieldName, _storyAssetClipboard);
-            PersistCurrentStoryRowsToFiles();
+            QueueCurrentStoryDocumentSave();
             UpdateStoryToolbarCurrentInfo();
             ShowStoryStatus(InfoBarSeverity.Success, "已粘贴基础素材", $"{StoryAssetFieldService.GetDisplayName(fieldName)}：{_storyAssetClipboard.Value}");
             if (fieldName == "BGM")
@@ -355,8 +387,13 @@ namespace GalExcleTools
 
         private async Task CycleStoryCharacterLayerAsync(int slotIndex, CharacterLayerKind layerKind, int delta)
         {
+            if (!CanEditStoryData())
+            {
+                return;
+            }
+
             var layerSpec = GetStoryCharacterLayerSpec(layerKind);
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -387,7 +424,7 @@ namespace GalExcleTools
 
                 CaptureStoryUndoState($"快捷切换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}{layerSpec.DisplayName}");
                 row.Set(filterColumn, nextIndex.ToString());
-                PersistCurrentStoryRowsToFiles();
+                QueueCurrentStoryDocumentSave();
                 ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, nextIndex, CharacterFilterService.GetDisplayName(filters[nextIndex], nextIndex));
                 await RefreshStoryPreviewAsync();
                 return;
@@ -419,14 +456,19 @@ namespace GalExcleTools
                 NormalizeStoryRowLayerCompatibility(row, character, slotIndex);
             }
 
-            PersistCurrentStoryRowsToFiles();
+            QueueCurrentStoryDocumentSave();
             ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, layerNextIndex, StoryCharacterLayerChoiceFactory.GetDisplayName(layerSpec, paths, layerNextIndex));
             await RefreshStoryPreviewAsync();
         }
 
         private async Task CycleStoryCharacterAsync(int slotIndex, int delta)
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData())
+            {
+                return;
+            }
+
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -456,13 +498,18 @@ namespace GalExcleTools
             row.Set(characterColumn, characters[nextIndex].Code);
             StoryCharacterSlotService.ResetLayerColumns(row, slotIndex);
             SyncStorySpeakerTextIfNeeded(slotIndex, characters[nextIndex].Code);
-            PersistCurrentStoryRowsToFiles();
+            QueueCurrentStoryDocumentSave();
             await RefreshStoryPreviewAsync();
         }
 
         private void ClearStoryCharacterSlot(int slotIndex)
         {
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData())
+            {
+                return;
+            }
+
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -477,7 +524,7 @@ namespace GalExcleTools
             row.Set(StoryCharacterSlotService.GetCharacterColumn(slotIndex), string.Empty);
             StoryCharacterSlotService.ResetLayerColumns(row, slotIndex);
             SyncStorySpeakerTextIfNeeded(slotIndex, string.Empty);
-            PersistCurrentStoryRowsToFiles();
+            QueueCurrentStoryDocumentSave();
             _ = RefreshStoryPreviewAsync();
         }
 

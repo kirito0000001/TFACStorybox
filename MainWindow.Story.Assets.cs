@@ -63,7 +63,12 @@ namespace GalExcleTools
 
         private async Task ChooseStoryCharacterAsync(int slotIndex)
         {
-            if (_currentStoryAssetLibrary is null || _currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (!CanEditStoryData())
+            {
+                return;
+            }
+
+            if (_currentStoryAssetLibrary is null || _currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 ShowStoryStatus(InfoBarSeverity.Warning, "无法选择角色", "当前项目没有可用的绑定素材库。");
                 return;
@@ -98,7 +103,7 @@ namespace GalExcleTools
                 emptyRow.Set($"Face{slotIndex}", "0");
                 emptyRow.Set($"Adorn{slotIndex}", "0");
                 emptyRow.Set($"Vfx{slotIndex}", "0");
-                PersistCurrentStoryRowsToFiles();
+                QueueCurrentStoryDocumentSave();
                 await RefreshStoryPreviewAsync();
                 return;
             }
@@ -124,14 +129,19 @@ namespace GalExcleTools
             row.Set($"Face{slotIndex}", "0");
             row.Set($"Adorn{slotIndex}", "0");
             row.Set($"Vfx{slotIndex}", "0");
-            PersistCurrentStoryRowsToFiles();
+            QueueCurrentStoryDocumentSave();
             await RefreshStoryPreviewAsync();
         }
 
         private async Task ChooseStoryCharacterLayerAsync(int slotIndex, CharacterLayerKind layerKind)
         {
+            if (!CanEditStoryData())
+            {
+                return;
+            }
+
             var layerSpec = GetStoryCharacterLayerSpec(layerKind);
-            if (_currentStoryCsvPath is null || _storyRows.Count == 0)
+            if (_currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
@@ -170,7 +180,7 @@ namespace GalExcleTools
 
                 CaptureStoryUndoState($"更换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}{layerSpec.DisplayName}");
                 row.Set(filterColumn, selectedFilterIndex.ToString());
-                PersistCurrentStoryRowsToFiles();
+                QueueCurrentStoryDocumentSave();
                 ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, selectedFilterIndex, CharacterFilterService.GetDisplayName(filters[selectedFilterIndex], selectedFilterIndex));
                 await RefreshStoryPreviewAsync();
                 return;
@@ -204,7 +214,7 @@ namespace GalExcleTools
                 NormalizeStoryRowLayerCompatibility(row, character, slotIndex);
             }
 
-            PersistCurrentStoryRowsToFiles();
+            QueueCurrentStoryDocumentSave();
             ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, selectedIndex, StoryCharacterLayerChoiceFactory.GetDisplayName(layerSpec, paths, selectedIndex));
             await RefreshStoryPreviewAsync();
         }
@@ -394,7 +404,7 @@ namespace GalExcleTools
             }
 
             return BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary))
-                .Select((path, index) => new StoryAssetChoice(index, Path.GetFileNameWithoutExtension(path)))
+                .Select((path, index) => new StoryAssetChoice(index, Path.GetFileNameWithoutExtension(path), path))
                 .ToList();
         }
 

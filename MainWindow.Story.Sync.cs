@@ -104,7 +104,7 @@ namespace GalExcleTools
                 return;
             }
 
-            LoadStoryRowsFromSectionFiles(_currentStoryChapter);
+            LoadStoryDocument(_currentStoryChapter);
             SynchronizeStorySectionState();
             ClearStoryUndoStack();
             _currentStoryRowIndex = Math.Clamp(_currentStoryRowIndex, 0, Math.Max(0, _storyRows.Count - 1));
@@ -208,21 +208,14 @@ namespace GalExcleTools
             gridView.Items.Add(item);
         }
 
-        private void ShowStoryStatus(InfoBarSeverity severity, string title, string message)
+        private void ShowStoryStatus(
+            InfoBarSeverity severity,
+            string title,
+            string message,
+            Exception? exception = null,
+            string? logMessage = null)
         {
-            var tip = CreateStoryTipBar(severity, title, message);
-            AddStoryTipWithEntrance(StoryFloatingTipsPanel, tip);
-
-            var timer = DispatcherQueue.CreateTimer();
-            timer.Interval = TimeSpan.FromSeconds(severity == InfoBarSeverity.Error ? 5 : 2.6);
-            timer.Tick += (_, _) =>
-            {
-                timer.Stop();
-                _storyTransientTipTimers.Remove(tip);
-                StoryFloatingTipsPanel.Children.Remove(tip);
-            };
-            _storyTransientTipTimers[tip] = timer;
-            timer.Start();
+            ShowFloatingTip(StoryFloatingTipsPanel, severity, title, message, exception, logMessage);
         }
 
     }

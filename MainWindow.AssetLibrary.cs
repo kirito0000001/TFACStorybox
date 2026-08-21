@@ -289,12 +289,21 @@ namespace GalExcleTools
             try
             {
                 var importedCount = await ImportBackgroundImagesAsync(selectedFiles.Select(file => file.Path));
-                AppendLog(LogKind.User, $"导入背景图：{importedCount} 个文件。");
+                ShowFloatingTip(
+                    importedCount > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                    importedCount > 0 ? "背景图已导入" : "没有导入背景图",
+                    importedCount > 0 ? $"已导入 {importedCount} 个文件。" : "选择的文件没有可导入内容。",
+                    logMessage: $"导入背景图：{importedCount} 个文件。");
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Error, "导入背景图失败。", ex);
                 AssetLibraryDetailStatusText.Text = $"导入背景图失败：{ex.Message}";
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "背景图导入失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "导入背景图失败。");
             }
         }
 
@@ -355,8 +364,24 @@ namespace GalExcleTools
                 return;
             }
 
-            var importedCount = ImportMusicFiles(selectedFiles.Select(file => file.Path));
-            AppendLog(LogKind.User, $"导入音乐：{importedCount} 个文件。");
+            try
+            {
+                var importedCount = ImportMusicFiles(selectedFiles.Select(file => file.Path));
+                ShowFloatingTip(
+                    importedCount > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                    importedCount > 0 ? "音乐已导入" : "没有导入音乐",
+                    importedCount > 0 ? $"已导入 {importedCount} 个文件。" : "选择的文件没有可导入内容。",
+                    logMessage: $"导入音乐：{importedCount} 个文件。");
+            }
+            catch (Exception ex)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "音乐导入失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "导入音乐失败。");
+            }
         }
 
         private int ImportMusicFiles(IEnumerable<string> sourcePaths)
@@ -398,8 +423,25 @@ namespace GalExcleTools
                 return;
             }
 
-            var importedCount = ImportAudioFiles(kind, selectedFiles.Select(file => file.Path));
-            AppendLog(LogKind.User, $"导入{AudioAssetService.GetDisplayName(kind)}：{importedCount} 个文件。");
+            var displayName = AudioAssetService.GetDisplayName(kind);
+            try
+            {
+                var importedCount = ImportAudioFiles(kind, selectedFiles.Select(file => file.Path));
+                ShowFloatingTip(
+                    importedCount > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                    importedCount > 0 ? $"{displayName}已导入" : $"没有导入{displayName}",
+                    importedCount > 0 ? $"已导入 {importedCount} 个文件。" : "选择的文件没有可导入内容。",
+                    logMessage: $"导入{displayName}：{importedCount} 个文件。");
+            }
+            catch (Exception ex)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    $"{displayName}导入失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    $"导入{displayName}失败。");
+            }
         }
 
         private int ImportAudioFiles(AudioAssetKind kind, IEnumerable<string> sourcePaths)
@@ -498,11 +540,20 @@ namespace GalExcleTools
             try
             {
                 var importedCount = await importAsync(selectedFiles.Select(file => file.Path));
-                AppendLog(LogKind.User, $"导入{logLabel}：{importedCount} 个文件。");
+                ShowFloatingTip(
+                    importedCount > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                    importedCount > 0 ? $"{logLabel}已导入" : $"没有导入{logLabel}",
+                    importedCount > 0 ? $"已导入 {importedCount} 个文件。" : "选择的文件没有可导入内容。",
+                    logMessage: $"导入{logLabel}：{importedCount} 个文件。");
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Error, errorMessage, ex);
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    $"{logLabel}导入失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    errorMessage);
             }
         }
 

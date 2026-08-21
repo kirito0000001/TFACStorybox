@@ -76,7 +76,7 @@ internal sealed class StoryEditorService
         }
     }
 
-    public StoryRowsEditResult MoveNextOrCreate(
+    public StoryRowsEditResult MoveNext(
         IList<StoryRow> rows,
         Dictionary<string, int> rowSections,
         int currentRowIndex)
@@ -87,27 +87,30 @@ internal sealed class StoryEditorService
         }
 
         currentRowIndex = Math.Clamp(currentRowIndex, 0, rows.Count - 1);
-        if (currentRowIndex < rows.Count - 1)
-        {
-            return new StoryRowsEditResult(currentRowIndex + 1, false, []);
-        }
-
-        var sections = GetSectionsInRowOrder(rows.ToList(), rowSections);
-        var copiedSection = currentRowIndex < sections.Count ? sections[currentRowIndex] : 1;
-        var nextRow = rows[currentRowIndex].Clone();
-        nextRow.Set("Name", StoryCsvService.CreateRowName(rows.Count));
-        nextRow.Set("Tesxt", string.Empty);
-        nextRow.Set("Custom", string.Empty);
-        rows.Add(nextRow);
-        sections.Add(copiedSection);
-        ApplySectionsInRowOrder(rows.ToList(), rowSections, sections);
-        return new StoryRowsEditResult(currentRowIndex + 1, true, []);
+        return new StoryRowsEditResult(Math.Min(currentRowIndex + 1, rows.Count - 1), false, []);
     }
 
     public StoryRowsEditResult InsertAtCurrent(
         IList<StoryRow> rows,
         Dictionary<string, int> rowSections,
         int currentRowIndex)
+    {
+        return InsertRelativeToCurrent(rows, rowSections, currentRowIndex, insertAfter: false);
+    }
+
+    public StoryRowsEditResult InsertAfterCurrent(
+        IList<StoryRow> rows,
+        Dictionary<string, int> rowSections,
+        int currentRowIndex)
+    {
+        return InsertRelativeToCurrent(rows, rowSections, currentRowIndex, insertAfter: true);
+    }
+
+    private StoryRowsEditResult InsertRelativeToCurrent(
+        IList<StoryRow> rows,
+        Dictionary<string, int> rowSections,
+        int currentRowIndex,
+        bool insertAfter)
     {
         if (rows.Count == 0)
         {
@@ -118,13 +121,79 @@ internal sealed class StoryEditorService
         var sections = GetSectionsInRowOrder(rows.ToList(), rowSections);
         var copiedSection = currentRowIndex < sections.Count ? sections[currentRowIndex] : 1;
         var insertedRow = rows[currentRowIndex].Clone();
+        insertedRow.StableId = StoryRow.CreateStableId();
         insertedRow.Set("Tesxt", string.Empty);
         insertedRow.Set("Custom", string.Empty);
-        rows.Insert(currentRowIndex, insertedRow);
-        sections.Insert(currentRowIndex, copiedSection);
+        var insertIndex = currentRowIndex + (insertAfter ? 1 : 0);
+        rows.Insert(insertIndex, insertedRow);
+        sections.Insert(insertIndex, copiedSection);
         RenameRowsInOrder(rows);
         ApplySectionsInRowOrder(rows.ToList(), rowSections, sections);
-        return new StoryRowsEditResult(currentRowIndex, true, []);
+        return new StoryRowsEditResult(insertIndex, true, []);
+    }
+
+    public bool NormalizeContiguousSections(
+        IList<StoryRow> rows,
+        Dictionary<string, int> rowSections)
+    {
+        if (rows.Count == 0)
+        {
+            rowSections.Clear();
+            return false;
+        }
+
+        var rawSections = GetSectionsInRowOrder(rows.ToList(), rowSections);
+        var normalizedSections = new List<int>(rawSections.Count);
+        var nextSection = 1;
+        var previousRawSection = rawSections[0];
+        for (var index = 0; index < rawSections.Count; index++)
+        {
+            if (index > 0 && rawSections[index] != previousRawSection)
+            {
+                nextSection++;
+                previousRawSection = rawSections[index];
+            }
+
+            normalizedSections.Add(nextSection);
+        }
+
+        var changed = !rawSections.SequenceEqual(normalizedSections);
+        ApplySectionsInRowOrder(rows.ToList(), rowSections, normalizedSections);
+        return changed;
+    }
+
+    public bool CanSplitSectionAtCurrent(
+        IReadOnlyList<StoryRow> rows,
+        IReadOnlyDictionary<string, int> rowSections,
+        int currentRowIndex)
+    {
+        if (currentRowIndex <= 0 || currentRowIndex >= rows.Count)
+        {
+            return false;
+        }
+
+        var sections = GetSectionsInRowOrder(rows, rowSections);
+        return sections[currentRowIndex - 1] == sections[currentRowIndex];
+    }
+
+    public bool SplitSectionAtCurrent(
+        IList<StoryRow> rows,
+        Dictionary<string, int> rowSections,
+        int currentRowIndex)
+    {
+        if (!CanSplitSectionAtCurrent(rows.ToList(), rowSections, currentRowIndex))
+        {
+            return false;
+        }
+
+        var sections = GetSectionsInRowOrder(rows.ToList(), rowSections);
+        for (var index = currentRowIndex; index < sections.Count; index++)
+        {
+            sections[index] = sections[index] + 1;
+        }
+
+        ApplySectionsInRowOrder(rows.ToList(), rowSections, sections);
+        return true;
     }
 
     public StoryRowsEditResult DeleteCurrent(

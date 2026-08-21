@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -17,6 +18,10 @@ namespace GalExcleTools.Services;
 
 internal sealed class UnrealSyncService
 {
+    private const int CurrentUnrealSyncStateVersion = 3;
+    public const string MusicPlayerBlueprintAssetPath = "/Game/BaseC/EXActor/MusicPlayer.MusicPlayer";
+    private const string InvalidUnrealObjectNameCharacters = "\\:*?\"<>|' ,/.&!~@#(){}[]=;^%$`";
+
     public static readonly string[] ExpectedNarrativeFolders =
     [
         "BackGround",
@@ -29,6 +34,7 @@ internal sealed class UnrealSyncService
 
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly StoryCsvService _storyCsvService;
+    private readonly StoryDocumentRepository _storyDocumentRepository;
 
     public UnrealSyncService()
         : this(new JsonSerializerOptions { WriteIndented = true }, new StoryCsvService())
@@ -44,6 +50,7 @@ internal sealed class UnrealSyncService
     {
         _jsonOptions = jsonOptions;
         _storyCsvService = storyCsvService;
+        _storyDocumentRepository = new StoryDocumentRepository(jsonOptions);
     }
 
     public List<UnrealLustrationSyncEntry> BuildLustrationSyncEntries(
@@ -169,7 +176,9 @@ internal sealed class UnrealSyncService
                     entry.CsvPath,
                     $"{tableFolder}/{assetName}.{assetName}",
                     "/Script/GALLibrary.StoryStruct",
-                    BuildLegacyStoryTableAssets(context, source.Chapter, entry.CsvPath, tableFolder, assetName)));
+                    BuildLegacyStoryTableAssets(context, source.Chapter, entry.CsvPath, tableFolder, assetName),
+                    source.Chapter.Code,
+                    _storyCsvService.TryParseStorySectionFromFileName(source.Chapter, entry.CsvPath) ?? 1));
             }
         }
 
@@ -183,16 +192,16 @@ internal sealed class UnrealSyncService
         IReadOnlyList<ChapterInfo> chapters)
     {
         var sources = chapters
-            .Select(chapter => new UnrealStoryTableSource(chapter, GetChapterStoryCsvPathsForSync(context.Project, chapter)))
+            .Select(chapter => new UnrealStoryTableSource(chapter, GetChapterStoryCsvPathsForSync(chapter)))
             .Where(source => source.CsvEntries.Count > 0)
             .ToList();
         return BuildStoryTableSyncEntries(context, sources);
     }
 
-    public List<string> GetProjectStoryCsvPaths(ProjectInfo project, IReadOnlyList<ChapterInfo> chapters)
+    public List<string> GetProjectStoryCsvPaths(IReadOnlyList<ChapterInfo> chapters)
     {
         return chapters
-            .SelectMany(chapter => GetChapterStoryCsvPathsForSync(project, chapter).Select(entry => entry.CsvPath))
+            .SelectMany(chapter => GetChapterStoryCsvPathsForSync(chapter).Select(entry => entry.CsvPath))
             .Where(File.Exists)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -238,10 +247,15 @@ internal sealed class UnrealSyncService
         UnrealSyncContext context,
         UnrealSyncChangePlan changePlan,
         IReadOnlyList<CharacterFilterEntry> filters,
-        string manifestPath)
+        string manifestPath,
+        string progressPath,
+        string resultPath)
     {
         var manifest = new
         {
+            ProtocolVersion = 1,
+            ProgressPath = progressPath,
+            ResultPath = resultPath,
             GeneratedAt = DateTimeOffset.Now,
             ToolProject = new
             {
@@ -267,6 +281,14 @@ internal sealed class UnrealSyncService
             },
             StoryTables = changePlan.StoryTables,
             AssetIndexTables = changePlan.AssetIndexTables,
+            VoiceMap = new
+            {
+                BlueprintAsset = MusicPlayerBlueprintAssetPath,
+                MapProperty = "VoiceMaps",
+                ManagedTableRoot = $"{context.TargetAssetRoot}/ExcelTexts/",
+                ShouldUpdate = changePlan.VoiceMapsChanged,
+                Entries = changePlan.VoiceMapsChanged ? changePlan.VoiceMaps : []
+            },
             Imports = changePlan.ImportGroups,
             Deletes = changePlan.DeleteGroups,
             Filters = filters
@@ -281,16 +303,117 @@ internal sealed class UnrealSyncService
         var script = $$"""
             import json
             import os
+            import sys
+            import time
             import unreal
 
             manifest_path = r"{{normalizedManifestPath}}"
             with open(manifest_path, "r", encoding="utf-8-sig") as manifest_file:
                 manifest = json.load(manifest_file)
 
+            protocol_version = int(manifest.get("ProtocolVersion", 1))
+            progress_path = manifest.get("ProgressPath")
+            result_path = manifest.get("ResultPath")
             target_root = manifest.get("TargetRoot", "/Game")
             imports = manifest.get("Imports", [])
             deletes = manifest.get("Deletes", [])
             tasks = []
+            errors = []
+            warnings = []
+            imported_count = 0
+            deleted_count = 0
+            story_table_count = 0
+            asset_index_table_count = 0
+            voice_maps_updated = False
+            lustration_updated = False
+            portraits_updated = False
+
+            def atomic_write_json(path, payload):
+                if not path:
+                    return
+                folder = os.path.dirname(path)
+                if folder:
+                    os.makedirs(folder, exist_ok=True)
+                temporary_path = path + ".tmp"
+                with open(temporary_path, "w", encoding="utf-8") as output_file:
+                    json.dump(payload, output_file, ensure_ascii=False, indent=2)
+                    output_file.flush()
+                    os.fsync(output_file.fileno())
+                for attempt in range(40):
+                    try:
+                        os.replace(temporary_path, path)
+                        return
+                    except PermissionError:
+                        if attempt == 39:
+                            raise
+                        time.sleep(0.05)
+
+            def write_progress(stage, message, percent, completed=0, total=0):
+                atomic_write_json(progress_path, {
+                    "ProtocolVersion": protocol_version,
+                    "Stage": stage,
+                    "Message": message,
+                    "Percent": float(percent),
+                    "Completed": int(completed),
+                    "Total": int(total)
+                })
+
+            def add_warning(message):
+                warnings.append(str(message))
+                unreal.log_warning(str(message))
+
+            def add_error(message):
+                errors.append(str(message))
+                unreal.log_error(str(message))
+
+            def save_loaded_asset_with_retry(asset, asset_path):
+                last_error = None
+                for attempt in range(4):
+                    try:
+                        if unreal.EditorAssetLibrary.save_loaded_asset(asset, only_if_is_dirty=False):
+                            return True
+                        last_error = "save_loaded_asset returned false"
+                    except Exception as exc:
+                        last_error = str(exc)
+                    if attempt < 3:
+                        unreal.log_warning("GalExcleTools retrying asset save ({}/4): {}".format(attempt + 2, asset_path))
+                        time.sleep(1.0)
+                add_error("GalExcleTools failed to save asset {}: {}".format(asset_path, last_error))
+                return False
+
+            def save_asset_path_with_retry(asset_path):
+                asset = unreal.EditorAssetLibrary.load_asset(asset_path)
+                if not asset:
+                    add_error("GalExcleTools could not load imported asset for save: {}".format(asset_path))
+                    return False
+                return save_loaded_asset_with_retry(asset, asset_path)
+
+            def write_result(completed):
+                atomic_write_json(result_path, {
+                    "ProtocolVersion": protocol_version,
+                    "Completed": bool(completed),
+                    "Success": bool(completed and not errors),
+                    "ImportedCount": imported_count,
+                    "DeletedCount": deleted_count,
+                    "StoryTableCount": story_table_count,
+                    "AssetIndexTableCount": asset_index_table_count,
+                    "VoiceMapsUpdated": voice_maps_updated,
+                    "LustrationUpdated": lustration_updated,
+                    "PortraitsUpdated": portraits_updated,
+                    "Errors": errors,
+                    "Warnings": warnings
+                })
+
+            def sync_excepthook(exception_type, exception_value, exception_traceback):
+                add_error("GalExcleTools unexpected sync failure: {}".format(exception_value))
+                try:
+                    write_result(False)
+                    write_progress("Failed", "Unreal 同步执行失败", 100)
+                finally:
+                    sys.__excepthook__(exception_type, exception_value, exception_traceback)
+
+            sys.excepthook = sync_excepthook
+            write_progress("ReadManifest", "Unreal 已读取同步清单", 60)
 
             def delete_asset_if_exists(asset_path):
                 if not asset_path:
@@ -301,21 +424,12 @@ internal sealed class UnrealSyncService
                     if unreal.EditorAssetLibrary.delete_asset(asset_path):
                         unreal.log("GalExcleTools deleted extra asset: {}".format(asset_path))
                         return True
-                    unreal.log_warning("GalExcleTools failed to delete extra asset: {}".format(asset_path))
+                    add_error("GalExcleTools failed to delete extra asset: {}".format(asset_path))
                 except Exception as exc:
-                    unreal.log_warning("GalExcleTools failed to delete extra asset {}: {}".format(asset_path, exc))
+                    add_error("GalExcleTools failed to delete extra asset {}: {}".format(asset_path, exc))
                 return False
 
-            deleted_count = 0
-            for group in deletes:
-                destination = group.get("Destination")
-                assets = group.get("Assets", [])
-                if not destination:
-                    continue
-                for asset_path in assets:
-                    if delete_asset_if_exists(asset_path):
-                        deleted_count += 1
-
+            write_progress("PrepareImports", "正在准备素材导入任务", 62)
             for group in imports:
                 destination = group.get("Destination")
                 files = group.get("Files", [])
@@ -324,7 +438,7 @@ internal sealed class UnrealSyncService
                 unreal.EditorAssetLibrary.make_directory(destination)
                 for filename in files:
                     if not filename or not os.path.exists(filename):
-                        unreal.log_warning("GalExcleTools missing source file: {}".format(filename))
+                        add_error("GalExcleTools missing source file: {}".format(filename))
                         continue
                     task = unreal.AssetImportTask()
                     task.set_editor_property("filename", filename)
@@ -337,19 +451,30 @@ internal sealed class UnrealSyncService
                         pass
                     tasks.append(task)
 
+            write_progress("PrepareImports", "素材导入任务准备完成", 64, len(tasks), len(tasks))
             if tasks:
-                unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
-                imported_paths = []
-                for task in tasks:
+                asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
+                for task_index, task in enumerate(tasks):
+                    try:
+                        asset_tools.import_asset_tasks([task])
+                    except Exception as exc:
+                        add_error("GalExcleTools failed to import source {}: {}".format(task.get_editor_property("filename"), exc))
+                        write_progress("ImportAssets", "正在导入并保存素材", 65 + 15.0 * (task_index + 1) / len(tasks), task_index + 1, len(tasks))
+                        continue
+                    imported_paths = []
                     try:
                         imported_paths.extend(task.get_editor_property("imported_object_paths") or [])
                     except Exception:
                         pass
-                for imported_path in imported_paths:
-                    try:
-                        unreal.EditorAssetLibrary.save_asset(imported_path, only_if_is_dirty=False)
-                    except Exception as exc:
-                        unreal.log_warning("GalExcleTools failed to save imported asset {}: {}".format(imported_path, exc))
+                    if not imported_paths:
+                        add_error("GalExcleTools import produced no asset: {}".format(task.get_editor_property("filename")))
+                    else:
+                        imported_count += 1
+                    for imported_path in imported_paths:
+                        save_asset_path_with_retry(imported_path)
+                    write_progress("ImportAssets", "正在导入并保存素材", 65 + 15.0 * (task_index + 1) / len(tasks), task_index + 1, len(tasks))
+            else:
+                write_progress("ImportAssets", "本次没有需要导入的素材", 80)
 
             def set_first_editor_property(obj, property_names, value):
                 for property_name in property_names:
@@ -457,18 +582,21 @@ internal sealed class UnrealSyncService
                 return data_table, row_struct
 
             story_tables = manifest.get("StoryTables", [])
+            asset_index_tables = manifest.get("AssetIndexTables", [])
+            total_tables = len(story_tables) + len(asset_index_tables)
+            completed_tables = 0
+            legacy_assets_to_delete = []
+            write_progress("UpdateTables", "正在更新剧情表和素材索引表", 82, 0, total_tables)
             for story_table in story_tables:
                 table_asset_path = story_table.get("TableAsset")
                 csv_path = story_table.get("CsvPath")
                 row_struct_path = story_table.get("RowStruct")
                 if not table_asset_path or not csv_path:
+                    add_error("GalExcleTools story table entry is incomplete: {}".format(story_table))
                     continue
                 for legacy_asset_path in story_table.get("LegacyTableAssets", []) or []:
                     if legacy_asset_path and legacy_asset_path != table_asset_path and unreal.EditorAssetLibrary.does_asset_exist(legacy_asset_path):
-                        if unreal.EditorAssetLibrary.delete_asset(legacy_asset_path):
-                            unreal.log("GalExcleTools deleted legacy story data table: {}".format(legacy_asset_path))
-                        else:
-                            unreal.log_warning("GalExcleTools failed to delete legacy story data table: {}".format(legacy_asset_path))
+                        legacy_assets_to_delete.append(legacy_asset_path)
                 data_table, row_struct = ensure_story_data_table(table_asset_path, row_struct_path)
                 if data_table:
                     try:
@@ -476,19 +604,22 @@ internal sealed class UnrealSyncService
                     except TypeError:
                         ok = unreal.DataTableFunctionLibrary.fill_data_table_from_csv_file(data_table, csv_path)
                     if ok:
-                        unreal.EditorAssetLibrary.save_asset(table_asset_path, only_if_is_dirty=False)
-                        unreal.log("GalExcleTools updated story data table: {}".format(table_asset_path))
+                        if save_loaded_asset_with_retry(data_table, table_asset_path):
+                            unreal.log("GalExcleTools updated story data table: {}".format(table_asset_path))
+                            story_table_count += 1
                     else:
-                        unreal.log_warning("GalExcleTools failed to update story data table: {}".format(table_asset_path))
+                        add_error("GalExcleTools failed to update story data table: {}".format(table_asset_path))
                 else:
-                    unreal.log_warning("GalExcleTools could not create or load story data table: {}".format(table_asset_path))
+                    add_error("GalExcleTools could not create or load story data table: {}".format(table_asset_path))
+                completed_tables += 1
+                write_progress("UpdateTables", "正在更新剧情表和素材索引表", 82 + (8.0 * completed_tables / max(total_tables, 1)), completed_tables, total_tables)
 
-            asset_index_tables = manifest.get("AssetIndexTables", [])
             for index_table in asset_index_tables:
                 table_asset_path = index_table.get("TableAsset")
                 csv_path = index_table.get("CsvPath")
                 row_struct_path = index_table.get("RowStruct")
                 if not table_asset_path or not csv_path:
+                    add_error("GalExcleTools asset index table entry is incomplete: {}".format(index_table))
                     continue
                 data_table, row_struct = ensure_story_data_table(table_asset_path, row_struct_path)
                 if data_table:
@@ -497,12 +628,136 @@ internal sealed class UnrealSyncService
                     except TypeError:
                         ok = unreal.DataTableFunctionLibrary.fill_data_table_from_csv_file(data_table, csv_path)
                     if ok:
-                        unreal.EditorAssetLibrary.save_asset(table_asset_path, only_if_is_dirty=False)
-                        unreal.log("GalExcleTools updated asset index data table: {}".format(table_asset_path))
+                        if save_loaded_asset_with_retry(data_table, table_asset_path):
+                            unreal.log("GalExcleTools updated asset index data table: {}".format(table_asset_path))
+                            asset_index_table_count += 1
                     else:
-                        unreal.log_warning("GalExcleTools failed to update asset index data table: {}".format(table_asset_path))
+                        add_error("GalExcleTools failed to update asset index data table: {}".format(table_asset_path))
                 else:
-                    unreal.log_warning("GalExcleTools could not create or load asset index data table: {}".format(table_asset_path))
+                    add_error("GalExcleTools could not create or load asset index data table: {}".format(table_asset_path))
+                completed_tables += 1
+                write_progress("UpdateTables", "正在更新剧情表和素材索引表", 82 + (8.0 * completed_tables / max(total_tables, 1)), completed_tables, total_tables)
+
+            def get_object_path(asset):
+                if not asset:
+                    return ""
+                try:
+                    return str(asset.get_path_name())
+                except Exception:
+                    return str(asset)
+
+            def get_map_value_by_object_path(source_map, object_path):
+                if not source_map:
+                    return None
+                normalized_path = str(object_path).split(".")[0]
+                try:
+                    for existing_key, existing_value in source_map.items():
+                        if get_object_path(existing_key).split(".")[0] == normalized_path:
+                            return existing_value
+                except Exception:
+                    pass
+                return None
+
+            def verify_voice_map(source_map, entries, managed_table_root):
+                expected_paths = set(str(entry.get("TableAsset", "")).split(".")[0] for entry in entries)
+                try:
+                    managed_paths = set(
+                        get_object_path(key).split(".")[0]
+                        for key in source_map.keys()
+                        if get_object_path(key).startswith(managed_table_root))
+                except Exception:
+                    return False
+                if managed_paths != expected_paths:
+                    return False
+                for entry in entries:
+                    table_asset_path = entry.get("TableAsset")
+                    table_voices = get_map_value_by_object_path(source_map, table_asset_path)
+                    actual_waves = get_first_editor_property(table_voices, ["TableWaves", "table_waves"])
+                    expected_waves = entry.get("Waves", []) or []
+                    if actual_waves is None or len(actual_waves) != len(expected_waves):
+                        return False
+                    for actual_wave, expected_wave in zip(actual_waves, expected_waves):
+                        if not expected_wave:
+                            if actual_wave:
+                                return False
+                        elif get_object_path(actual_wave).split(".")[0] != str(expected_wave).split(".")[0]:
+                            return False
+                return True
+
+            voice_map_info = manifest.get("VoiceMap", {})
+            should_update_voice_maps = voice_map_info.get("ShouldUpdate", False)
+            write_progress("UpdateVoiceMaps", "正在更新剧情语音映射", 91)
+            if should_update_voice_maps:
+                blueprint_asset_path = voice_map_info.get("BlueprintAsset")
+                map_property = voice_map_info.get("MapProperty", "VoiceMaps")
+                managed_table_root = voice_map_info.get("ManagedTableRoot", target_root + "/ExcelTexts/")
+                voice_map_entries = voice_map_info.get("Entries", []) or []
+                blueprint_asset = unreal.EditorAssetLibrary.load_asset(blueprint_asset_path) if blueprint_asset_path else None
+                generated_class = None
+                if blueprint_asset_path:
+                    try:
+                        generated_class = unreal.EditorAssetLibrary.load_blueprint_class(blueprint_asset_path.split(".")[0])
+                    except Exception:
+                        generated_class = None
+                if generated_class is None and blueprint_asset is not None:
+                    try:
+                        generated_class = blueprint_asset.generated_class()
+                    except Exception:
+                        generated_class = None
+                class_default_object = unreal.get_default_object(generated_class) if generated_class else None
+                if not blueprint_asset or not class_default_object:
+                    add_error("GalExcleTools could not load MusicPlayer blueprint defaults: {}".format(blueprint_asset_path))
+                else:
+                    existing_voice_map = get_first_editor_property(class_default_object, [map_property, map_property.lower(), "VoiceMaps", "voice_maps"]) or {}
+                    merged_voice_map = {}
+                    try:
+                        for existing_table, existing_value in existing_voice_map.items():
+                            if not get_object_path(existing_table).startswith(managed_table_root):
+                                merged_voice_map[existing_table] = existing_value
+                    except Exception as exc:
+                        add_error("GalExcleTools could not read existing MusicPlayer voice map: {}".format(exc))
+
+                    voice_map_valid = not errors
+                    for entry in voice_map_entries:
+                        table_asset_path = entry.get("TableAsset")
+                        data_table = unreal.EditorAssetLibrary.load_asset(table_asset_path) if table_asset_path else None
+                        if not data_table:
+                            add_error("GalExcleTools could not load voice DataTable: {}".format(table_asset_path))
+                            voice_map_valid = False
+                            continue
+                        loaded_waves = []
+                        for wave_path in entry.get("Waves", []) or []:
+                            if not wave_path:
+                                loaded_waves.append(None)
+                                continue
+                            wave_asset = unreal.EditorAssetLibrary.load_asset(wave_path)
+                            if not wave_asset:
+                                add_error("GalExcleTools could not load voice SoundWave: {}".format(wave_path))
+                                voice_map_valid = False
+                            loaded_waves.append(wave_asset)
+                        table_voices = unreal.TableVoices()
+                        if not set_first_editor_property(table_voices, ["TableWaves", "table_waves"], loaded_waves):
+                            add_error("GalExcleTools could not set TableVoices.TableWaves for {}".format(table_asset_path))
+                            voice_map_valid = False
+                        merged_voice_map[data_table] = table_voices
+
+                    if voice_map_valid:
+                        try:
+                            class_default_object.modify()
+                        except Exception:
+                            pass
+                        if set_first_editor_property(class_default_object, [map_property, map_property.lower(), "VoiceMaps", "voice_maps"], merged_voice_map):
+                            if save_loaded_asset_with_retry(blueprint_asset, blueprint_asset_path):
+                                saved_voice_map = get_first_editor_property(class_default_object, [map_property, map_property.lower(), "VoiceMaps", "voice_maps"]) or {}
+                                if verify_voice_map(saved_voice_map, voice_map_entries, managed_table_root):
+                                    voice_maps_updated = True
+                                    unreal.log("GalExcleTools updated MusicPlayer voice maps: tables={} waves={}".format(
+                                        len(voice_map_entries),
+                                        sum(int(entry.get("AssignedCount", 0)) for entry in voice_map_entries)))
+                                else:
+                                    add_error("GalExcleTools MusicPlayer voice-map verification failed after save: {}".format(blueprint_asset_path))
+                        else:
+                            add_error("GalExcleTools could not set MusicPlayer voice-map property '{}' on {}".format(map_property, blueprint_asset_path))
 
             def build_lustration_struct(row, existing_item=None):
                 # Keep Unreal-side Vfx data intact. The tool owns imported texture
@@ -522,6 +777,7 @@ internal sealed class UnrealSyncService
                 return item
 
             lustration_info = manifest.get("LustrationInfo", {})
+            write_progress("UpdateLustration", "正在更新立绘数据", 92)
             data_asset_path = lustration_info.get("DataAsset")
             map_property = lustration_info.get("MapProperty", "Infor")
             lustration_rows = lustration_info.get("Rows", [])
@@ -542,14 +798,16 @@ internal sealed class UnrealSyncService
                     except Exception:
                         pass
                     if set_first_editor_property(data_asset, [map_property, map_property.lower(), "Infor", "infor"], lustration_map):
-                        unreal.EditorAssetLibrary.save_asset(data_asset_path, only_if_is_dirty=False)
-                        unreal.log("GalExcleTools updated lustration data asset: {} rows={}".format(data_asset_path, len(lustration_map)))
+                        if save_loaded_asset_with_retry(data_asset, data_asset_path):
+                            unreal.log("GalExcleTools updated lustration data asset: {} rows={}".format(data_asset_path, len(lustration_map)))
+                            lustration_updated = True
                     else:
-                        unreal.log_warning("GalExcleTools could not set lustration map property '{}' on {}".format(map_property, data_asset_path))
+                        add_error("GalExcleTools could not set lustration map property '{}' on {}".format(map_property, data_asset_path))
                 else:
-                    unreal.log_warning("GalExcleTools could not load lustration data asset: {}".format(data_asset_path))
+                    add_error("GalExcleTools could not load lustration data asset: {}".format(data_asset_path))
 
             portraits_info = manifest.get("PortraitsInfo", {})
+            write_progress("UpdatePortraits", "正在更新小预览数据", 94)
             portraits_data_asset_path = portraits_info.get("DataAsset")
             portraits_map_property = portraits_info.get("MapProperty", "Infor")
             portrait_rows = portraits_info.get("Rows", [])
@@ -568,13 +826,26 @@ internal sealed class UnrealSyncService
                     except Exception:
                         pass
                     if set_first_editor_property(portraits_data_asset, [portraits_map_property, portraits_map_property.lower(), "Infor", "infor"], portraits_map):
-                        unreal.EditorAssetLibrary.save_asset(portraits_data_asset_path, only_if_is_dirty=False)
-                        unreal.log("GalExcleTools updated portrait data asset: {} rows={}".format(portraits_data_asset_path, len(portraits_map)))
+                        if save_loaded_asset_with_retry(portraits_data_asset, portraits_data_asset_path):
+                            unreal.log("GalExcleTools updated portrait data asset: {} rows={}".format(portraits_data_asset_path, len(portraits_map)))
+                            portraits_updated = True
                     else:
-                        unreal.log_warning("GalExcleTools could not set portrait map property '{}' on {}".format(portraits_map_property, portraits_data_asset_path))
+                        add_error("GalExcleTools could not set portrait map property '{}' on {}".format(portraits_map_property, portraits_data_asset_path))
                 else:
-                    unreal.log_warning("GalExcleTools could not load portrait data asset: {}".format(portraits_data_asset_path))
+                    add_error("GalExcleTools could not load portrait data asset: {}".format(portraits_data_asset_path))
 
+            pending_deletes = []
+            for group in deletes:
+                pending_deletes.extend(group.get("Assets", []) or [])
+            pending_deletes.extend(legacy_assets_to_delete)
+            write_progress("DeleteAssets", "正在清理虚幻中的多余素材", 96, 0, len(pending_deletes))
+            for delete_index, asset_path in enumerate(pending_deletes):
+                if delete_asset_if_exists(asset_path):
+                    deleted_count += 1
+                write_progress("DeleteAssets", "正在清理虚幻中的多余素材", 96 + (3.0 * (delete_index + 1) / max(len(pending_deletes), 1)), delete_index + 1, len(pending_deletes))
+
+            write_result(True)
+            write_progress("Completed", "Unreal 同步已完成" if not errors else "Unreal 同步完成，但存在失败项", 100)
             unreal.log("GalExcleTools sync finished. Imported task count: {}, deleted extra asset count: {}".format(len(tasks), deleted_count))
             """;
 
@@ -593,9 +864,13 @@ internal sealed class UnrealSyncService
         Directory.CreateDirectory(savedFolder);
         var manifestPath = Path.Combine(savedFolder, "gal-sync-manifest.json");
         var scriptPath = Path.Combine(savedFolder, "gal_sync_import.py");
+        var progressPath = Path.Combine(savedFolder, "gal-sync-progress.json");
+        var resultPath = Path.Combine(savedFolder, "gal-sync-result.json");
+        File.Delete(progressPath);
+        File.Delete(resultPath);
 
         progress?.Report(new UnrealSyncProgressUpdate("正在写入同步清单...", 40));
-        WriteManifest(context, changePlan, filters, manifestPath);
+        WriteManifest(context, changePlan, filters, manifestPath, progressPath, resultPath);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new UnrealSyncProgressUpdate("正在写入 Unreal Python 脚本...", 48));
         WritePythonScript(scriptPath, manifestPath);
@@ -622,7 +897,7 @@ internal sealed class UnrealSyncService
         progress?.Report(new UnrealSyncProgressUpdate("Unreal 已启动，正在加载项目并执行导入脚本...", 60));
 
         var waitStartedAt = DateTime.UtcNow;
-        var lastProgressReportAt = DateTime.MinValue;
+        string? lastProgressJson = null;
         while (!process.WaitForExit(1000))
         {
             if (cancellationToken.IsCancellationRequested)
@@ -638,20 +913,18 @@ internal sealed class UnrealSyncService
                 throw new TimeoutException("Unreal Editor 同步超过 30 分钟，已终止进程。");
             }
 
-            if ((DateTime.UtcNow - lastProgressReportAt).TotalSeconds >= 10)
+            var progressUpdate = ReadProgressUpdate(progressPath, ref lastProgressJson);
+            if (progressUpdate is not null)
             {
-                lastProgressReportAt = DateTime.UtcNow;
-                var percent = Math.Min(90, 60 + elapsed.TotalSeconds / 180d * 25d);
-                progress?.Report(new UnrealSyncProgressUpdate(
-                    "Unreal 正在加载项目、导入资源并保存资产...",
-                    percent));
+                progress?.Report(progressUpdate);
             }
         }
 
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new UnrealSyncProgressUpdate("正在收集 Unreal 同步结果...", 95));
         var output = outputTask.Result + errorTask.Result + ReadLatestLogSnippet(context);
-        return new UnrealSyncResult(process.ExitCode, manifestPath, scriptPath, output);
+        var report = ReadExecutionReport(resultPath);
+        return new UnrealSyncResult(process.ExitCode, manifestPath, scriptPath, progressPath, resultPath, output, report);
     }
 
     public UnrealSyncChangePlan BuildChangePlan(
@@ -663,11 +936,14 @@ internal sealed class UnrealSyncService
         IReadOnlyCollection<string> ambientPaths,
         IReadOnlyCollection<string> soundEffectPaths,
         IReadOnlyCollection<string> voicePaths,
+        ProjectVoiceMapState voiceMapState,
         IReadOnlyList<UnrealStoryTableSyncEntry> allStoryTables,
         string assetIndexTableCacheFolder,
         Func<CharacterInfo, IReadOnlyDictionary<string, string>> getPortraitPreviewPathsByLayerFileName)
     {
-        var importGroups = BuildImportGroups(
+        var syncState = ReadState(context);
+        var requiresVerifiedTableSync = syncState.StateVersion < CurrentUnrealSyncStateVersion;
+        var allImportGroups = BuildImportGroups(
                 context,
                 characters,
                 backgroundPaths,
@@ -675,29 +951,19 @@ internal sealed class UnrealSyncService
                 ambientPaths,
                 soundEffectPaths,
                 voicePaths)
+            .Concat(context.AssetLibrary.IsPortraitPreviewEnabled
+                ? BuildPortraitPreviewImportGroups(context, characters, getPortraitPreviewPathsByLayerFileName)
+                : [])
+            .ToList();
+        var sourceHashes = ComputeSourceHashes(allImportGroups, allStoryTables);
+        var importGroups = allImportGroups
             .Select(group => new UnrealSyncImportGroup(
                 group.Destination,
                 forceFullSync
                     ? group.Files.ToList()
                     : group.Files
-                        .Where(path => SourceFileNeedsImport(context, group.Destination, path))
+                        .Where(path => SourceFileNeedsImport(context, group.Destination, path, syncState, sourceHashes))
                         .ToList()))
-            .ToList();
-
-        var portraitPreviewImportGroups = context.AssetLibrary.IsPortraitPreviewEnabled
-            ? BuildPortraitPreviewImportGroups(context, characters, getPortraitPreviewPathsByLayerFileName)
-                .Select(group => new UnrealSyncImportGroup(
-                    group.Destination,
-                    forceFullSync
-                        ? group.Files.ToList()
-                        : group.Files
-                            .Where(path => SourceFileNeedsImport(context, group.Destination, path))
-                            .ToList()))
-                .ToList()
-            : [];
-
-        importGroups = importGroups
-            .Concat(portraitPreviewImportGroups)
             .Where(group => group.Files.Count > 0)
             .ToList();
 
@@ -712,13 +978,12 @@ internal sealed class UnrealSyncService
             allStoryTables,
             getPortraitPreviewPathsByLayerFileName);
 
-        var storyTables = forceFullSync
+        var storyTables = forceFullSync || requiresVerifiedTableSync
             ? allStoryTables.ToList()
             : allStoryTables
-                .Where(entry => SourceFileNeedsAssetUpdate(context, entry.CsvPath, entry.TableAsset))
+                .Where(entry => SourceFileNeedsAssetUpdate(context, entry.CsvPath, entry.TableAsset, syncState, sourceHashes))
                 .ToList();
 
-        var syncState = ReadState(context);
         var allAssetIndexTables = BuildAssetIndexTableSyncEntries(
             context,
             assetIndexTableCacheFolder,
@@ -729,9 +994,19 @@ internal sealed class UnrealSyncService
         var assetIndexTablesHash = ComputeAssetIndexTablesHash(allAssetIndexTables);
         var assetIndexTablesChanged =
             forceFullSync ||
+            requiresVerifiedTableSync ||
             !string.Equals(syncState.AssetIndexTablesHash, assetIndexTablesHash, StringComparison.OrdinalIgnoreCase) ||
             allAssetIndexTables.Any(entry => !File.Exists(AssetObjectPathToFilePath(context, entry.TableAsset)));
         var assetIndexTables = assetIndexTablesChanged ? allAssetIndexTables : [];
+
+        var voiceMaps = BuildVoiceMapSyncEntries(context, allStoryTables, voiceMapState);
+        var voiceMapsHash = ComputeSha256Hex("music-player-voice-maps-v1|" + JsonSerializer.Serialize(voiceMaps, _jsonOptions));
+        var voiceMapsChanged =
+            allStoryTables.Count > 0 &&
+            (forceFullSync ||
+                requiresVerifiedTableSync ||
+                !string.Equals(syncState.VoiceMapsHash, voiceMapsHash, StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(UnrealObjectPathToContentFilePath(context, MusicPlayerBlueprintAssetPath)));
 
         var lustrationRows = BuildLustrationSyncEntries(context, characters);
         var lustrationHash = ComputeSha256Hex("lustration-dataasset-v3-preserve-vfx|" + JsonSerializer.Serialize(lustrationRows, _jsonOptions));
@@ -760,57 +1035,83 @@ internal sealed class UnrealSyncService
         var deleteCount = deleteGroups.Sum(group => group.Assets.Count);
         var storyTableCount = storyTables.Count;
         var assetIndexTableCount = assetIndexTables.Count;
-        var totalChanged = importCount + deleteCount + storyTableCount + assetIndexTableCount + (lustrationChanged ? 1 : 0) + (portraitsChanged ? 1 : 0);
-        var planItems = new List<string>
+        var totalChanged = importCount + deleteCount + storyTableCount + assetIndexTableCount + (voiceMapsChanged ? 1 : 0) + (lustrationChanged ? 1 : 0) + (portraitsChanged ? 1 : 0);
+        var changeItems = new List<string>();
+        if (importCount > 0)
         {
-            forceFullSync ? "全部重新同步：已忽略时间戳和同步缓存" : "同步模式：仅同步检测到的变动",
-            $"变动素材文件：{importCount} 个",
-            deleteCount > 0
-                ? $"虚幻多余素材：{deleteCount} 个将删除"
-                : "虚幻多余素材：无",
-            $"变动剧情 CSV/DataTable：{storyTableCount} 个",
-            assetIndexTablesChanged
-                ? $"素材索引表：需要更新 {assetIndexTableCount} 张 DataTable"
-                : "素材索引表：无变动",
-            lustrationChanged
-                ? $"立绘数据资产：需要更新 {lustrationRows.Count} 个角色映射"
-                : "立绘数据资产：无变动",
-            portraitsChanged
-                ? $"小预览数据资产：需要更新 {portraitRows.Count} 个角色映射"
-                : context.AssetLibrary.IsPortraitPreviewEnabled ? "小预览数据资产：无变动" : "小预览数据资产：未启用"
-        };
-
-        foreach (var group in importGroups)
-        {
-            planItems.Add($"{group.Destination}：{group.Files.Count} 个文件待导入");
+            changeItems.Add($"新增或更新素材：{importCount} 个");
         }
-
-        foreach (var group in deleteGroups)
+        if (deleteCount > 0)
         {
-            planItems.Add($"{group.Destination}：{group.Assets.Count} 个多余资产待删除");
+            changeItems.Add($"清理虚幻中的多余素材：{deleteCount} 个");
         }
-
         if (storyTableCount > 0)
         {
-            planItems.Add($"ExcelTexts：{storyTableCount} 个剧情表待填入");
+            changeItems.Add($"更新剧情表：{storyTableCount} 张");
         }
-
         if (assetIndexTableCount > 0)
         {
-            planItems.Add($"ExcelTexts：{assetIndexTableCount} 张素材索引表待填入");
+            changeItems.Add($"更新素材索引表：{assetIndexTableCount} 张");
+        }
+        if (voiceMapsChanged)
+        {
+            changeItems.Add($"更新剧情语音映射：{voiceMaps.Sum(entry => entry.AssignedCount)} 条");
+        }
+        if (lustrationChanged)
+        {
+            changeItems.Add($"更新立绘数据：{lustrationRows.Count} 个角色");
+        }
+        if (portraitsChanged)
+        {
+            changeItems.Add($"更新小预览数据：{portraitRows.Count} 个角色");
+        }
+
+        var unchangedItems = new List<string>();
+        if (importCount == 0)
+        {
+            unchangedItems.Add("素材文件：没有变化");
+        }
+        if (deleteCount == 0)
+        {
+            unchangedItems.Add("多余素材：无需清理");
+        }
+        if (storyTableCount == 0)
+        {
+            unchangedItems.Add("剧情表：没有变化");
+        }
+        if (!assetIndexTablesChanged)
+        {
+            unchangedItems.Add("素材索引表：没有变化");
+        }
+        if (!voiceMapsChanged)
+        {
+            unchangedItems.Add("剧情语音映射：没有变化");
+        }
+        if (!lustrationChanged)
+        {
+            unchangedItems.Add("立绘数据：没有变化");
+        }
+        if (!portraitsChanged)
+        {
+            unchangedItems.Add(context.AssetLibrary.IsPortraitPreviewEnabled
+                ? "小预览数据：没有变化"
+                : "小预览数据：未启用");
         }
 
         var summary = totalChanged == 0
-            ? "没有检测到需要同步的变动。"
+            ? "当前内容与虚幻项目一致，无需同步。"
             : forceFullSync
-                ? $"已准备全部重新同步，共 {totalChanged} 项。"
-                : $"检测到 {totalChanged} 项同步变动；本次只会同步这些变动项。";
+                ? $"已准备全部重新同步，共处理 {totalChanged} 项：{string.Join("；", changeItems)}。"
+                : $"本次同步将处理 {totalChanged} 项：{string.Join("；", changeItems)}。";
 
         return new UnrealSyncChangePlan(
             importGroups,
             deleteGroups,
             storyTables,
             assetIndexTables,
+            voiceMapsChanged,
+            voiceMaps,
+            voiceMapsHash,
             lustrationChanged,
             lustrationRows,
             portraitsChanged,
@@ -818,9 +1119,134 @@ internal sealed class UnrealSyncService
             lustrationHash,
             portraitsHash,
             assetIndexTablesHash,
+            sourceHashes,
+            forceFullSync,
             totalChanged,
             summary,
-            planItems);
+            changeItems,
+            unchangedItems);
+    }
+
+    public List<UnrealVoiceMapSyncEntry> BuildVoiceMapSyncEntries(
+        UnrealSyncContext context,
+        IReadOnlyList<UnrealStoryTableSyncEntry> storyTables,
+        ProjectVoiceMapState voiceMapState)
+    {
+        var result = new List<UnrealVoiceMapSyncEntry>();
+        var stableRowIds = BuildStableVoiceRowIds(context);
+        foreach (var table in storyTables)
+        {
+            if (!File.Exists(table.CsvPath))
+            {
+                continue;
+            }
+
+            var rows = _storyCsvService.ReadRows(table.CsvPath);
+            var indexedRows = rows
+                .Select((row, index) => new
+                {
+                    RowName = string.IsNullOrWhiteSpace(row.Get("Name"))
+                        ? StoryCsvService.CreateRowName(index)
+                        : row.Get("Name")
+                })
+                .Select(item =>
+                {
+                    var isNumeric = int.TryParse(item.RowName, out var rowNumber);
+                    return new
+                    {
+                        item.RowName,
+                        IsNumeric = isNumeric,
+                        RowNumber = rowNumber
+                    };
+                })
+                .Where(item => item.IsNumeric && item.RowNumber >= 0)
+                .ToList();
+            if (indexedRows.Count == 0)
+            {
+                continue;
+            }
+
+            var wavesByRowName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in indexedRows)
+            {
+                var exportRowKey = ProjectTextDataService.BuildExportRowKey(table.ChapterCode, table.Section, row.RowName);
+                var rowId = stableRowIds.TryGetValue(exportRowKey, out var stableRowId)
+                    ? ProjectTextDataService.BuildStableTextRowId(table.ChapterCode, stableRowId)
+                    : string.Empty;
+                if (string.IsNullOrWhiteSpace(rowId) ||
+                    !voiceMapState.Voices.TryGetValue(rowId, out var voicePath) ||
+                    !File.Exists(voicePath))
+                {
+                    continue;
+                }
+
+                var destination = GetProjectVoiceDestinationPath(context, voicePath);
+                wavesByRowName[row.RowName] = BuildAssetObjectPath(destination, voicePath);
+            }
+
+            var waves = BuildSparseVoiceWaveSlots(indexedRows.Select(row => row.RowName).ToList(), wavesByRowName);
+            var assignedCount = wavesByRowName.Count;
+            if (assignedCount > 0)
+            {
+                result.Add(new UnrealVoiceMapSyncEntry(table.TableAsset, waves, assignedCount));
+            }
+        }
+
+        return result
+            .OrderBy(entry => entry.TableAsset, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private Dictionary<string, string> BuildStableVoiceRowIds(UnrealSyncContext context)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var workspaceService = new ProjectWorkspaceService();
+        foreach (var chapter in workspaceService.GetChapters(context.Project))
+        {
+            var document = _storyDocumentRepository.Load(chapter);
+            var localIndexes = new Dictionary<int, int>();
+            foreach (var row in document.Rows)
+            {
+                var section = document.RowSections.TryGetValue(row.Get("Name"), out var mappedSection)
+                    ? Math.Max(1, mappedSection)
+                    : 1;
+                var localIndex = localIndexes.TryGetValue(section, out var currentIndex) ? currentIndex + 1 : 1;
+                localIndexes[section] = localIndex;
+                var exportRowKey = ProjectTextDataService.BuildExportRowKey(
+                    chapter.Code,
+                    section,
+                    StoryCsvService.CreateRowName(localIndex - 1));
+                result[exportRowKey] = row.StableId;
+            }
+        }
+
+        return result;
+    }
+
+    public static List<string?> BuildSparseVoiceWaveSlots(
+        IReadOnlyList<string> rowNames,
+        IReadOnlyDictionary<string, string> wavesByRowName)
+    {
+        var rowNumbers = rowNames
+            .Select(rowName => int.TryParse(rowName, out var rowNumber) ? rowNumber : -1)
+            .Where(rowNumber => rowNumber >= 0)
+            .ToList();
+        if (rowNumbers.Count == 0)
+        {
+            return [];
+        }
+
+        var maxRowNumber = rowNumbers.Max();
+        var waves = new string?[maxRowNumber + 1];
+        foreach (var pair in wavesByRowName)
+        {
+            if (int.TryParse(pair.Key, out var rowNumber) && rowNumber >= 0 && rowNumber < waves.Length)
+            {
+                waves[rowNumber] = pair.Value;
+            }
+        }
+
+        return waves.ToList();
     }
 
     public List<UnrealAssetIndexTableSyncEntry> BuildAssetIndexTableSyncEntries(
@@ -916,13 +1342,13 @@ internal sealed class UnrealSyncService
 
     public static string BuildTextureReference(string destinationPath, string sourcePath)
     {
-        var assetName = Path.GetFileNameWithoutExtension(sourcePath);
+        var assetName = NormalizeImportedAssetName(Path.GetFileNameWithoutExtension(sourcePath));
         return $"Texture2D'{destinationPath}/{assetName}.{assetName}'";
     }
 
     public static string BuildSoundWaveReference(string destinationPath, string sourcePath)
     {
-        var assetName = Path.GetFileNameWithoutExtension(sourcePath);
+        var assetName = NormalizeImportedAssetName(Path.GetFileNameWithoutExtension(sourcePath));
         return $"SoundWave'{destinationPath}/{assetName}.{assetName}'";
     }
 
@@ -950,7 +1376,7 @@ internal sealed class UnrealSyncService
 
     public static string BuildAssetObjectPath(string destinationPath, string sourcePath)
     {
-        var assetName = Path.GetFileNameWithoutExtension(sourcePath);
+        var assetName = NormalizeImportedAssetName(Path.GetFileNameWithoutExtension(sourcePath));
         return $"{destinationPath}/{assetName}.{assetName}";
     }
 
@@ -1065,7 +1491,9 @@ internal sealed class UnrealSyncService
 
         try
         {
-            return JsonSerializer.Deserialize<UnrealSyncState>(File.ReadAllText(path)) ?? new UnrealSyncState();
+            var state = JsonSerializer.Deserialize<UnrealSyncState>(File.ReadAllText(path)) ?? new UnrealSyncState();
+            state.SourceHashes ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            return state;
         }
         catch
         {
@@ -1078,10 +1506,13 @@ internal sealed class UnrealSyncService
         var statePath = GetUnrealSyncStatePath(context);
         Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
         var state = ReadState(context);
+        state.StateVersion = CurrentUnrealSyncStateVersion;
         state.LastSyncedAt = DateTimeOffset.Now;
         state.LustrationHash = changePlan.LustrationHash;
         state.PortraitsHash = changePlan.PortraitsHash;
         state.AssetIndexTablesHash = changePlan.AssetIndexTablesHash;
+        state.VoiceMapsHash = changePlan.VoiceMapsHash;
+        state.SourceHashes = new Dictionary<string, string>(changePlan.SourceHashes, StringComparer.OrdinalIgnoreCase);
         File.WriteAllText(statePath, JsonSerializer.Serialize(state, _jsonOptions), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
@@ -1364,33 +1795,82 @@ internal sealed class UnrealSyncService
         }
     }
 
-    private static bool SourceFileNeedsImport(UnrealSyncContext context, string destinationPath, string sourcePath)
+    private static bool SourceFileNeedsImport(
+        UnrealSyncContext context,
+        string destinationPath,
+        string sourcePath,
+        UnrealSyncState state,
+        IReadOnlyDictionary<string, string> sourceHashes)
     {
         var objectPath = BuildAssetObjectPath(destinationPath, sourcePath);
+        var legacyObjectPath = BuildLegacyAssetObjectPath(destinationPath, sourcePath);
         var assetFilePath = AssetObjectPathToFilePath(context, objectPath);
         var alternativeAssetFilePath = BuildImportedAssetFilePath(context, destinationPath, sourcePath);
-        return SourceFileNeedsAnyAssetUpdate(context, sourcePath, assetFilePath, alternativeAssetFilePath);
+        return SourceFileNeedsAnyAssetUpdate(objectPath, legacyObjectPath, state, sourceHashes, assetFilePath, alternativeAssetFilePath);
     }
 
-    private static bool SourceFileNeedsAssetUpdate(UnrealSyncContext context, string sourcePath, string objectPath)
+    private static bool SourceFileNeedsAssetUpdate(
+        UnrealSyncContext context,
+        string sourcePath,
+        string objectPath,
+        UnrealSyncState state,
+        IReadOnlyDictionary<string, string> sourceHashes)
     {
-        return SourceFileNeedsAnyAssetUpdate(context, sourcePath, AssetObjectPathToFilePath(context, objectPath));
+        return SourceFileNeedsAnyAssetUpdate(objectPath, null, state, sourceHashes, AssetObjectPathToFilePath(context, objectPath));
     }
 
-    private static bool SourceFileNeedsAnyAssetUpdate(UnrealSyncContext context, string sourcePath, params string[] assetFilePaths)
+    private static bool SourceFileNeedsAnyAssetUpdate(
+        string objectPath,
+        string? legacyObjectPath,
+        UnrealSyncState state,
+        IReadOnlyDictionary<string, string> sourceHashes,
+        params string[] assetFilePaths)
     {
-        if (!File.Exists(sourcePath))
-        {
-            return false;
-        }
-
         var existingAssetPath = assetFilePaths.FirstOrDefault(File.Exists);
         if (existingAssetPath is null)
         {
             return true;
         }
 
-        return File.GetLastWriteTimeUtc(sourcePath) > File.GetLastWriteTimeUtc(existingAssetPath).AddSeconds(1);
+        if (!sourceHashes.TryGetValue(objectPath, out var currentHash))
+        {
+            return true;
+        }
+
+        var hasPreviousHash = state.SourceHashes.TryGetValue(objectPath, out var previousHash);
+        if (!hasPreviousHash && !string.IsNullOrWhiteSpace(legacyObjectPath))
+        {
+            hasPreviousHash = state.SourceHashes.TryGetValue(legacyObjectPath, out previousHash);
+        }
+
+        return !hasPreviousHash || !string.Equals(currentHash, previousHash, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, string> ComputeSourceHashes(
+        IReadOnlyList<UnrealSyncImportGroup> importGroups,
+        IReadOnlyList<UnrealStoryTableSyncEntry> storyTables)
+    {
+        var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in importGroups)
+        {
+            foreach (var sourcePath in group.Files.Where(File.Exists))
+            {
+                hashes[BuildAssetObjectPath(group.Destination, sourcePath)] = ComputeFileSha256Hex(sourcePath);
+            }
+        }
+
+        foreach (var table in storyTables.Where(table => File.Exists(table.CsvPath)))
+        {
+            hashes[table.TableAsset] = ComputeFileSha256Hex(table.CsvPath);
+        }
+
+        return hashes;
+    }
+
+    private static string ComputeFileSha256Hex(string filePath)
+    {
+        using var stream = File.OpenRead(filePath);
+        return Convert.ToHexString(SHA256.HashData(stream));
     }
 
     private static string BuildImportedAssetFilePath(UnrealSyncContext context, string destinationPath, string sourcePath)
@@ -1406,6 +1886,16 @@ internal sealed class UnrealSyncService
             assetName + ".uasset");
     }
 
+    public static string UnrealObjectPathToContentFilePath(UnrealSyncContext context, string objectPath)
+    {
+        var packagePath = objectPath.Split('.')[0].Replace('\\', '/');
+        var relativePath = packagePath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase)
+            ? packagePath["/Game/".Length..]
+            : packagePath.Trim('/');
+        var contentRoot = Path.Combine(Path.GetDirectoryName(context.UnrealProjectPath)!, "Content");
+        return Path.Combine(contentRoot, relativePath.Replace('/', Path.DirectorySeparatorChar) + ".uasset");
+    }
+
     private static string GetExpectedImportedAssetName(string sourcePath)
     {
         return NormalizeImportedAssetName(Path.GetFileNameWithoutExtension(sourcePath));
@@ -1419,7 +1909,82 @@ internal sealed class UnrealSyncService
 
     private static string NormalizeImportedAssetName(string assetName)
     {
-        return assetName.Replace(' ', '_');
+        var normalized = new string(assetName
+            .Select(character => char.IsWhiteSpace(character) || InvalidUnrealObjectNameCharacters.Contains(character)
+                ? '_'
+                : character)
+            .ToArray());
+        return string.IsNullOrWhiteSpace(normalized) ? "Asset" : normalized;
+    }
+
+    private static string BuildLegacyAssetObjectPath(string destinationPath, string sourcePath)
+    {
+        var assetName = Path.GetFileNameWithoutExtension(sourcePath);
+        return $"{destinationPath}/{assetName}.{assetName}";
+    }
+
+    private UnrealSyncProgressUpdate? ReadProgressUpdate(string progressPath, ref string? lastProgressJson)
+    {
+        try
+        {
+            if (!File.Exists(progressPath))
+            {
+                return null;
+            }
+
+            var json = ReadSharedText(progressPath);
+            if (string.Equals(json, lastProgressJson, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var update = JsonSerializer.Deserialize<UnrealSyncProgressFile>(json, _jsonOptions);
+            if (update is null || update.ProtocolVersion != 1 || string.IsNullOrWhiteSpace(update.Message))
+            {
+                return null;
+            }
+
+            lastProgressJson = json;
+            var detail = update.Total > 0 ? $" ({update.Completed}/{update.Total})" : string.Empty;
+            return new UnrealSyncProgressUpdate(update.Message + detail, Math.Clamp(update.Percent, 0, 100));
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private UnrealSyncExecutionReport? ReadExecutionReport(string resultPath)
+    {
+        try
+        {
+            return File.Exists(resultPath)
+                ? JsonSerializer.Deserialize<UnrealSyncExecutionReport>(ReadSharedText(resultPath), _jsonOptions)
+                : null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string ReadSharedText(string path)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
     }
 
     private static void KillUnrealSyncProcess(Process process)
@@ -1484,9 +2049,8 @@ internal sealed class UnrealSyncService
         return result.ToList();
     }
 
-    private List<StoryTableCsvEntry> GetChapterStoryCsvPathsForSync(ProjectInfo project, ChapterInfo chapter)
+    private List<StoryTableCsvEntry> GetChapterStoryCsvPathsForSync(ChapterInfo chapter)
     {
-        CleanupStorySectionCache(project, chapter);
         var sectionFiles = _storyCsvService.GetLocalSectionCsvPaths(chapter)
             .OrderBy(item => item.Section)
             .ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
@@ -1500,7 +2064,7 @@ internal sealed class UnrealSyncService
         foreach (var sectionFile in sectionFiles)
         {
             var rows = _storyCsvService.ReadRows(sectionFile.Path);
-            if (!rows.Any(_storyCsvService.RowHasContent))
+            if (rows.Count == 0)
             {
                 if (sectionFile.Section > 1 && File.Exists(sectionFile.Path))
                 {
@@ -1525,29 +2089,6 @@ internal sealed class UnrealSyncService
                 hasMultipleSections ? StoryCsvService.BuildSectionCsvFileBaseName(chapter.Code, item.Section) : StoryCsvService.BuildSectionCsvBaseName(chapter.Code),
                 hasMultipleSections))
             .ToList();
-    }
-
-    private static string GetStorySectionCacheFolder(ProjectInfo project, ChapterInfo chapter)
-    {
-        return Path.Combine(
-            project.Path,
-            "Tools",
-            "UnrealStorySections",
-            StoryCsvService.RemoveChapterSectionSuffix(chapter.Code));
-    }
-
-    private static void CleanupStorySectionCache(ProjectInfo project, ChapterInfo chapter)
-    {
-        var folder = GetStorySectionCacheFolder(project, chapter);
-        if (!Directory.Exists(folder))
-        {
-            return;
-        }
-
-        foreach (var csvPath in Directory.EnumerateFiles(folder, "*.csv", SearchOption.TopDirectoryOnly))
-        {
-            File.Delete(csvPath);
-        }
     }
 
     private static string GetChapterCategoryFolder(string chapterType)

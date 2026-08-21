@@ -12,25 +12,22 @@ internal sealed class StoryAssetIndexSyncService
 {
     private readonly Func<List<ProjectInfo>> _getProjects;
     private readonly Func<ProjectInfo, AssetLibraryInfo?> _resolveProjectAssetLibrary;
-    private readonly Func<ProjectInfo, List<string>> _getProjectStoryCsvPaths;
     private readonly Func<ProjectInfo, string> _getChaptersFolderPath;
     private readonly Func<string, ChapterInfo> _readChapterInfo;
-    private readonly StoryCsvService _storyCsvService;
+    private readonly StoryDocumentRepository _storyDocumentRepository;
 
     public StoryAssetIndexSyncService(
         Func<List<ProjectInfo>> getProjects,
         Func<ProjectInfo, AssetLibraryInfo?> resolveProjectAssetLibrary,
-        Func<ProjectInfo, List<string>> getProjectStoryCsvPaths,
         Func<ProjectInfo, string> getChaptersFolderPath,
         Func<string, ChapterInfo> readChapterInfo,
-        StoryCsvService storyCsvService)
+        StoryDocumentRepository storyDocumentRepository)
     {
         _getProjects = getProjects;
         _resolveProjectAssetLibrary = resolveProjectAssetLibrary;
-        _getProjectStoryCsvPaths = getProjectStoryCsvPaths;
         _getChaptersFolderPath = getChaptersFolderPath;
         _readChapterInfo = readChapterInfo;
-        _storyCsvService = storyCsvService;
+        _storyDocumentRepository = storyDocumentRepository;
     }
 
     public AssetIndexSyncResult SyncGlobalAssetIndexes(
@@ -222,7 +219,8 @@ internal sealed class StoryAssetIndexSyncService
                 warnings.Count,
                 Path.GetFileName(csvFile.CsvPath)));
 
-            var rows = _storyCsvService.ReadRows(csvFile.CsvPath);
+            var document = _storyDocumentRepository.Load(csvFile.Chapter);
+            var rows = document.Rows;
             var changed = false;
             for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
             {
@@ -232,7 +230,7 @@ internal sealed class StoryAssetIndexSyncService
 
             if (changed)
             {
-                _storyCsvService.WriteRows(csvFile.CsvPath, rows);
+                _storyDocumentRepository.Save(csvFile.Chapter, document);
                 changedCsvPaths.Add(csvFile.CsvPath);
             }
         }
@@ -260,9 +258,12 @@ internal sealed class StoryAssetIndexSyncService
 
             foreach (var chapter in Directory.EnumerateDirectories(chaptersFolderPath).Select(_readChapterInfo))
             {
-                foreach (var sectionFile in _storyCsvService.GetLocalSectionCsvPaths(chapter).Where(file => File.Exists(file.Path)))
+                if (_storyDocumentRepository.Exists(chapter))
                 {
-                    result.Add(new RelatedStoryCsvFile(project.Name, chapter.Name, chapter.Code, sectionFile.Path));
+                    result.Add(new RelatedStoryCsvFile(
+                        project,
+                        chapter,
+                        _storyDocumentRepository.GetDocumentPath(chapter)));
                 }
             }
         }
@@ -281,11 +282,22 @@ internal sealed class StoryAssetIndexSyncService
                 continue;
             }
 
-            foreach (var csvPath in _getProjectStoryCsvPaths(project))
+            var chaptersFolderPath = _getChaptersFolderPath(project);
+            if (!Directory.Exists(chaptersFolderPath))
             {
-                var rows = _storyCsvService.ReadRows(csvPath);
+                continue;
+            }
+
+            foreach (var chapter in Directory.EnumerateDirectories(chaptersFolderPath).Select(_readChapterInfo))
+            {
+                if (!_storyDocumentRepository.Exists(chapter))
+                {
+                    continue;
+                }
+
+                var document = _storyDocumentRepository.Load(chapter);
                 var changed = false;
-                foreach (var row in rows)
+                foreach (var row in document.Rows)
                 {
                     changed |= updateRow(row);
                 }
@@ -295,7 +307,7 @@ internal sealed class StoryAssetIndexSyncService
                     continue;
                 }
 
-                _storyCsvService.WriteRows(csvPath, rows);
+                _storyDocumentRepository.Save(chapter, document);
                 changedFileCount++;
             }
         }

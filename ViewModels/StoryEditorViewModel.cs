@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using GalExcleTools.Services;
 using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace GalExcleTools.ViewModels;
@@ -15,9 +16,9 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private bool _isRowDirty;
     private bool _isUpdatingRowIndexText;
     private bool _isUpdatingSectionOptions;
-    private bool _isPersistingRows;
     private bool _isDebugModeEnabled;
     private bool _canUndo;
+    private bool _canRedo;
     private string _rowIndexText = "1";
     private string _rowTotalText = "/ 1 句";
     private string _title = string.Empty;
@@ -29,6 +30,7 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private string _currentSceneText = "当前环境音：无";
     private string _currentFunctionText = "当前函数：无";
     private string _assetStatusText = string.Empty;
+    private string _saveStatusText = "已加载";
     private bool _hasCurrentFunction;
     private bool _hasMultipleCurrentFunctions;
     private bool _hasCurrentChoices;
@@ -37,19 +39,17 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private string? _backgroundPreviewKey;
     private int _backgroundTransitionMode;
     private bool _bgmPlaybackSuppressed;
-    private string? _bgmPath;
-    private string? _scenePath;
-    private int _bgmPlaybackRequestId;
-    private int _scenePlaybackRequestId;
     private int? _hoveredCharacterSlotIndex;
     private string? _hoveredAssetFieldName;
 
     public StoryEditorViewModel()
     {
         UndoCommand = new RelayCommand(() => { });
+        RedoCommand = new RelayCommand(() => { });
         PreviousRowCommand = new RelayCommand(() => { });
         NextRowCommand = new RelayCommand(() => { });
         InsertRowCommand = new RelayCommand(() => { });
+        InsertAfterRowCommand = new RelayCommand(() => { });
         DeleteRowCommand = new RelayCommand(() => { });
         PreviousSectionCommand = new RelayCommand(() => { });
         NextSectionCommand = new RelayCommand(() => { });
@@ -64,11 +64,15 @@ internal sealed class StoryEditorViewModel : ObservableObject
         ClearCurrentRowCommand = new RelayCommand(() => { });
     }
 
-    public List<StoryRow> Rows { get; } = [];
+    public event EventHandler<Exception>? CommandExecutionFailed;
 
-    public Dictionary<string, int> RowSections { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public StoryDocument Document { get; } = new();
 
-    public List<StoryEditorUndoState> UndoStack { get; } = [];
+    public StoryUndoService UndoService { get; } = new();
+
+    public List<StoryRow> Rows => Document.Rows;
+
+    public Dictionary<string, int> RowSections => Document.RowSections;
 
     public Dictionary<string, BitmapImage> PreviewImageCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -76,11 +80,15 @@ internal sealed class StoryEditorViewModel : ObservableObject
 
     public RelayCommand UndoCommand { get; private set; }
 
+    public RelayCommand RedoCommand { get; private set; }
+
     public RelayCommand PreviousRowCommand { get; private set; }
 
     public RelayCommand NextRowCommand { get; private set; }
 
     public RelayCommand InsertRowCommand { get; private set; }
+
+    public RelayCommand InsertAfterRowCommand { get; private set; }
 
     public RelayCommand DeleteRowCommand { get; private set; }
 
@@ -118,14 +126,14 @@ internal sealed class StoryEditorViewModel : ObservableObject
         set => SetProperty(ref _assetLibrary, value);
     }
 
-    public string? CsvPath
+    public string? DocumentPath
     {
         get => _csvPath;
         set
         {
             if (SetProperty(ref _csvPath, value))
             {
-                CsvPathText = value ?? string.Empty;
+                DocumentPathText = value ?? string.Empty;
             }
         }
     }
@@ -168,22 +176,28 @@ internal sealed class StoryEditorViewModel : ObservableObject
         set => SetProperty(ref _isUpdatingSectionOptions, value);
     }
 
-    public bool IsPersistingRows
-    {
-        get => _isPersistingRows;
-        set => SetProperty(ref _isPersistingRows, value);
-    }
-
     public bool IsDebugModeEnabled
     {
         get => _isDebugModeEnabled;
-        set => SetProperty(ref _isDebugModeEnabled, value);
+        set
+        {
+            if (SetProperty(ref _isDebugModeEnabled, value))
+            {
+                RefreshCommandStates();
+            }
+        }
     }
 
     public bool CanUndo
     {
         get => _canUndo;
         set => SetProperty(ref _canUndo, value);
+    }
+
+    public bool CanRedo
+    {
+        get => _canRedo;
+        set => SetProperty(ref _canRedo, value);
     }
 
     public string RowIndexText
@@ -204,7 +218,7 @@ internal sealed class StoryEditorViewModel : ObservableObject
         set => SetProperty(ref _title, value);
     }
 
-    public string CsvPathText
+    public string DocumentPathText
     {
         get => _csvPathText;
         set => SetProperty(ref _csvPathText, value);
@@ -250,6 +264,12 @@ internal sealed class StoryEditorViewModel : ObservableObject
     {
         get => _assetStatusText;
         set => SetProperty(ref _assetStatusText, value);
+    }
+
+    public string SaveStatusText
+    {
+        get => _saveStatusText;
+        set => SetProperty(ref _saveStatusText, value);
     }
 
     public bool HasCurrentFunction
@@ -318,30 +338,6 @@ internal sealed class StoryEditorViewModel : ObservableObject
         set => SetProperty(ref _bgmPlaybackSuppressed, value);
     }
 
-    public string? BgmPath
-    {
-        get => _bgmPath;
-        set => SetProperty(ref _bgmPath, value);
-    }
-
-    public string? ScenePath
-    {
-        get => _scenePath;
-        set => SetProperty(ref _scenePath, value);
-    }
-
-    public int BgmPlaybackRequestId
-    {
-        get => _bgmPlaybackRequestId;
-        set => SetProperty(ref _bgmPlaybackRequestId, value);
-    }
-
-    public int ScenePlaybackRequestId
-    {
-        get => _scenePlaybackRequestId;
-        set => SetProperty(ref _scenePlaybackRequestId, value);
-    }
-
     public int? HoveredCharacterSlotIndex
     {
         get => _hoveredCharacterSlotIndex;
@@ -363,15 +359,19 @@ internal sealed class StoryEditorViewModel : ObservableObject
 
     public void RefreshUndoState()
     {
-        CanUndo = UndoStack.Count > 0;
+        CanUndo = UndoService.CanUndo;
+        CanRedo = UndoService.CanRedo;
         UndoCommand.NotifyCanExecuteChanged();
+        RedoCommand.NotifyCanExecuteChanged();
     }
 
     public void ConfigureCommands(
         Action undo,
+        Action redo,
         Action previousRow,
         Action nextRow,
         Action insertRow,
+        Action insertAfterRow,
         Action deleteRow,
         Action previousSection,
         Action nextSection,
@@ -385,26 +385,42 @@ internal sealed class StoryEditorViewModel : ObservableObject
         Action clearFunction,
         Action clearCurrentRow)
     {
-        UndoCommand = new RelayCommand(undo, () => CanUndo);
+        UndoCommand = new RelayCommand(undo, () => CanUndo && !IsDebugModeEnabled);
+        RedoCommand = new RelayCommand(redo, () => CanRedo && !IsDebugModeEnabled);
         PreviousRowCommand = new RelayCommand(previousRow, () => Rows.Count > 0 && CurrentRowIndex > 0);
-        NextRowCommand = new RelayCommand(nextRow, () => Rows.Count > 0);
-        InsertRowCommand = new RelayCommand(insertRow, () => Rows.Count > 0 && CsvPath is not null && !IsDebugModeEnabled);
-        DeleteRowCommand = new RelayCommand(deleteRow, () => Rows.Count > 0 && CsvPath is not null);
+        NextRowCommand = new RelayCommand(nextRow, () => Rows.Count > 0 && CurrentRowIndex < Rows.Count - 1);
+        InsertRowCommand = new RelayCommand(insertRow, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
+        InsertAfterRowCommand = new RelayCommand(insertAfterRow, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
+        DeleteRowCommand = new RelayCommand(deleteRow, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
         PreviousSectionCommand = new RelayCommand(previousSection, () => Rows.Count > 0);
         NextSectionCommand = new RelayCommand(nextSection, () => Rows.Count > 0);
-        AddSectionCommand = new RelayCommand(addSection, () => Rows.Count > 0 && CsvPath is not null);
-        ChangeBackgroundCommand = new AsyncRelayCommand(changeBackground, () => Rows.Count > 0 && CsvPath is not null);
-        ChangeBgmCommand = new AsyncRelayCommand(changeBgm, () => Rows.Count > 0 && CsvPath is not null);
-        ChangeSceneCommand = new AsyncRelayCommand(changeScene, () => Rows.Count > 0 && CsvPath is not null);
-        ChooseFunctionCommand = new AsyncRelayCommand(chooseFunction, () => Rows.Count > 0 && CsvPath is not null);
+        AddSectionCommand = new RelayCommand(addSection, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
+        ChangeBackgroundCommand = new AsyncRelayCommand(changeBackground, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
+        ChangeBgmCommand = new AsyncRelayCommand(changeBgm, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
+        ChangeSceneCommand = new AsyncRelayCommand(changeScene, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
+        ChooseFunctionCommand = new AsyncRelayCommand(chooseFunction, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
         ViewChoicesCommand = new AsyncRelayCommand(viewChoices, () => Rows.Count > 0 && HasCurrentChoices);
-        RemoveFunctionCommand = new AsyncRelayCommand(removeFunction, () => Rows.Count > 0 && HasMultipleCurrentFunctions);
-        ClearFunctionCommand = new RelayCommand(clearFunction, () => Rows.Count > 0 && HasCurrentFunction);
-        ClearCurrentRowCommand = new RelayCommand(clearCurrentRow, () => Rows.Count > 0 && CsvPath is not null);
+        RemoveFunctionCommand = new AsyncRelayCommand(removeFunction, () => Rows.Count > 0 && HasMultipleCurrentFunctions && !IsDebugModeEnabled);
+        ClearFunctionCommand = new RelayCommand(clearFunction, () => Rows.Count > 0 && HasCurrentFunction && !IsDebugModeEnabled);
+        ClearCurrentRowCommand = new RelayCommand(clearCurrentRow, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
+        foreach (var command in new[]
+                 {
+                     ChangeBackgroundCommand,
+                     ChangeBgmCommand,
+                     ChangeSceneCommand,
+                     ChooseFunctionCommand,
+                     ViewChoicesCommand,
+                     RemoveFunctionCommand
+                 })
+        {
+            command.ExecutionFailed += (_, exception) => CommandExecutionFailed?.Invoke(this, exception);
+        }
         OnPropertyChanged(nameof(UndoCommand));
+        OnPropertyChanged(nameof(RedoCommand));
         OnPropertyChanged(nameof(PreviousRowCommand));
         OnPropertyChanged(nameof(NextRowCommand));
         OnPropertyChanged(nameof(InsertRowCommand));
+        OnPropertyChanged(nameof(InsertAfterRowCommand));
         OnPropertyChanged(nameof(DeleteRowCommand));
         OnPropertyChanged(nameof(PreviousSectionCommand));
         OnPropertyChanged(nameof(NextSectionCommand));
@@ -423,9 +439,11 @@ internal sealed class StoryEditorViewModel : ObservableObject
     public void RefreshCommandStates()
     {
         UndoCommand.NotifyCanExecuteChanged();
+        RedoCommand.NotifyCanExecuteChanged();
         PreviousRowCommand.NotifyCanExecuteChanged();
         NextRowCommand.NotifyCanExecuteChanged();
         InsertRowCommand.NotifyCanExecuteChanged();
+        InsertAfterRowCommand.NotifyCanExecuteChanged();
         DeleteRowCommand.NotifyCanExecuteChanged();
         PreviousSectionCommand.NotifyCanExecuteChanged();
         NextSectionCommand.NotifyCanExecuteChanged();

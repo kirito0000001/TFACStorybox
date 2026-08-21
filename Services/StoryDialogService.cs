@@ -38,7 +38,12 @@ internal sealed class StoryDialogService
             title,
             "选择要写入当前剧情行的素材索引。",
             choices
-                .Select(choice => new SelectionDialogItem<StoryAssetChoice>($"{choice.Index}: {choice.Name}", choice))
+                .Select(choice => new SelectionDialogItem<StoryAssetChoice>(
+                    $"{choice.Index}: {choice.Name}",
+                    choice,
+                    string.IsNullOrWhiteSpace(choice.PreviewPath)
+                        ? null
+                        : StoryDialogContentFactory.CreateLazyImagePreviewToolTip(choice.PreviewPath)))
                 .ToList(),
             "确定",
             "取消",

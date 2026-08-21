@@ -42,6 +42,45 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
+        private async Task PlayCurrentStoryVoiceFromUiAsync()
+        {
+            StopStoryVoicePlayback();
+            if (_currentProject is null || _currentStoryChapter is null || _storyRows.Count == 0)
+            {
+                return;
+            }
+
+            var row = _storyRows[_currentStoryRowIndex];
+            var rowKey = ProjectTextDataService.BuildStableTextRowId(
+                _currentStoryChapter.Code,
+                row.StableId);
+            if (!_projectVoiceMapState.Voices.TryGetValue(rowKey, out var voicePath) ||
+                string.IsNullOrWhiteSpace(voicePath) ||
+                !File.Exists(voicePath))
+            {
+                return;
+            }
+
+            try
+            {
+                await _storyVoicePlayback.PlayAsync(voicePath, restartCurrent: true);
+            }
+            catch (Exception ex)
+            {
+                ShowStoryStatus(
+                    InfoBarSeverity.Error,
+                    "语音播放失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    $"故事编辑器语音播放失败：{rowKey}");
+            }
+        }
+
+        private void StopStoryVoicePlayback()
+        {
+            _storyVoicePlayback.Stop();
+        }
+
         private async Task PlayCurrentStoryBgmFromUiAsync()
         {
             if (IsCurrentStoryFunction("BGMSTOP"))
@@ -56,15 +95,18 @@ namespace GalExcleTools
                 return;
             }
 
-            var requestId = ++_storyBgmPlaybackRequestId;
             try
             {
-                await PlayCurrentStoryBgmAsync(requestId);
+                await PlayCurrentStoryBgmAsync();
             }
             catch (Exception ex)
             {
-                ShowStoryStatus(InfoBarSeverity.Error, "BGM播放失败", ex.Message);
-                AppendLog(LogKind.Error, "故事编辑器 BGM 播放失败。", ex);
+                ShowStoryStatus(
+                    InfoBarSeverity.Error,
+                    "BGM播放失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "故事编辑器 BGM 播放失败。");
             }
         }
 
@@ -124,7 +166,7 @@ namespace GalExcleTools
             {
                 AddStoryTipWithEntrance(
                     StoryFunctionTipsPanel,
-                    CreateStoryTipBar(InfoBarSeverity.Success, $"触发函数：{functionName}", string.Empty));
+                    CreateFloatingTipBar(InfoBarSeverity.Success, $"触发函数：{functionName}", string.Empty));
             }
         }
 
@@ -135,53 +177,13 @@ namespace GalExcleTools
 
         private void ClearStoryTransientTips()
         {
-            foreach (var timer in _storyTransientTipTimers.Values)
-            {
-                timer.Stop();
-            }
-
-            _storyTransientTipTimers.Clear();
-            StoryFloatingTipsPanel.Children.Clear();
+            ClearFloatingTips(StoryFloatingTipsPanel);
             StoryTransientTipsPanel.Children.Clear();
-        }
-
-        private InfoBar CreateStoryTipBar(InfoBarSeverity severity, string title, string message)
-        {
-            return new InfoBar
-            {
-                Severity = severity == InfoBarSeverity.Error ? InfoBarSeverity.Error : InfoBarSeverity.Success,
-                Title = title,
-                Message = message,
-                IsOpen = true,
-                IsClosable = true,
-                RenderTransform = new TranslateTransform { Y = -18 },
-                Opacity = 0
-            };
         }
 
         private void AddStoryTipWithEntrance(Panel panel, InfoBar tip)
         {
-            panel.Children.Add(tip);
-            var steps = 0;
-            var timer = DispatcherQueue.CreateTimer();
-            timer.Interval = TimeSpan.FromMilliseconds(16);
-            timer.Tick += (_, _) =>
-            {
-                steps++;
-                var progress = Math.Min(1, steps / 12.0);
-                var eased = 1 - Math.Pow(1 - progress, 3);
-                tip.Opacity = eased;
-                if (tip.RenderTransform is TranslateTransform transform)
-                {
-                    transform.Y = -18 + 18 * eased;
-                }
-
-                if (progress >= 1)
-                {
-                    timer.Stop();
-                }
-            };
-            timer.Start();
+            AddFloatingTipWithEntrance(panel, tip);
         }
 
         private void RebuildStoryPersistentFunctionState(int rowIndex)
@@ -230,7 +232,7 @@ namespace GalExcleTools
             return mode;
         }
 
-        private async Task PlayCurrentStoryBgmAsync(int requestId)
+        private async Task PlayCurrentStoryBgmAsync()
         {
             if (_storyBgmPlaybackSuppressed || IsCurrentStoryFunction("BGMSTOP"))
             {
@@ -256,59 +258,43 @@ namespace GalExcleTools
             }
 
             var bgmPath = bgmPaths[index.Value];
-            if (!string.IsNullOrWhiteSpace(_storyBgmPath) &&
-                PathsEqual(_storyBgmPath, bgmPath) &&
-                _storyBgmPlayer.PlaybackSession.PlaybackState == MediaPlaybackState.Playing)
-            {
-                return;
-            }
-
-            _storyBgmPath = bgmPath;
-            var file = await StorageFile.GetFileFromPathAsync(bgmPath);
-            if (requestId != _storyBgmPlaybackRequestId)
-            {
-                return;
-            }
-
             if (_storyBgmPlaybackSuppressed || IsCurrentStoryFunction("BGMSTOP"))
             {
                 PauseStoryBgm();
                 return;
             }
 
-            _storyBgmPlayer.Source = MediaSource.CreateFromStorageFile(file);
-            _storyBgmPlayer.Play();
-            AppendLog(LogKind.Info, $"故事编辑器播放 BGM：索引 {rawIndex} -> {Path.GetFileName(bgmPath)}");
+            await _storyBgmPlayback.PlayAsync(bgmPath);
         }
 
         private void StopStoryBgm()
         {
-            _storyBgmPlayer.Pause();
-            _storyBgmPlayer.Source = null;
-            _storyBgmPath = null;
+            _storyBgmPlayback.Stop();
         }
 
         private void PauseStoryBgm()
         {
-            _storyBgmPlaybackRequestId++;
-            _storyBgmPlayer.Pause();
+            _storyBgmPlayback.Pause();
         }
 
         private async Task PlayCurrentStorySceneFromUiAsync()
         {
-            var requestId = ++_storyScenePlaybackRequestId;
             try
             {
-                await PlayCurrentStorySceneAsync(requestId);
+                await PlayCurrentStorySceneAsync();
             }
             catch (Exception ex)
             {
-                ShowStoryStatus(InfoBarSeverity.Error, "环境音播放失败", ex.Message);
-                AppendLog(LogKind.Error, "故事编辑器环境音播放失败。", ex);
+                ShowStoryStatus(
+                    InfoBarSeverity.Error,
+                    "环境音播放失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "故事编辑器环境音播放失败。");
             }
         }
 
-        private async Task PlayCurrentStorySceneAsync(int requestId)
+        private async Task PlayCurrentStorySceneAsync()
         {
             if (_currentStoryAssetLibrary is null || _storyRows.Count == 0)
             {
@@ -330,39 +316,20 @@ namespace GalExcleTools
             }
 
             var scenePath = scenePaths[index.Value];
-            if (!string.IsNullOrWhiteSpace(_storyScenePath) &&
-                PathsEqual(_storyScenePath, scenePath) &&
-                _storyScenePlayer.PlaybackSession.PlaybackState == MediaPlaybackState.Playing)
-            {
-                return;
-            }
-
-            _storyScenePath = scenePath;
-            var file = await StorageFile.GetFileFromPathAsync(scenePath);
-            if (requestId != _storyScenePlaybackRequestId)
-            {
-                return;
-            }
-
-            _storyScenePlayer.Source = MediaSource.CreateFromStorageFile(file);
-            _storyScenePlayer.Play();
-            AppendLog(LogKind.Info, $"故事编辑器播放环境音：索引 {rawIndex} -> {Path.GetFileName(scenePath)}");
+            await _storyScenePlayback.PlayAsync(scenePath);
         }
 
         private void StopStoryScene()
         {
-            _storyScenePlayer.Pause();
-            _storyScenePlayer.Source = null;
-            _storyScenePath = null;
+            _storyScenePlayback.Stop();
         }
 
         private void StopStoryEditorAudio()
         {
-            _storyBgmPlaybackRequestId++;
-            _storyScenePlaybackRequestId++;
             _storyBgmPlaybackSuppressed = false;
             StopStoryBgm();
             StopStoryScene();
+            StopStoryVoicePlayback();
         }
 
     }

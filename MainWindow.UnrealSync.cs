@@ -263,6 +263,7 @@ namespace GalExcleTools
             UnrealSyncSummaryText.Text = "正在比较工具箱源文件与虚幻项目内的 .uasset 时间戳。";
             try
             {
+                await PrepareStoryCsvForUnrealSyncAsync(validation.Context.Project);
                 var changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context));
                 ApplyUnrealSyncChangePlan(changePlan);
                 AppendUnrealSyncDiffDetails(changePlan);
@@ -310,9 +311,23 @@ namespace GalExcleTools
             RunUnrealSyncButton.IsEnabled = false;
             SetUnrealSyncProgress(true, "正在检测虚幻同步差异... 5%", false, 5);
             UnrealSyncSummaryText.Text = forceFullSync
-                ? "正在准备全量重新同步，将忽略本地缓存和 .uasset 时间戳。"
-                : "正在比较工具箱源文件与虚幻项目内的 .uasset 时间戳；文件名不变但内容重新导出时，也会因源文件写入时间更新而进入同步计划。";
-            var changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context, forceFullSync));
+                ? "正在准备全量重新同步，将忽略本地同步状态。"
+                : "正在计算工具箱源文件的 SHA-256，并与上次成功同步状态比较；只有内容真正变化时才会进入同步计划。";
+            UnrealSyncChangePlan changePlan;
+            try
+            {
+                await PrepareStoryCsvForUnrealSyncAsync(validation.Context.Project);
+                changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context, forceFullSync));
+            }
+            catch (Exception ex)
+            {
+                SetUnrealSyncProgress(false, string.Empty);
+                SetUnrealSyncStatus(InfoBarSeverity.Error, "准备剧情CSV失败", ex.Message);
+                UnrealSyncSummaryText.Text = $"准备剧情CSV失败：{ex.Message}";
+                AppendLog(LogKind.Error, "同步前生成剧情CSV失败。", ex);
+                RunUnrealSyncButton.IsEnabled = true;
+                return;
+            }
             ApplyUnrealSyncChangePlan(changePlan);
             if (!changePlan.HasChanges)
             {
@@ -324,7 +339,7 @@ namespace GalExcleTools
             }
 
             SetUnrealSyncProgress(true, "差异检测完成，等待确认备份... 10%", false, 10);
-            var runningUnrealChoice = await ShowRunningUnrealEditorDialogAsync();
+            var runningUnrealChoice = await ShowRunningUnrealEditorDialogAsync(validation.Context);
             if (runningUnrealChoice is null)
             {
                 SetUnrealSyncProgress(false, string.Empty);
@@ -335,7 +350,7 @@ namespace GalExcleTools
             if (runningUnrealChoice == true)
             {
                 SetUnrealSyncProgress(true, "正在尝试关闭已打开的 Unreal Editor... 12%", false, 12);
-                await Task.Run(CloseRunningUnrealEditors);
+                await Task.Run(() => CloseRunningUnrealEditors(validation.Context));
                 await Task.Delay(1200);
             }
 
@@ -355,7 +370,7 @@ namespace GalExcleTools
                 if (backupChoice == true)
                 {
                     SetUnrealSyncProgress(true, "正在备份虚幻项目... 20%", false, 20);
-                    backupPath = await Task.Run(() => CreateCleanUnrealProjectBackup(validation.Context, cancellationToken), cancellationToken);
+                    backupPath = await Task.Run(() => CreateUnrealSyncBackup(validation.Context, cancellationToken), cancellationToken);
                     SetUnrealSyncProgress(true, "虚幻项目备份完成... 30%", false, 30);
                     AppendLog(LogKind.User, $"虚幻项目备份完成：{backupPath}");
                 }
@@ -363,47 +378,38 @@ namespace GalExcleTools
                 var progress = new Progress<UnrealSyncProgressUpdate>(update =>
                     SetUnrealSyncProgress(true, $"{update.Message} {update.Percent:0}%", false, update.Percent));
                 var result = await Task.Run(() => RunUnrealSync(validation.Context, changePlan, progress, cancellationToken), cancellationToken);
+                var report = result.Report;
+                var reportSuccess = result.ExitCode == 0 &&
+                    report is { ProtocolVersion: 1, Completed: true, Success: true } &&
+                    report.ImportedCount == changePlan.ImportGroups.Sum(group => group.Files.Count) &&
+                    report.StoryTableCount == changePlan.StoryTables.Count &&
+                    report.AssetIndexTableCount == changePlan.AssetIndexTables.Count &&
+                    (!changePlan.VoiceMapsChanged || report.VoiceMapsUpdated) &&
+                    (!changePlan.LustrationChanged || report.LustrationUpdated) &&
+                    (!changePlan.PortraitsChanged || report.PortraitsUpdated);
                 SetUnrealSyncStatus(
-                    result.ExitCode == 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
-                    result.ExitCode == 0 ? "同步完成" : "同步命令已结束",
-                    $"退出码 {result.ExitCode}。脚本：{result.ScriptPath}");
+                    reportSuccess ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                    reportSuccess ? "同步完成" : "同步未完整完成",
+                    reportSuccess
+                        ? $"Unreal 已确认导入 {report!.ImportedCount} 项、更新 {report.StoryTableCount + report.AssetIndexTableCount} 张表{(report.VoiceMapsUpdated ? "，并刷新剧情语音映射" : string.Empty)}。"
+                        : report is null
+                            ? $"退出码 {result.ExitCode}，但没有收到结构化结果文件：{result.ResultPath}"
+                            : string.Join(" ", report.Errors.DefaultIfEmpty($"退出码 {result.ExitCode}，部分计划项没有完成。")));
                 var backupSummary = backupPath is null ? string.Empty : $"备份：{backupPath}\n";
                 UnrealSyncSummaryText.Text = result.Output.Length == 0
                     ? $"{backupSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}"
                     : $"{backupSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}\n{TrimLongText(result.Output, 900)}";
-                var lustrationConfirmed = !changePlan.LustrationChanged ||
-                    result.Output.Contains("GalExcleTools updated lustration data asset", StringComparison.OrdinalIgnoreCase);
-                var portraitsConfirmed = !changePlan.PortraitsChanged ||
-                    result.Output.Contains("GalExcleTools updated portrait data asset", StringComparison.OrdinalIgnoreCase);
-                var storyTableFailed =
-                    result.Output.Contains("GalExcleTools failed to update story data table", StringComparison.OrdinalIgnoreCase) ||
-                    result.Output.Contains("GalExcleTools could not create or load story data table", StringComparison.OrdinalIgnoreCase) ||
-                    result.Output.Contains("GalExcleTools story row struct missing", StringComparison.OrdinalIgnoreCase) ||
-                    result.Output.Contains("GalExcleTools failed to load story row struct", StringComparison.OrdinalIgnoreCase);
-                var assetIndexTableFailed =
-                    result.Output.Contains("GalExcleTools failed to update asset index data table", StringComparison.OrdinalIgnoreCase) ||
-                    result.Output.Contains("GalExcleTools could not create or load asset index data table", StringComparison.OrdinalIgnoreCase);
-                if (result.ExitCode == 0 && lustrationConfirmed && portraitsConfirmed && !assetIndexTableFailed)
+                if (reportSuccess)
                 {
                     _unrealSyncService.WriteState(validation.Context, changePlan);
                     SetUnrealSyncProgress(true, "同步完成 100%", false, 100);
                     CompleteGlobalProgress("虚幻同步完成", $"处理 {changePlan.TotalChangedItems} 项，退出码 {result.ExitCode}");
-                    if (storyTableFailed)
-                    {
-                        SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步完成，但剧情表未确认", "Unreal 日志提示 StoryStruct 或 DataTable 写入失败，请查看下方日志输出。");
-                    }
                 }
-                else if (result.ExitCode == 0 && assetIndexTableFailed)
+                else
                 {
-                    SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步结束，但素材索引表未确认", "Unreal 日志提示素材索引 DataTable 写入失败，请检查 FTexture2DTable / FWaveTable 结构体路径和表格资产。");
-                }
-                else if (result.ExitCode == 0 && changePlan.LustrationChanged)
-                {
-                    SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步结束，但立绘数据未确认", "Unreal 日志没有返回立绘数据资产写入确认。本次不会缓存为已同步，请关闭虚幻编辑器后再同步一次。");
-                }
-                else if (result.ExitCode == 0 && changePlan.PortraitsChanged)
-                {
-                    SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步结束，但小预览数据未确认", "Unreal 日志没有返回 DA_Portraits 写入确认。本次不会缓存为已同步，请关闭虚幻编辑器后再同步一次。");
+                    CompleteGlobalProgress("虚幻同步未完整完成", report is null
+                        ? "Unreal 未返回结构化结果，本次不会记录为已同步。"
+                        : string.Join("；", report.Errors.DefaultIfEmpty("部分计划项没有完成，本次不会记录为已同步。")));
                 }
 
                 AppendLog(result.ExitCode == 0 ? LogKind.User : LogKind.Warning, $"虚幻同步结束，退出码：{result.ExitCode}");
@@ -550,9 +556,31 @@ namespace GalExcleTools
         private void ApplyUnrealSyncChangePlan(UnrealSyncChangePlan changePlan)
         {
             UnrealSyncPlanItemsControl.Items.Clear();
-            foreach (var item in changePlan.PlanItems)
+            AddUnrealSyncPlanHeading("同步方式");
+            AddUnrealSyncPlanText(changePlan.IsFullSync
+                ? "全部重新同步：忽略同步记录，重新处理全部内容。"
+                : "仅同步本次检测到的变化，未变化的内容不会重复处理。");
+
+            AddUnrealSyncPlanHeading("本次同步", topMargin: 10);
+            if (changePlan.ChangeItems.Count == 0)
             {
-                AddUnrealSyncPlanText($"• {item}");
+                AddUnrealSyncPlanText("没有需要处理的内容。");
+            }
+            else
+            {
+                foreach (var item in changePlan.ChangeItems)
+                {
+                    AddUnrealSyncPlanText($"• {item}");
+                }
+            }
+
+            if (changePlan.UnchangedItems.Count > 0)
+            {
+                AddUnrealSyncPlanHeading("无需处理", topMargin: 10);
+                foreach (var item in changePlan.UnchangedItems)
+                {
+                    AddUnrealSyncPlanText($"• {item}");
+                }
             }
 
             UnrealSyncSummaryText.Text = changePlan.Summary;
@@ -567,7 +595,9 @@ namespace GalExcleTools
 
             foreach (var group in changePlan.ImportGroups)
             {
-                AddUnrealSyncPlanText($"[{group.Destination}] 待导入文件", topMargin: 8);
+                var displayName = GetUnrealSyncDestinationDisplayName(group.Destination);
+                AddUnrealSyncPlanHeading($"新增或更新：{displayName}（{group.Files.Count} 个）", topMargin: 12);
+                AddUnrealSyncPlanText($"目标位置：{group.Destination}");
                 foreach (var path in group.Files)
                 {
                     AddUnrealSyncPlanText($"  - {Path.GetFileName(path)}");
@@ -576,7 +606,9 @@ namespace GalExcleTools
 
             foreach (var group in changePlan.DeleteGroups)
             {
-                AddUnrealSyncPlanText($"[{group.Destination}] 待删除多余资产", topMargin: 8);
+                var displayName = GetUnrealSyncDestinationDisplayName(group.Destination);
+                AddUnrealSyncPlanHeading($"清理多余素材：{displayName}（{group.Assets.Count} 个）", topMargin: 12);
+                AddUnrealSyncPlanText($"虚幻位置：{group.Destination}");
                 foreach (var assetPath in group.Assets)
                 {
                     AddUnrealSyncPlanText($"  - {assetPath}");
@@ -585,7 +617,8 @@ namespace GalExcleTools
 
             if (changePlan.StoryTables.Count > 0)
             {
-                AddUnrealSyncPlanText("[ExcelTexts] 待更新剧情表", topMargin: 8);
+                AddUnrealSyncPlanHeading($"更新剧情表（{changePlan.StoryTables.Count} 张）", topMargin: 12);
+                AddUnrealSyncPlanText($"目标位置：{GetUnrealAssetFolderPath(changePlan.StoryTables[0].TableAsset)}");
                 foreach (var entry in changePlan.StoryTables)
                 {
                     AddUnrealSyncPlanText($"  - {Path.GetFileName(entry.CsvPath)} -> {entry.TableAsset}");
@@ -594,7 +627,8 @@ namespace GalExcleTools
 
             if (changePlan.AssetIndexTables.Count > 0)
             {
-                AddUnrealSyncPlanText("[ExcelTexts] 待更新素材索引表", topMargin: 8);
+                AddUnrealSyncPlanHeading($"更新素材索引表（{changePlan.AssetIndexTables.Count} 张）", topMargin: 12);
+                AddUnrealSyncPlanText($"目标位置：{GetUnrealAssetFolderPath(changePlan.AssetIndexTables[0].TableAsset)}");
                 foreach (var entry in changePlan.AssetIndexTables)
                 {
                     AddUnrealSyncPlanText($"  - {Path.GetFileName(entry.CsvPath)} -> {entry.TableAsset}");
@@ -603,7 +637,7 @@ namespace GalExcleTools
 
             if (changePlan.LustrationChanged)
             {
-                AddUnrealSyncPlanText("[Lustration] 待更新立绘数据资产", topMargin: 8);
+                AddUnrealSyncPlanHeading($"更新立绘数据（{changePlan.LustrationRows.Count} 个角色）", topMargin: 12);
                 foreach (var row in changePlan.LustrationRows)
                 {
                     AddUnrealSyncPlanText($"  - {row.Key} / {row.Name}");
@@ -612,12 +646,75 @@ namespace GalExcleTools
 
             if (changePlan.PortraitsChanged)
             {
-                AddUnrealSyncPlanText("[Lustration] 待更新小预览数据资产", topMargin: 8);
+                AddUnrealSyncPlanHeading($"更新小预览数据（{changePlan.PortraitRows.Count} 个角色）", topMargin: 12);
                 foreach (var row in changePlan.PortraitRows)
                 {
                     AddUnrealSyncPlanText($"  - {row.Key} / {row.Name}");
                 }
             }
+
+            if (changePlan.VoiceMapsChanged)
+            {
+                AddUnrealSyncPlanHeading($"更新剧情语音映射（{changePlan.VoiceMaps.Sum(entry => entry.AssignedCount)} 条）", topMargin: 12);
+                AddUnrealSyncPlanText($"目标蓝图：{UnrealSyncService.MusicPlayerBlueprintAssetPath}");
+                foreach (var entry in changePlan.VoiceMaps)
+                {
+                    AddUnrealSyncPlanText($"  - {entry.TableAsset}：{entry.AssignedCount} 条语音 / {entry.Waves.Count} 个索引槽位");
+                }
+            }
+        }
+
+        private static string GetUnrealSyncDestinationDisplayName(string destination)
+        {
+            var normalized = destination.Replace('\\', '/').TrimEnd('/');
+            if (normalized.EndsWith("/BackGround", StringComparison.OrdinalIgnoreCase))
+            {
+                return "背景图";
+            }
+            if (normalized.EndsWith("/BGM", StringComparison.OrdinalIgnoreCase))
+            {
+                return "BGM";
+            }
+            if (normalized.EndsWith("/Scene_Effect", StringComparison.OrdinalIgnoreCase))
+            {
+                return "环境音与特殊音效";
+            }
+
+            var voiceMarker = "/Voice/";
+            var voiceIndex = normalized.IndexOf(voiceMarker, StringComparison.OrdinalIgnoreCase);
+            if (voiceIndex >= 0)
+            {
+                return $"章节语音：{normalized[(voiceIndex + voiceMarker.Length)..]}";
+            }
+            if (normalized.EndsWith("/Voice", StringComparison.OrdinalIgnoreCase))
+            {
+                return "语音";
+            }
+            if (normalized.Contains("/Lustration", StringComparison.OrdinalIgnoreCase))
+            {
+                return "立绘素材";
+            }
+
+            var separatorIndex = normalized.LastIndexOf('/');
+            return separatorIndex >= 0 ? normalized[(separatorIndex + 1)..] : normalized;
+        }
+
+        private static string GetUnrealAssetFolderPath(string assetPath)
+        {
+            var separatorIndex = assetPath.LastIndexOf('/');
+            return separatorIndex > 0 ? assetPath[..separatorIndex] : assetPath;
+        }
+
+        private void AddUnrealSyncPlanHeading(string text, double topMargin = 0)
+        {
+            UnrealSyncPlanItemsControl.Items.Add(new TextBlock
+            {
+                Text = text,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, topMargin, 0, 5),
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = Application.Current.Resources["TextFillColorPrimaryBrush"] as Brush
+            });
         }
 
         private void AddUnrealSyncPlanText(string text, double topMargin = 0)

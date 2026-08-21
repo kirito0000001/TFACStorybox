@@ -11,6 +11,7 @@ $utf8Strict = [System.Text.UTF8Encoding]::new($false, $true)
 $filesToCheck = @(
     "MainWindow.xaml",
     "MainWindow.xaml.cs",
+    "Services/AppVersionService.cs",
     "README.md",
     "Docs/CodexInternalNotes.md"
 )
@@ -81,6 +82,192 @@ foreach ($entry in @(
         }
     }
 }
+
+function Require-SourcePattern {
+    param(
+        [string]$Path,
+        [string]$Pattern,
+        [string]$Description,
+        [switch]$NotMatch
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        $issues.Add("$Description missing source file: $Path")
+        return
+    }
+
+    $source = $utf8Strict.GetString([System.IO.File]::ReadAllBytes((Resolve-Path $Path)))
+    if ($NotMatch ? ($source -match $Pattern) : ($source -notmatch $Pattern)) {
+        $issues.Add("$Description")
+    }
+}
+
+function Require-MethodPattern {
+    param(
+        [string]$Path,
+        [string]$MethodName,
+        [string]$Pattern,
+        [string]$Description,
+        [switch]$NotMatch
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        $issues.Add("$Description missing source file: $Path")
+        return
+    }
+
+    $source = $utf8Strict.GetString([System.IO.File]::ReadAllBytes((Resolve-Path $Path)))
+    $methodPattern = '(?ms)^\s*(?:public|private|internal|protected)[^\r\n]*\b' + [regex]::Escape($MethodName) + '\s*\(.*?(?=^\s*(?:public|private|internal|protected)\s+|\z)'
+    $methodMatch = [regex]::Match($source, $methodPattern)
+    if (-not $methodMatch.Success -or ($NotMatch ? ($methodMatch.Value -match $Pattern) : ($methodMatch.Value -notmatch $Pattern))) {
+        $issues.Add("$Description")
+    }
+}
+
+Require-SourcePattern "MainWindow.xaml" 'x:Name="FloatingTipsPanel"' "MainWindow.xaml is missing the global FloatingTipsPanel."
+Require-SourcePattern "MainWindow.xaml" 'x:Name="FloatingTipsPanel"[\s\S]*?MaxWidth="520"[\s\S]*?Margin="0,18,28,0"[\s\S]*?Canvas\.ZIndex="330"[\s\S]*?Spacing="6"' "FloatingTipsPanel does not match the Tips layout specification."
+Require-SourcePattern "MainWindow.Tips.cs" 'InfoBarSeverity\.Informational\s*=>\s*InfoBarSeverity\.Success' "Floating Tips must normalize Informational to Success."
+Require-SourcePattern "MainWindow.Tips.cs" 'InfoBarSeverity\.Error\s*=>\s*TimeSpan\.FromSeconds\(5\)' "Error Tips must remain visible for 5 seconds."
+Require-SourcePattern "MainWindow.Tips.cs" 'InfoBarSeverity\.Warning\s*=>\s*TimeSpan\.FromSeconds\(3\.2\)' "Warning Tips must remain visible for 3.2 seconds."
+Require-SourcePattern "MainWindow.Tips.cs" 'TimeSpan\.FromSeconds\(2\.6\)' "Success Tips must remain visible for 2.6 seconds."
+Require-SourcePattern "MainWindow.Tips.cs" 'MaxFloatingTipCount\s*=\s*4' "Floating Tips must be limited to four visible items."
+Require-SourcePattern "MainWindow.Tips.cs" 'CopyErrorLogToClipboard' "Error Tips must copy their corresponding Log text to the clipboard."
+Require-SourcePattern "MainWindow.AssetLibrary.Editing.cs" '已替换背景图素材[\s\S]*?ShowFloatingTip' "Replacing a background image must show a result Tip."
+Require-SourcePattern "MainWindow.AssetLibrary.Editing.cs" 'logMessage\s*=\s*\$"已替换\{displayName\}素材：\{Path\.GetFileName\(layerPath\)\}[\s\S]*?ShowFloatingTip' "Replacing a character layer must show a result Tip."
+Require-SourcePattern "MainWindow.AssetLibrary.Editing.cs" 'logMessage\s*=\s*\$"已替换\{displayName\}素材：\{Path\.GetFileName\(musicPath\)\}[\s\S]*?ShowFloatingTip' "Replacing an audio asset must show a result Tip."
+Require-MethodPattern "MainWindow.AssetLibrary.DragDrop.cs" "AudioDropZone_Drop" 'ShowFloatingTip' "Dropping audio assets must show a result Tip."
+Require-MethodPattern "MainWindow.Workbench.Import.cs" "ProjectsGridView_Drop" 'ShowFloatingTip' "Dropping project archives must show a result Tip."
+Require-MethodPattern "MainWindow.Workbench.Import.cs" "AssetLibrariesGridView_Drop" 'ShowFloatingTip' "Dropping asset-library archives must show a result Tip."
+Require-MethodPattern "MainWindow.Workbench.TextTool.cs" "CreateProjectTextVoiceTableRow" 'ShowFloatingTip' "Selecting or replacing a voice file must show a result Tip."
+Require-MethodPattern "MainWindow.Workbench.TextTool.cs" "CreateProjectTextVoiceTableRow" 'CreateProjectVoicePreviewButton' "Voice rows must include the preview column button."
+Require-SourcePattern "MainWindow.Workbench.TextTool.cs" 'PlayProjectVoicePreviewAsync' "The text voice tool is missing voice preview playback."
+Require-SourcePattern "MainWindow.Workbench.TextTool.cs" 'new GridLength\(72\)' "The voice preview column must use the fixed narrow width."
+Require-SourcePattern "MainWindow.xaml" 'x:Name="ProjectTextToolVoiceFilterButton"' "The text voice tool is missing its configured-voice filter button."
+Require-MethodPattern "MainWindow.Workbench.TextTool.cs" "ProjectTextToolVoiceFilterButton_Click" 'ShowOnlyConfiguredVoices' "The voice filter button must toggle configured-only rows."
+Require-MethodPattern "MainWindow.Workbench.TextTool.cs" "RefreshProjectTextToolPage" 'ShowOnlyConfiguredVoices' "The text voice table must apply the configured-voice filter."
+Require-MethodPattern "Services/ProjectVoiceAssetService.cs" "WriteVoice" 'int\.TryParse\(row\.RowName[\s\S]*?BuildTargetPath\(folderPath, rowNumber' "Voice file numbering must come from the text row index."
+Require-MethodPattern "MainWindow.Workbench.TextTool.cs" "RefreshProjectTextToolPage" 'CreateProjectTextVoiceTableRow\(row, value, chapterRows\.Count\)' "Voice file numbering width must use the complete chapter row set."
+Require-MethodPattern "Services/ProjectTextDataService.cs" "ReadVoiceMap" 'ResolveVoiceMapPaths' "Voice map reads must resolve project-relative paths."
+Require-MethodPattern "Services/ProjectTextDataService.cs" "WriteVoiceMap" 'CreatePortableVoiceMap' "Voice map writes must store portable project-relative paths."
+Require-SourcePattern "Services/ProjectTextDataService.cs" 'Path\.GetRelativePath\(project\.Path' "Portable voice maps must be relative to the project directory."
+Require-SourcePattern "MainWindow.xaml.cs" '_storyVoicePlayback\s*=\s*new\(looping:\s*false\)' "The story editor must own a dedicated voice playback service."
+Require-MethodPattern "MainWindow.Story.cs" "LoadStoryRowIntoUi" 'PlayCurrentStoryVoiceFromUiAsync' "Loading a story row must trigger its configured voice."
+Require-MethodPattern "MainWindow.Story.Media.cs" "PlayCurrentStoryVoiceFromUiAsync" 'StopStoryVoicePlayback\(\)[\s\S]*?_storyVoicePlayback\.PlayAsync' "A new story voice request must stop the previous voice before loading the next file."
+Require-MethodPattern "Services/StoryAudioPlaybackService.cs" "PlayAsync" 'requestId\s*=\s*\+\+_requestId[\s\S]*?requestId\s*!=\s*_requestId' "Story audio playback must reject stale asynchronous requests."
+Require-MethodPattern "MainWindow.Story.Media.cs" "StopStoryEditorAudio" 'StopStoryVoicePlayback' "Closing the story editor must stop story voice playback."
+Require-MethodPattern "Services/StoryAssetFieldService.cs" "ReplaceForwardContiguousIndex" 'fieldName is not \("BGindex" or "BGM" or "Scene"\)[\s\S]*?for \(var index = startIndex; index < rows\.Count; index\+\+\)[\s\S]*?break;' "Forward asset propagation must be limited to basic assets and stop at the first different value."
+Require-MethodPattern "MainWindow.Story.Functions.cs" "ChooseStoryAssetIndexAsync" 'CaptureStoryUndoState[\s\S]*?ReplaceForwardContiguousIndex[\s\S]*?changedCount' "Changing a basic story asset must create one undo state and update the forward contiguous range."
+Require-SourcePattern "Models/UnrealSyncModels.cs" 'bool IsFullSync[\s\S]*?List<string> ChangeItems[\s\S]*?List<string> UnchangedItems' "Unreal sync preview copy must separate mode, changes, and unchanged items."
+Require-SourcePattern "Services/UnrealSyncService.cs" '本次同步将处理' "Unreal sync summary must clearly state what will be processed."
+Require-SourcePattern "Services/UnrealSyncService.cs" '新增或更新素材[\s\S]*?清理虚幻中的多余素材[\s\S]*?更新剧情表[\s\S]*?更新素材索引表' "Unreal sync summary must use clear action-oriented copy."
+Require-MethodPattern "MainWindow.UnrealSync.cs" "ApplyUnrealSyncChangePlan" '同步方式[\s\S]*?本次同步[\s\S]*?无需处理' "Unreal sync preview must render readable information groups."
+Require-MethodPattern "MainWindow.UnrealSync.cs" "AppendUnrealSyncDiffDetails" 'GetUnrealSyncDestinationDisplayName[\s\S]*?目标位置：' "Unreal sync details must show friendly asset names before technical paths."
+Require-SourcePattern "Models/UnrealSyncModels.cs" 'Dictionary<string, string> SourceHashes' "Unreal sync state must persist source SHA-256 hashes."
+Require-SourcePattern "Models/UnrealSyncModels.cs" 'UnrealSyncExecutionReport[\s\S]*?Completed[\s\S]*?Success[\s\S]*?Errors[\s\S]*?Warnings' "Unreal sync must expose a structured execution report."
+Require-MethodPattern "Services/UnrealSyncService.cs" "WriteManifest" 'ProtocolVersion[\s\S]*?ProgressPath[\s\S]*?ResultPath' "Unreal sync manifest must include structured progress and result paths."
+Require-MethodPattern "Services/UnrealSyncService.cs" "WritePythonScript" 'atomic_write_json[\s\S]*?os\.replace[\s\S]*?write_progress[\s\S]*?write_result' "Unreal Python must atomically report real progress and its structured result."
+Require-MethodPattern "Services/UnrealSyncService.cs" "WritePythonScript" 'except PermissionError[\s\S]*?time\.sleep' "Unreal Python atomic JSON replacement must retry transient Windows file locks."
+Require-MethodPattern "Services/UnrealSyncService.cs" "WritePythonScript" 'def save_loaded_asset_with_retry[\s\S]*?save_loaded_asset[\s\S]*?time\.sleep[\s\S]*?add_error' "Unreal asset saves must retry and report final failures."
+Require-MethodPattern "Services/UnrealSyncService.cs" "WritePythonScript" 'if save_loaded_asset_with_retry\(data_table, table_asset_path\):[\s\S]*?story_table_count \+= 1' "Story tables must only be confirmed after the package is saved."
+Require-SourcePattern "Models/UnrealSyncModels.cs" 'int StateVersion' "Unreal sync state must include a migration version."
+Require-MethodPattern "Services/UnrealSyncService.cs" "BuildChangePlan" 'requiresVerifiedTableSync[\s\S]*?storyTables[\s\S]*?assetIndexTablesChanged' "Older sync state must force a verified table refresh."
+Require-MethodPattern "Services/UnrealSyncService.cs" "Run" 'ReadProgressUpdate[\s\S]*?ReadExecutionReport' "Unreal sync runner must consume structured progress and result files."
+Require-MethodPattern "Services/UnrealSyncService.cs" "ReadProgressUpdate" 'ReadSharedText' "Unreal progress polling must use replace-safe shared file reads."
+Require-MethodPattern "Services/UnrealSyncService.cs" "ReadSharedText" 'FileShare\.ReadWrite\s*\|\s*FileShare\.Delete' "Structured Unreal sync JSON reads must allow atomic replacement on Windows."
+Require-MethodPattern "Services/UnrealSyncService.cs" "Run" 'elapsed\.TotalSeconds' "Unreal sync runner still uses elapsed time to estimate progress." -NotMatch
+Require-MethodPattern "Services/UnrealSyncService.cs" "BuildChangePlan" 'ComputeSourceHashes[\s\S]*?SourceHashes' "Unreal sync planning must compare source SHA-256 hashes."
+Require-MethodPattern "Services/UnrealSyncService.cs" "BuildAssetObjectPath" 'NormalizeImportedAssetName' "Imported Unreal object paths must use the same sanitized asset name as Unreal."
+Require-MethodPattern "Services/UnrealSyncService.cs" "BuildTextureReference" 'NormalizeImportedAssetName' "Unreal texture references must use sanitized imported asset names."
+Require-MethodPattern "Services/UnrealSyncService.cs" "BuildSoundWaveReference" 'NormalizeImportedAssetName' "Unreal sound references must use sanitized imported asset names."
+Require-MethodPattern "Services/UnrealSyncService.cs" "NormalizeImportedAssetName" 'char\.IsWhiteSpace[\s\S]*?InvalidUnrealObjectNameCharacters' "Imported asset-name normalization must cover Unreal invalid object-name characters."
+Require-MethodPattern "Services/UnrealSyncService.cs" "SourceFileNeedsImport" 'BuildLegacyAssetObjectPath[\s\S]*?SourceFileNeedsAnyAssetUpdate' "Source hash checks must recognize state keys written before asset-name normalization."
+Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncButton_Click" 'result\.Report[\s\S]*?reportSuccess[\s\S]*?Success:\s*true' "Unreal sync completion must use the structured report."
+Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncButton_Click" 'GalExcleTools updated|GalExcleTools failed' "Unreal sync UI still parses fixed English log messages." -NotMatch
+Require-MethodPattern "MainWindow.UnrealSync.Process.cs" "GetRunningUnrealEditorProcesses" 'UnrealSyncContext[\s\S]*?Win32_Process[\s\S]*?CommandLine' "Unreal process detection must be limited to the bound .uproject."
+Require-MethodPattern "MainWindow.UnrealSync.Process.cs" "CreateUnrealSyncBackup" 'Config[\s\S]*?TargetContentFolderPath[\s\S]*?Take\(5\)' "Unreal sync backup must cover the affected scope and retain only five archives."
+Require-SourcePattern "MainWindow.xaml" 'x:Name="AppTitleVersionText"' "The title bar version must be populated from the shared version service."
+Require-SourcePattern "MainWindow.xaml" 'x:Name="SettingsAppVersionText"' "The settings version must be populated from the shared version service."
+Require-SourcePattern "MainWindow.xaml.cs" 'AppVersionService\.GetDisplayVersion\(\)[\s\S]*?AppTitleVersionText\.Text[\s\S]*?SettingsAppVersionText\.Text' "The title bar and settings page must use the same resolved app version."
+Require-SourcePattern "Services/AppVersionService.cs" 'OverrideFileName\s*=\s*"ax-app-version\.json"' "The shared version service must expose the Ax-managed override file."
+Require-SourcePattern "Services/AppVersionService.cs" 'Assembly\.GetEntryAssembly[\s\S]*?AssemblyInformationalVersionAttribute' "The shared version service must fall back to the built assembly version."
+Require-SourcePattern "GalExcleTools.csproj" 'ax-app-version\.json[\s\S]*?CopyToOutputDirectory[\s\S]*?CopyToPublishDirectory' "The Ax-managed version file must be copied to build and publish output."
+Require-SourcePattern "Scripts/Package-App.ps1" 'Get-AppVersion[\s\S]*?ProjectPath[\s\S]*?<Version>' "Packaging must resolve its default version from the project instead of XAML display text."
+Require-SourcePattern "Models/UnrealSyncModels.cs" 'UnrealVoiceMapSyncEntry[\s\S]*?TableAsset[\s\S]*?List<string\?> Waves[\s\S]*?AssignedCount' "Unreal sync must model sparse voice arrays per story table."
+Require-SourcePattern "Models/UnrealSyncModels.cs" 'bool VoiceMapsChanged[\s\S]*?List<UnrealVoiceMapSyncEntry> VoiceMaps[\s\S]*?string VoiceMapsHash' "Unreal sync plans must track voice-map changes and their hash."
+Require-MethodPattern "Services/UnrealSyncService.cs" "BuildVoiceMapSyncEntries" 'BuildExportRowKey[\s\S]*?BuildStableTextRowId[\s\S]*?GetProjectVoiceDestinationPath[\s\S]*?BuildAssetObjectPath[\s\S]*?BuildSparseVoiceWaveSlots' "Voice-map plans must resolve stable rows against their exported story table slots."
+Require-MethodPattern "Services/UnrealSyncService.cs" "BuildSparseVoiceWaveSlots" 'int\.TryParse[\s\S]*?maxRowNumber \+ 1[\s\S]*?waves\[rowNumber\]\s*=\s*pair\.Value' "Sparse voice arrays must retain slot zero, the maximum story index, and all empty gaps."
+Require-MethodPattern "Services/UnrealSyncService.cs" "BuildChangePlan" 'VoiceMapsHash[\s\S]*?voiceMapsChanged[\s\S]*?更新剧情语音映射' "Voice-map changes must participate in Unreal diff planning."
+Require-MethodPattern "Services/UnrealSyncService.cs" "WriteManifest" 'VoiceMap[\s\S]*?BlueprintAsset[\s\S]*?MapProperty[\s\S]*?ShouldUpdate[\s\S]*?Entries' "The Unreal manifest must carry the MusicPlayer voice-map update."
+Require-MethodPattern "Services/UnrealSyncService.cs" "WritePythonScript" 'load_blueprint_class[\s\S]*?get_default_object[\s\S]*?unreal\.TableVoices[\s\S]*?save_loaded_asset_with_retry[\s\S]*?verify_voice_map' "Unreal Python must update, verify, and save the MusicPlayer class defaults."
+Require-SourcePattern "Models/UnrealSyncModels.cs" 'bool VoiceMapsUpdated' "Structured Unreal results must report whether MusicPlayer voice maps were saved."
+Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncButton_Click" '!changePlan\.VoiceMapsChanged \|\| report\.VoiceMapsUpdated' "The UI must not record a voice-map sync as successful unless Unreal confirms it."
+Require-MethodPattern "Services/UnrealSyncService.cs" "WriteState" 'VoiceMapsHash\s*=\s*changePlan\.VoiceMapsHash' "Successful sync state must persist the voice-map hash."
+Require-MethodPattern "MainWindow.UnrealSync.Process.cs" "CreateUnrealSyncBackup" 'UnrealObjectPathToContentFilePath[\s\S]*?MusicPlayerBlueprintAssetPath[\s\S]*?filesToBackup\.Add' "Unreal sync backups must include the MusicPlayer blueprint modified by voice-map synchronization."
+Require-SourcePattern "Models/StoryModels.cs" 'StoryAssetChoice\(int Index, string Name, string\? PreviewPath = null\)' "Story asset choices must support an optional image preview path."
+Require-MethodPattern "MainWindow.Story.Assets.cs" "GetStoryBackgroundChoices" 'new StoryAssetChoice\(index, Path\.GetFileNameWithoutExtension\(path\), path\)' "Story background choices must retain their source image path for hover previews."
+Require-MethodPattern "Services/StoryDialogService.cs" "SelectAssetChoiceAsync" 'CreateLazyImagePreviewToolTip\(choice\.PreviewPath' "Story asset selection must attach lazy image previews when a preview path is available."
+Require-MethodPattern "Views/StoryDialogContentFactory.cs" "CreateLazyImagePreviewToolTip" 'toolTip\.Opened[\s\S]*?LoadPreviewImageAsync[\s\S]*?toolTip\.Closed[\s\S]*?image\.Source\s*=\s*null' "Story image preview tooltips must load on hover and release the bitmap after closing."
+Require-MethodPattern "Services/StoryEditorService.cs" "InsertAfterCurrent" 'InsertRelativeToCurrent\([\s\S]*?insertAfter:\s*true' "Right insertion must insert after the current story row."
+Require-MethodPattern "Services/StoryEditorService.cs" "InsertRelativeToCurrent" 'insertIndex\s*=\s*currentRowIndex\s*\+\s*\(insertAfter\s*\?\s*1\s*:\s*0\)[\s\S]*?rows\.Insert\(insertIndex, insertedRow\)[\s\S]*?StoryRowsEditResult\(insertIndex' "Story row insertion must return and select the actual left or right insertion index."
+Require-SourcePattern "ViewModels/StoryEditorViewModel.cs" 'InsertAfterRowCommand[\s\S]*?!IsDebugModeEnabled' "The story editor must expose a debug-safe right-insert command."
+Require-SourcePattern "MainWindow.xaml" 'Content="左插入"[\s\S]*?Command="\{Binding InsertRowCommand\}"[\s\S]*?Content="右插入"[\s\S]*?Command="\{Binding InsertAfterRowCommand\}"[\s\S]*?Content="删除此句"' "Story row controls must provide left insert, right insert, and delete actions in order."
+Require-SourcePattern "MainWindow.xaml" 'x:Name="StoryEditorPage"[\s\S]*?PreviewKeyDown="StoryEditorPage_PreviewKeyDown"' "The story editor must intercept Ctrl+Z before focused input controls consume it."
+Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryEditorPage_PreviewKeyDown" 'IsControlKeyDown\(\)[\s\S]*?VirtualKey\.Z[\s\S]*?UndoStoryEditorOperation\(\)[\s\S]*?e\.Handled\s*=\s*true' "The story editor preview key handler must route Ctrl+Z to the unified undo stack."
+Require-SourcePattern "Models/UpdateModels.cs" 'UpdateSource[\s\S]*?Gitee[\s\S]*?GitHub[\s\S]*?UpdateManifest[\s\S]*?sha256[\s\S]*?UpdatePackageManifest' "The toolbox update models must describe Gitee/GitHub sources, hashes, and package identity."
+Require-SourcePattern "Services/UpdateService.cs" 'GiteeReleaseApiUrl\s*=\s*"https://gitee\.com/api/v5/repos/xiaojie578/TFACStorybox/releases"' "The update service must target the TFACStorybox Gitee releases API."
+Require-MethodPattern "Services/UpdateService.cs" "CheckAsync" 'UpdateSource\.Gitee[\s\S]*?UpdateSource\.GitHub' "Update checks must try Gitee before the GitHub fallback."
+Require-MethodPattern "Services/UpdateService.cs" "DownloadAndVerifyAsync" 'ValidateDownloadedFileAsync' "Downloaded updates must pass the shared validation pipeline before installation."
+Require-MethodPattern "Services/UpdateService.cs" "ValidateDownloadedFileAsync" 'SHA256[\s\S]*?ValidatePackage' "Downloaded updates must pass SHA-256 and package identity validation."
+Require-MethodPattern "Services/UpdateService.cs" "LaunchUpdaterAsync" '热更新覆盖\.ps1[\s\S]*?Environment\.ProcessId' "Installing an update must hand off to an external updater that waits for the current process."
+Require-SourcePattern "MainWindow.Update.cs" '#if DEBUG[\s\S]*?CheckUpdateOnStartupAsync[\s\S]*?return;' "Debug builds must skip automatic startup updates."
+Require-MethodPattern "MainWindow.Update.cs" "PromptAndInstallUpdateAsync" '#if DEBUG[\s\S]*?开发版[\s\S]*?return;' "Debug builds must never overwrite their development output through the in-app updater."
+Require-SourcePattern "MainWindow.xaml" 'Header="应用更新"[\s\S]*?自动检查更新[\s\S]*?更新通道[\s\S]*?检查更新[\s\S]*?测试连接' "The settings page must expose update controls and status."
+Require-SourcePattern "Scripts/Package-App.ps1" 'update-package\.json' "Packaging must embed an update-package identity manifest."
+Require-SourcePattern "Scripts/Package-App.ps1" 'toolbox-update\.json' "Packaging must generate the remote update manifest."
+Require-SourcePattern "Scripts/Package-App.ps1" 'Get-FileHash[\s\S]*?SHA256' "Packaging must generate a SHA-256 for the update ZIP."
+Require-SourcePattern "Scripts/Publish-GiteeRelease.ps1" 'GITEE_TOKEN[\s\S]*?toolbox-update\.json[\s\S]*?attach_files' "Gitee publishing must use an environment token and upload the manifest plus package assets."
+Require-SourcePattern "Models/StoryModels.cs" 'class StoryRow[\s\S]*?StableId[\s\S]*?Guid\.NewGuid[\s\S]*?clone\.StableId\s*=\s*StableId' "Story rows must own a stable identity that survives cloning."
+Require-MethodPattern "Services/StoryEditorService.cs" "MoveNext" 'new StoryRowsEditResult\(Math\.Min\(currentRowIndex \+ 1, rows\.Count - 1\), false' "Next-row navigation must never create story data."
+Require-MethodPattern "Services/StoryEditorService.cs" "InsertRelativeToCurrent" 'insertedRow\.StableId\s*=\s*StoryRow\.CreateStableId\(\)' "Inserted story rows must receive a new stable identity."
+Require-MethodPattern "Services/StoryEditorService.cs" "NormalizeContiguousSections" 'nextSection[\s\S]*?previousRawSection[\s\S]*?ApplySectionsInRowOrder' "Story sections must be normalized by ordered boundaries without regrouping rows."
+Require-MethodPattern "Services/StoryEditorService.cs" "SplitSectionAtCurrent" 'CanSplitSectionAtCurrent[\s\S]*?sections\[index\]\s*=\s*sections\[index\]\s*\+\s*1' "Creating a section must split the current ordered section instead of assigning an arbitrary group."
+Require-SourcePattern "Models/StoryModels.cs" 'ProjectTextRow\([\s\S]*?string Id[\s\S]*?string StableRowId' "Project text rows must use stable row identifiers."
+Require-MethodPattern "Services/StoryCsvExporter.cs" "ExportTransactionally" 'story-csv-export-transaction[\s\S]*?staged[\s\S]*?backup[\s\S]*?commit\.started' "Story CSV export must use a recoverable transaction."
+Require-MethodPattern "MainWindow.Story.Preview.cs" "RefreshStoryPreviewAsync" 'CancellationTokenSource[\s\S]*?ThrowIfCancellationRequested' "Story preview refreshes must cancel stale row requests."
+Require-MethodPattern "MainWindow.Story.Preview.cs" "RefreshStoryPreviewAsync" 'PersistCurrentStoryRowsToFiles' "Rendering a story preview must never persist or repair story data." -NotMatch
+Require-MethodPattern "MainWindow.Workbench.cs" "GetCachedStoryPreviewImageAsync" 'MaxStoryPreviewImageCacheCount[\s\S]*?_storyPreviewImageCache\.Remove' "Story preview image caching must have a hard capacity limit."
+Require-MethodPattern "MainWindow.Story.cs" "UpdateStoryDebugModeUi" 'StorySpeakerTextBox\.IsReadOnly[\s\S]*?StoryTextTextBox\.IsReadOnly' "Story debug mode must make text editing read-only."
+Require-SourcePattern "ViewModels/StoryEditorViewModel.cs" 'CommandExecutionFailed[\s\S]*?ExecutionFailed\s*\+=' "Story async command failures must be surfaced to the window."
+Require-SourcePattern "ViewModels/StoryEditorViewModel.cs" 'DeleteRowCommand\s*=.*!IsDebugModeEnabled[\s\S]*?AddSectionCommand\s*=.*!IsDebugModeEnabled[\s\S]*?ChangeBackgroundCommand\s*=.*!IsDebugModeEnabled' "Story debug mode must disable destructive and asset-edit commands."
+Require-SourcePattern "MainWindow.xaml" 'StorySpeakerTextBox[\s\S]*?BeforeTextChanging="StoryTextEditor_BeforeTextChanging"[\s\S]*?LostFocus="StoryTextEditor_LostFocus"[\s\S]*?StoryTextTextBox[\s\S]*?BeforeTextChanging="StoryTextEditor_BeforeTextChanging"[\s\S]*?LostFocus="StoryTextEditor_LostFocus"' "Story text controls must coalesce undo by focus session."
+Require-MethodPattern "MainWindow.Story.TextEditing.cs" "StoryTextEditor_BeforeTextChanging" '_storyTextEditUndoCaptured[\s\S]*?CaptureStoryRowUndoState' "Story text undo must capture only the current row before the first change in a focus session."
+Require-MethodPattern "Services/StoryUndoService.cs" "BeginRowEdit" '_pendingRowBefore[\s\S]*?\.Clone\(\)' "Text undo must not snapshot the full story document."
+Require-SourcePattern "Models/StoryDocument.cs" 'class StoryDocument[\s\S]*?List<StoryRow> Rows[\s\S]*?Dictionary<string, int> RowSections[\s\S]*?CaptureSnapshot[\s\S]*?ApplyChange' "StoryDocument must own story rows, ordered sections, snapshots, and change application."
+Require-SourcePattern "Models/StoryDocument.cs" 'StoryChangeSet[\s\S]*?RowChanges[\s\S]*?BeforeOrder[\s\S]*?SectionChanges[\s\S]*?ChoiceNoteChanges' "Story change sets must track row, order, section, and choice-note deltas."
+Require-MethodPattern "Models/StoryDocument.cs" "RowsHaveSameContent" 'column\s*!=\s*"Name"' "Story change comparison must ignore export row numbering."
+Require-SourcePattern "Services/StoryUndoService.cs" 'class StoryUndoService[\s\S]*?_undoStack[\s\S]*?_redoStack[\s\S]*?TryUndo[\s\S]*?TryRedo' "Story undo must support compact undo and redo change sets."
+Require-SourcePattern "ViewModels/StoryEditorViewModel.cs" 'StoryDocument Document[\s\S]*?StoryUndoService UndoService[\s\S]*?RedoCommand' "The story editor view model must expose StoryDocument, compact undo, and redo."
+Require-SourcePattern "ViewModels/StoryEditorViewModel.cs" 'List<StoryEditorUndoState> UndoStack' "The story editor still stores full-chapter undo snapshots." -NotMatch
+Require-MethodPattern "MainWindow.Story.cs" "CaptureStoryUndoState" 'UndoService\.Begin' "Story edit capture must begin a document change transaction."
+Require-MethodPattern "MainWindow.Story.cs" "CommitStoryUndoState" 'UndoService\.Commit' "Story edits must explicitly commit compact document changes."
+Require-MethodPattern "MainWindow.Story.Functions.cs" "ChooseStoryFunctionAsync" 'QueueCurrentStoryDocumentSave\(choiceNotes:\s*_pendingStoryChoiceNotes\)[\s\S]*?_pendingStoryChoiceNotes\s*=\s*null' "Choice notes must commit with the function row transaction."
+Require-MethodPattern "MainWindow.Story.Functions.cs" "ChooseStoryAssetIndexAsync" '_pendingStoryChoiceNotes' "Basic asset changes must not consume pending choice-note state." -NotMatch
+Require-SourcePattern "MainWindow.xaml" 'Content="撤回"[\s\S]*?Command="\{Binding UndoCommand\}"[\s\S]*?Content="重做"[\s\S]*?Command="\{Binding RedoCommand\}"' "The story toolbar must expose compact undo and redo controls."
+Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryEditorPage_PreviewKeyDown" 'VirtualKey\.Y[\s\S]*?VirtualKey\.Z[\s\S]*?IsShiftKeyDown[\s\S]*?RedoStoryEditorOperation' "Story redo must support Ctrl+Y and Ctrl+Shift+Z."
+Require-SourcePattern "Models/StoryDocument.cs" 'using GalExcleTools\.Services' "Story domain models must not depend on service-layer types." -NotMatch
+Require-SourcePattern "Models/StorySchema.cs" 'class StorySchema[\s\S]*?Columns[\s\S]*?NumericColumns' "Story schema must live in the domain layer instead of CSV persistence."
+Require-SourcePattern "Services/StoryDocumentRepository.cs" 'story\.document\.json[\s\S]*?Load[\s\S]*?SaveAsync[\s\S]*?File\.Move' "Story documents must use an atomic JSON repository."
+Require-SourcePattern "Services/StorySaveCoordinator.cs" 'class StorySaveCoordinator[\s\S]*?SemaphoreSlim[\s\S]*?QueueSave[\s\S]*?FlushAsync' "Story autosave must be serialized, debounced, and flushable."
+Require-MethodPattern "MainWindow.Story.TextEditing.cs" "SaveCurrentStoryRow" 'QueueCurrentStoryDocumentSave' "Text edits must queue JSON persistence instead of writing CSV."
+Require-SourcePattern "MainWindow.Story.TextEditing.cs" 'StoryCsvService|ReadRows|WriteRows|\.csv' "Text editing must not depend on CSV infrastructure." -NotMatch
+Require-MethodPattern "MainWindow.Story.Persistence.cs" "QueueCurrentStoryDocumentSave" '_storySaveCoordinator\.QueueSave' "The editor must route persistence through the background story save coordinator."
+Require-MethodPattern "MainWindow.Story.Persistence.cs" "QueueCurrentStoryDocumentSave" 'WriteRows|ExportChapter' "Normal editor saves must not write section CSV files." -NotMatch
+Require-MethodPattern "Services/ProjectTextDataService.cs" "LoadTextRows" 'StoryDocumentRepository[\s\S]*?Load' "Text, voice, and localization views must read canonical story documents."
+Require-MethodPattern "Services/ChapterRepairService.cs" "Scan" 'StoryDocumentRepository[\s\S]*?Save' "Chapter repair must update canonical story documents."
+Require-SourcePattern "Services/StoryAssetIndexSyncService.cs" 'StoryDocumentRepository[\s\S]*?Save' "Asset-index repairs must update canonical story documents."
+Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncButton_Click" 'PrepareStoryCsvForUnrealSyncAsync[\s\S]*?BuildUnrealSyncChangePlan' "Unreal sync must flush story JSON and export CSV before computing differences."
+Require-SourcePattern "MainWindow.Story.TextEditing.cs" 'StoryCsvExporter|StoryCsvService|WriteRows' "Text editing must never generate CSV." -NotMatch
+Require-SourcePattern "MainWindow.Story.Persistence.cs" 'StoryCsvExporter|ExportChapter' "Normal story persistence must never generate CSV." -NotMatch
 
 if ($Build) {
     dotnet build GalExcleTools.csproj --configuration Release --runtime win-x64 -p:Platform=x64 -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true
