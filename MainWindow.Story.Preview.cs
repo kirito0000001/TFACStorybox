@@ -42,6 +42,17 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
+        private void StoryEditorCanvasHost_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (sender is FrameworkElement element)
+            {
+                element.Clip = new RectangleGeometry
+                {
+                    Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, e.NewSize.Height)
+                };
+            }
+        }
+
         private async Task RefreshStoryPreviewAsync()
         {
             _storyPreviewRefreshCancellation?.Cancel();

@@ -409,7 +409,12 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <Grid Height="48" Margin="0,0,0,8" ColumnSpacing="10">
+                    <Grid
+                        Height="48"
+                        Margin="0,0,0,8"
+                        ColumnSpacing="10"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        Canvas.ZIndex="100">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -600,7 +605,12 @@
                                     </StackPanel>
                                 </ScrollViewer>
                             </Grid>
-                        <Grid Grid.Column="0" MinWidth="640">
+                        <Grid
+                            x:Name="StoryEditorCanvasHost"
+                            Grid.Column="0"
+                            MinWidth="640"
+                            SizeChanged="StoryEditorCanvasHost_SizeChanged"
+                            Canvas.ZIndex="0">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="220" />
