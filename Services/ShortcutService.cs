@@ -26,7 +26,7 @@ internal sealed class ShortcutService : IShortcutService
                 "Tab: clear hovered character slot",
                 "Ctrl+Z: undo last edit",
                 "Ctrl+Y or Ctrl+Shift+Z: redo last edit",
-                "Ctrl+C / Ctrl+V: copy/paste hovered character slot or base asset"
+                "Ctrl+C / Ctrl+V: copy/paste hovered character slot, base asset, or selected function"
             ]);
 
         await _dialogService.ShowAsync(

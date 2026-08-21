@@ -421,6 +421,9 @@ namespace GalExcleTools
         private bool _refreshBackgroundImagesAfterDelay;
         private bool _storyTextEditUndoCaptured;
         private StoryChoiceNoteState? _pendingStoryChoiceNotes;
+        private string? _storyFunctionClipboard;
+        private StoryFunctionListItem? _draggedStoryFunctionItem;
+        private List<string>? _storyFunctionDragOriginalOrder;
         private string? _lastStoryVoiceRowId;
         private bool _isStoryDebugModeEnabled
         {
@@ -479,9 +482,14 @@ namespace GalExcleTools
                 () => ChooseStoryAssetIndexAsync("更换BGM", "BGM", GetStoryBgmChoices()),
                 () => ChooseStoryAssetIndexAsync("更换环境音", "Scene", GetStorySceneChoices()),
                 ChooseStoryFunctionAsync,
+                EditSelectedStoryFunctionAsync,
+                () => MoveSelectedStoryFunction(-1),
+                () => MoveSelectedStoryFunction(1),
+                CopySelectedStoryFunction,
+                PasteStoryFunctionAsync,
                 ShowCurrentStoryChoicesAsync,
                 RemoveStoryFunctionAsync,
-                ClearStoryFunction,
+                ClearStoryFunctionAsync,
                 ClearCurrentStoryRow);
             _storyEditorViewModel.CommandExecutionFailed += (_, exception) =>
             {

@@ -79,6 +79,24 @@ internal static class StoryFunctionListService
         return removed;
     }
 
+    public static bool ApplyOrder(StoryRow row, IReadOnlyList<string> orderedValues)
+    {
+        var currentValues = GetValues(row);
+        var normalizedValues = orderedValues.Select(ValidateToken).ToList();
+        if (currentValues.Count != normalizedValues.Count ||
+            !HaveSameValues(currentValues, normalizedValues))
+        {
+            throw new InvalidOperationException("函数排序结果与当前函数列表不一致。");
+        }
+        if (currentValues.SequenceEqual(normalizedValues, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        SetValues(row, normalizedValues);
+        return true;
+    }
+
     public static List<string> Clear(StoryRow row)
     {
         var removed = GetValues(row);
@@ -112,5 +130,26 @@ internal static class StoryFunctionListService
         {
             throw new ArgumentOutOfRangeException(nameof(index));
         }
+    }
+
+    private static bool HaveSameValues(
+        IEnumerable<string> first,
+        IEnumerable<string> second)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var value in first)
+        {
+            counts[value] = counts.TryGetValue(value, out var count) ? count + 1 : 1;
+        }
+        foreach (var value in second)
+        {
+            if (!counts.TryGetValue(value, out var count) || count == 0)
+            {
+                return false;
+            }
+            counts[value] = count - 1;
+        }
+
+        return counts.Values.All(count => count == 0);
     }
 }

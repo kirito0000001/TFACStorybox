@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using GalExcleTools.Services;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -34,6 +35,7 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private bool _hasCurrentFunction;
     private bool _hasMultipleCurrentFunctions;
     private bool _hasCurrentChoices;
+    private int _selectedFunctionIndex = -1;
     private StoryCharacterSlotClipboard? _characterSlotClipboard;
     private StoryAssetClipboard? _assetClipboard;
     private string? _backgroundPreviewKey;
@@ -58,9 +60,14 @@ internal sealed class StoryEditorViewModel : ObservableObject
         ChangeBgmCommand = new AsyncRelayCommand(() => Task.CompletedTask);
         ChangeSceneCommand = new AsyncRelayCommand(() => Task.CompletedTask);
         ChooseFunctionCommand = new AsyncRelayCommand(() => Task.CompletedTask);
+        EditFunctionCommand = new AsyncRelayCommand(() => Task.CompletedTask);
+        MoveFunctionUpCommand = new RelayCommand(() => { });
+        MoveFunctionDownCommand = new RelayCommand(() => { });
+        CopyFunctionCommand = new RelayCommand(() => { });
+        PasteFunctionCommand = new AsyncRelayCommand(() => Task.CompletedTask);
         ViewChoicesCommand = new AsyncRelayCommand(() => Task.CompletedTask);
         RemoveFunctionCommand = new AsyncRelayCommand(() => Task.CompletedTask);
-        ClearFunctionCommand = new RelayCommand(() => { });
+        ClearFunctionCommand = new AsyncRelayCommand(() => Task.CompletedTask);
         ClearCurrentRowCommand = new RelayCommand(() => { });
     }
 
@@ -77,6 +84,8 @@ internal sealed class StoryEditorViewModel : ObservableObject
     public Dictionary<string, BitmapImage> PreviewImageCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public Dictionary<int, string> CharacterPreviewKeys { get; } = [];
+
+    public ObservableCollection<StoryFunctionListItem> FunctionItems { get; } = [];
 
     public RelayCommand UndoCommand { get; private set; }
 
@@ -106,11 +115,21 @@ internal sealed class StoryEditorViewModel : ObservableObject
 
     public AsyncRelayCommand ChooseFunctionCommand { get; private set; }
 
+    public AsyncRelayCommand EditFunctionCommand { get; private set; }
+
+    public RelayCommand MoveFunctionUpCommand { get; private set; }
+
+    public RelayCommand MoveFunctionDownCommand { get; private set; }
+
+    public RelayCommand CopyFunctionCommand { get; private set; }
+
+    public AsyncRelayCommand PasteFunctionCommand { get; private set; }
+
     public AsyncRelayCommand ViewChoicesCommand { get; private set; }
 
     public AsyncRelayCommand RemoveFunctionCommand { get; private set; }
 
-    public RelayCommand ClearFunctionCommand { get; private set; }
+    public AsyncRelayCommand ClearFunctionCommand { get; private set; }
 
     public RelayCommand ClearCurrentRowCommand { get; private set; }
 
@@ -272,6 +291,18 @@ internal sealed class StoryEditorViewModel : ObservableObject
         set => SetProperty(ref _saveStatusText, value);
     }
 
+    public int SelectedFunctionIndex
+    {
+        get => _selectedFunctionIndex;
+        set
+        {
+            if (SetProperty(ref _selectedFunctionIndex, value))
+            {
+                RefreshFunctionCommandStates();
+            }
+        }
+    }
+
     public bool HasCurrentFunction
     {
         get => _hasCurrentFunction;
@@ -357,6 +388,22 @@ internal sealed class StoryEditorViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentRowNumber));
     }
 
+    public void SetFunctionItems(IReadOnlyList<string> values, int preferredSelectedIndex = -2)
+    {
+        var selectedIndex = preferredSelectedIndex == -2 ? SelectedFunctionIndex : preferredSelectedIndex;
+        FunctionItems.Clear();
+        for (var index = 0; index < values.Count; index++)
+        {
+            FunctionItems.Add(new StoryFunctionListItem(index + 1, values[index]));
+        }
+
+        SelectedFunctionIndex = values.Count == 0
+            ? -1
+            : Math.Clamp(selectedIndex, 0, values.Count - 1);
+        OnPropertyChanged(nameof(FunctionItems));
+        RefreshFunctionCommandStates();
+    }
+
     public void RefreshUndoState()
     {
         CanUndo = UndoService.CanUndo;
@@ -380,9 +427,14 @@ internal sealed class StoryEditorViewModel : ObservableObject
         Func<Task> changeBgm,
         Func<Task> changeScene,
         Func<Task> chooseFunction,
+        Func<Task> editFunction,
+        Action moveFunctionUp,
+        Action moveFunctionDown,
+        Action copyFunction,
+        Func<Task> pasteFunction,
         Func<Task> viewChoices,
         Func<Task> removeFunction,
-        Action clearFunction,
+        Func<Task> clearFunction,
         Action clearCurrentRow)
     {
         UndoCommand = new RelayCommand(undo, () => CanUndo && !IsDebugModeEnabled);
@@ -399,9 +451,14 @@ internal sealed class StoryEditorViewModel : ObservableObject
         ChangeBgmCommand = new AsyncRelayCommand(changeBgm, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
         ChangeSceneCommand = new AsyncRelayCommand(changeScene, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
         ChooseFunctionCommand = new AsyncRelayCommand(chooseFunction, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
+        EditFunctionCommand = new AsyncRelayCommand(editFunction, () => HasSelectedFunction && !IsDebugModeEnabled);
+        MoveFunctionUpCommand = new RelayCommand(moveFunctionUp, () => HasSelectedFunction && SelectedFunctionIndex > 0 && !IsDebugModeEnabled);
+        MoveFunctionDownCommand = new RelayCommand(moveFunctionDown, () => HasSelectedFunction && SelectedFunctionIndex < FunctionItems.Count - 1 && !IsDebugModeEnabled);
+        CopyFunctionCommand = new RelayCommand(copyFunction, () => HasSelectedFunction);
+        PasteFunctionCommand = new AsyncRelayCommand(pasteFunction, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
         ViewChoicesCommand = new AsyncRelayCommand(viewChoices, () => Rows.Count > 0 && HasCurrentChoices);
-        RemoveFunctionCommand = new AsyncRelayCommand(removeFunction, () => Rows.Count > 0 && HasMultipleCurrentFunctions && !IsDebugModeEnabled);
-        ClearFunctionCommand = new RelayCommand(clearFunction, () => Rows.Count > 0 && HasCurrentFunction && !IsDebugModeEnabled);
+        RemoveFunctionCommand = new AsyncRelayCommand(removeFunction, () => HasSelectedFunction && !IsDebugModeEnabled);
+        ClearFunctionCommand = new AsyncRelayCommand(clearFunction, () => Rows.Count > 0 && HasCurrentFunction && !IsDebugModeEnabled);
         ClearCurrentRowCommand = new RelayCommand(clearCurrentRow, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
         foreach (var command in new[]
                  {
@@ -409,8 +466,11 @@ internal sealed class StoryEditorViewModel : ObservableObject
                      ChangeBgmCommand,
                      ChangeSceneCommand,
                      ChooseFunctionCommand,
+                     EditFunctionCommand,
+                     PasteFunctionCommand,
                      ViewChoicesCommand,
-                     RemoveFunctionCommand
+                     RemoveFunctionCommand,
+                     ClearFunctionCommand
                  })
         {
             command.ExecutionFailed += (_, exception) => CommandExecutionFailed?.Invoke(this, exception);
@@ -429,6 +489,11 @@ internal sealed class StoryEditorViewModel : ObservableObject
         OnPropertyChanged(nameof(ChangeBgmCommand));
         OnPropertyChanged(nameof(ChangeSceneCommand));
         OnPropertyChanged(nameof(ChooseFunctionCommand));
+        OnPropertyChanged(nameof(EditFunctionCommand));
+        OnPropertyChanged(nameof(MoveFunctionUpCommand));
+        OnPropertyChanged(nameof(MoveFunctionDownCommand));
+        OnPropertyChanged(nameof(CopyFunctionCommand));
+        OnPropertyChanged(nameof(PasteFunctionCommand));
         OnPropertyChanged(nameof(ViewChoicesCommand));
         OnPropertyChanged(nameof(RemoveFunctionCommand));
         OnPropertyChanged(nameof(ClearFunctionCommand));
@@ -452,10 +517,26 @@ internal sealed class StoryEditorViewModel : ObservableObject
         ChangeBgmCommand.NotifyCanExecuteChanged();
         ChangeSceneCommand.NotifyCanExecuteChanged();
         ChooseFunctionCommand.NotifyCanExecuteChanged();
+        EditFunctionCommand.NotifyCanExecuteChanged();
+        MoveFunctionUpCommand.NotifyCanExecuteChanged();
+        MoveFunctionDownCommand.NotifyCanExecuteChanged();
+        CopyFunctionCommand.NotifyCanExecuteChanged();
+        PasteFunctionCommand.NotifyCanExecuteChanged();
         ViewChoicesCommand.NotifyCanExecuteChanged();
         RemoveFunctionCommand.NotifyCanExecuteChanged();
         ClearFunctionCommand.NotifyCanExecuteChanged();
         ClearCurrentRowCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool HasSelectedFunction => SelectedFunctionIndex >= 0 && SelectedFunctionIndex < FunctionItems.Count;
+
+    private void RefreshFunctionCommandStates()
+    {
+        EditFunctionCommand.NotifyCanExecuteChanged();
+        MoveFunctionUpCommand.NotifyCanExecuteChanged();
+        MoveFunctionDownCommand.NotifyCanExecuteChanged();
+        CopyFunctionCommand.NotifyCanExecuteChanged();
+        RemoveFunctionCommand.NotifyCanExecuteChanged();
     }
 
     public (int LocalIndex, int Total) GetCurrentSectionPositionInfo()
@@ -532,3 +613,5 @@ internal sealed class StoryEditorViewModel : ObservableObject
         return true;
     }
 }
+
+internal sealed record StoryFunctionListItem(int Position, string Value);

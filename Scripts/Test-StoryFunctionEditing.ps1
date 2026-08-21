@@ -28,6 +28,27 @@ if (-not (Test-Path -LiteralPath $functionServicePath) -or
     $issues.Add('Function templates must expose the fixed two-chapter usage order.')
 }
 
+$viewModelPath = Join-Path $repoRoot 'ViewModels\StoryEditorViewModel.cs'
+$xamlPath = Join-Path $repoRoot 'MainWindow.xaml'
+$interactionPath = Join-Path $repoRoot 'MainWindow.Story.Interaction.cs'
+$windowFunctionPath = Join-Path $repoRoot 'MainWindow.Story.Functions.cs'
+$editorDialogPath = Join-Path $repoRoot 'Views\EditorDialogContentFactory.cs'
+if ((Get-Content -Raw -Encoding UTF8 -LiteralPath $viewModelPath) -notmatch 'ObservableCollection<StoryFunctionListItem>[\s\S]*?SelectedFunctionIndex[\s\S]*?MoveFunctionUpCommand[\s\S]*?CopyFunctionCommand[\s\S]*?PasteFunctionCommand') {
+    $issues.Add('Story function list selection and commands are missing from the view model.')
+}
+if ((Get-Content -Raw -Encoding UTF8 -LiteralPath $xamlPath) -notmatch 'x:Name="StoryFunctionListView"[\s\S]*?CanReorderItems="True"[\s\S]*?DragItemsCompleted="StoryFunctionListView_DragItemsCompleted"') {
+    $issues.Add('The story function list must support direct selection and drag reordering.')
+}
+if ((Get-Content -Raw -Encoding UTF8 -LiteralPath $interactionPath) -notmatch 'IsStoryFunctionListInteraction[\s\S]*?VirtualKey\.C[\s\S]*?CopySelectedStoryFunction[\s\S]*?VirtualKey\.V[\s\S]*?PasteStoryFunctionAsync') {
+    $issues.Add('Ctrl+C and Ctrl+V must be scoped to the story function list.')
+}
+if ((Get-Content -Raw -Encoding UTF8 -LiteralPath $windowFunctionPath) -notmatch 'StoryFunctionListView_DragItemsCompleted[\s\S]*?ApplyOrder[\s\S]*?QueueCurrentStoryDocumentSave') {
+    $issues.Add('Drag reorder must write the final function order in one save transaction.')
+}
+if ((Get-Content -Raw -Encoding UTF8 -LiteralPath $editorDialogPath) -notmatch 'ComboBox _categoryBox[\s\S]*?FunctionCategories[\s\S]*?Expander[\s\S]*?IsExpanded = false') {
+    $issues.Add('Function template settings must use fixed categories and collapse optional Choice notes by default.')
+}
+
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Error $_ }
     exit 1
@@ -51,6 +72,7 @@ $move = $serviceType.GetMethod('Move', $publicStatic)
 $insertAfter = $serviceType.GetMethod('InsertAfter', $publicStatic)
 $copyAt = $serviceType.GetMethod('CopyAt', $publicStatic)
 $removeAt = $serviceType.GetMethod('RemoveAt', $publicStatic)
+$applyOrder = $serviceType.GetMethod('ApplyOrder', $publicStatic)
 
 if (-not [bool]$move.Invoke($null, @($row, 2, 0))) {
     throw 'Move should report a change.'
@@ -62,6 +84,16 @@ $actual = [string]$get.Invoke($row, @('Custom'))
 $expected = 'PhoneMessageBurst/BGM_Start/VFXON_Fog'
 if ($copied -ne 'BGM_Start' -or $removed -ne 'BGM_Start' -or $actual -ne $expected) {
     throw "Function editing changed token data. Copy=$copied Removed=$removed Actual=$actual"
+}
+
+$orderedValues = [System.Collections.Generic.List[string]]::new()
+@('VFXON_Fog', 'PhoneMessageBurst', 'BGM_Start') | ForEach-Object { [void]$orderedValues.Add($_) }
+$orderArguments = [object[]]::new(2)
+$orderArguments[0] = $row
+$orderArguments[1] = $orderedValues
+if (-not [bool]$applyOrder.Invoke($null, $orderArguments) -or
+    [string]$get.Invoke($row, @('Custom')) -ne 'VFXON_Fog/PhoneMessageBurst/BGM_Start') {
+    throw 'Drag order application failed.'
 }
 
 $entryType = $assembly.GetType('GalExcleTools.FunctionEntry', $true)
@@ -86,9 +118,9 @@ foreach ($spec in @(
 }
 
 $functionServiceType = $assembly.GetType('GalExcleTools.Services.StoryFunctionService', $true)
-$orderArguments = [object[]]::new(1)
-$orderArguments[0] = $entries
-$orderedEntries = $functionServiceType.GetMethod('OrderByFixedUsage', $publicStatic).Invoke($null, $orderArguments)
+$templateOrderArguments = [object[]]::new(1)
+$templateOrderArguments[0] = $entries
+$orderedEntries = $functionServiceType.GetMethod('OrderByFixedUsage', $publicStatic).Invoke($null, $templateOrderArguments)
 $indicatorProperty = $entryType.GetProperty('Indicator')
 $actualOrder = @($orderedEntries | ForEach-Object { $indicatorProperty.GetValue($_) })
 $expectedOrder = @('BGM_Start', 'VFXON_', 'BGLerpMode_', 'Scene_', 'TransAnim_', 'TitleShowMode', 'M2-00-Choice1', 'MedPlay_', 'IntoChapter_M2', 'CustomFunction')
