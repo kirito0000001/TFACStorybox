@@ -9,7 +9,7 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private const int MaxFloatingTipCount = 4;
+        private const int MaxFloatingTipCount = 2;
 
         private void ShowFloatingTip(
             InfoBarSeverity severity,
@@ -55,7 +55,7 @@ namespace GalExcleTools
         {
             return severity switch
             {
-                InfoBarSeverity.Informational => InfoBarSeverity.Success,
+                InfoBarSeverity.Informational => InfoBarSeverity.Informational,
                 InfoBarSeverity.Warning => InfoBarSeverity.Warning,
                 InfoBarSeverity.Error => InfoBarSeverity.Error,
                 _ => InfoBarSeverity.Success

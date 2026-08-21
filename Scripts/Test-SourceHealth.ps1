@@ -126,11 +126,11 @@ function Require-MethodPattern {
 
 Require-SourcePattern "MainWindow.xaml" 'x:Name="FloatingTipsPanel"' "MainWindow.xaml is missing the global FloatingTipsPanel."
 Require-SourcePattern "MainWindow.xaml" 'x:Name="FloatingTipsPanel"[\s\S]*?MaxWidth="520"[\s\S]*?Margin="0,18,28,0"[\s\S]*?Canvas\.ZIndex="330"[\s\S]*?Spacing="6"' "FloatingTipsPanel does not match the Tips layout specification."
-Require-SourcePattern "MainWindow.Tips.cs" 'InfoBarSeverity\.Informational\s*=>\s*InfoBarSeverity\.Success' "Floating Tips must normalize Informational to Success."
+Require-SourcePattern "MainWindow.Tips.cs" 'InfoBarSeverity\.Informational\s*=>\s*InfoBarSeverity\.Informational' "Floating Tips must preserve neutral informational severity."
 Require-SourcePattern "MainWindow.Tips.cs" 'InfoBarSeverity\.Error\s*=>\s*TimeSpan\.FromSeconds\(5\)' "Error Tips must remain visible for 5 seconds."
 Require-SourcePattern "MainWindow.Tips.cs" 'InfoBarSeverity\.Warning\s*=>\s*TimeSpan\.FromSeconds\(3\.2\)' "Warning Tips must remain visible for 3.2 seconds."
 Require-SourcePattern "MainWindow.Tips.cs" 'TimeSpan\.FromSeconds\(2\.6\)' "Success Tips must remain visible for 2.6 seconds."
-Require-SourcePattern "MainWindow.Tips.cs" 'MaxFloatingTipCount\s*=\s*4' "Floating Tips must be limited to four visible items."
+Require-SourcePattern "MainWindow.Tips.cs" 'MaxFloatingTipCount\s*=\s*2' "Floating Tips must be limited to two visible items."
 Require-SourcePattern "MainWindow.Tips.cs" 'CopyErrorLogToClipboard' "Error Tips must copy their corresponding Log text to the clipboard."
 Require-SourcePattern "MainWindow.AssetLibrary.Editing.cs" '已替换背景图素材[\s\S]*?ShowFloatingTip' "Replacing a background image must show a result Tip."
 Require-SourcePattern "MainWindow.AssetLibrary.Editing.cs" 'logMessage\s*=\s*\$"已替换\{displayName\}素材：\{Path\.GetFileName\(layerPath\)\}[\s\S]*?ShowFloatingTip' "Replacing a character layer must show a result Tip."
@@ -221,6 +221,10 @@ Require-SourcePattern "MainWindow.Story.Interaction.cs" 'ToggleStorySettingsPane
 Require-SourcePattern "MainWindow.xaml" 'Text="本句检查器"[\s\S]*?Text="转场判断"[\s\S]*?StoryCurrentBackgroundText[\s\S]*?ItemsSource="\{Binding CurrentFunctionItems\}"' "The story inspector must show transition state before assets and ordered functions."
 Require-SourcePattern "MainWindow.xaml" 'StoryFunctionTipsPanel' "Persistent story functions must not share the transient Tips surface." -NotMatch
 Require-MethodPattern "MainWindow.Story.Media.cs" "UpdateStoryFunctionInspector" 'TryParseBackgroundTransitionMode[\s\S]*?continue;[\s\S]*?functionNames\.AddRange[\s\S]*?SetCurrentFunctionItems' "The story inspector must evaluate transition functions before listing other functions."
+Require-SourcePattern "MainWindow.xaml" 'x:Name="StoryFloatingTipsPanel"[\s\S]*?Grid\.Row="1"[\s\S]*?Margin="0,12,322,0"' "Transient story Tips must stay over the canvas and clear of the inspector."
+Require-SourcePattern "MainWindow.xaml" 'StoryTransientTipsPanel' "The fixed story toolbar must not contain a second transient Tips host." -NotMatch
+Require-SourcePattern "MainWindow.Tips.cs" 'MaxFloatingTipCount\s*=\s*2[\s\S]*?InfoBarSeverity\.Informational\s*=>\s*InfoBarSeverity\.Informational' "Floating Tips must stay limited and preserve neutral informational severity."
+Require-SourcePattern "MainWindow.xaml" 'Height="36" ColumnSpacing="8"[\s\S]*?Content="上一句"[\s\S]*?Content="下一句"[\s\S]*?<ColumnDefinition Width="\*"\s*/>[\s\S]*?<ColumnDefinition Width="\*"\s*/>[\s\S]*?<ColumnDefinition Width="\*"\s*/>[\s\S]*?Content="左插入"[\s\S]*?Content="右插入"[\s\S]*?Content="删除此句"' "Story navigation and row commands must use stable equal-width groups."
 Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryEditorPage_PreviewKeyDown" 'IsControlKeyDown\(\)[\s\S]*?VirtualKey\.Z[\s\S]*?UndoStoryEditorOperation\(\)[\s\S]*?e\.Handled\s*=\s*true' "The story editor preview key handler must route Ctrl+Z to the unified undo stack."
 Require-SourcePattern "Models/UpdateModels.cs" 'UpdateSource[\s\S]*?Gitee[\s\S]*?GitHub[\s\S]*?UpdateManifest[\s\S]*?sha256[\s\S]*?UpdatePackageManifest' "The toolbox update models must describe Gitee/GitHub sources, hashes, and package identity."
 Require-SourcePattern "Services/UpdateService.cs" 'GiteeReleaseApiUrl\s*=\s*"https://gitee\.com/api/v5/repos/xiaojie578/TFACStorybox/releases"' "The update service must target the TFACStorybox Gitee releases API."

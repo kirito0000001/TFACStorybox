@@ -87,9 +87,9 @@
                 <Border Width="32" Height="32" CornerRadius="7" VerticalAlignment="Center">
                     <Image Source="ms-appx:///Assets/AppIcon.png" Stretch="UniformToFill" />
                 </Border>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="0">
-                    <TextBlock Text="TFAC剧情箱-轮椅版" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock x:Name="AppTitleVersionText" Style="{StaticResource SubtleTextStyle}" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <TextBlock Text="TFAC剧情箱-轮椅版" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="AppTitleVersionText" Style="{StaticResource SubtleTextStyle}" VerticalAlignment="Center" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -432,17 +432,12 @@
                             TextTrimming="CharacterEllipsis"
                             ToolTipService.ToolTip="{Binding DocumentPathText, Mode=OneWay}"
                             VerticalAlignment="Center" />
-                        <Grid Grid.Column="2" VerticalAlignment="Center">
-                            <TextBlock
-                                Text="{Binding SaveStatusText, Mode=OneWay}"
-                                Style="{StaticResource SubtleTextStyle}"
-                                HorizontalAlignment="Right" />
-                            <StackPanel
-                                x:Name="StoryTransientTipsPanel"
-                                MinWidth="280"
-                                Spacing="6"
-                                HorizontalAlignment="Right" />
-                        </Grid>
+                        <TextBlock
+                            Grid.Column="2"
+                            Text="{Binding SaveStatusText, Mode=OneWay}"
+                            Style="{StaticResource SubtleTextStyle}"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center" />
                     </Grid>
 
                     <Grid
@@ -725,65 +720,67 @@
                                         Width="34"
                                         Height="32"
                                         Padding="0"
-                                        Content="+"
                                         Command="{Binding AddSectionCommand}"
-                                        ToolTipService.ToolTip="从当前句开始拆分一个新小节" />
+                                        ToolTipService.ToolTip="从当前句开始拆分一个新小节">
+                                        <SymbolIcon Symbol="Add" />
+                                    </Button>
                                 </Grid>
-                                <Grid ColumnSpacing="8" RowSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <Button Grid.ColumnSpan="3" Content="上一句" Command="{Binding PreviousRowCommand}" />
-                                    <Button Grid.Column="3" Grid.ColumnSpan="3" Content="下一句" Command="{Binding NextRowCommand}" />
-                                    <Button
-                                        x:Name="InsertStoryRowBeforeButton"
-                                        Grid.Row="1"
-                                        Grid.ColumnSpan="2"
-                                        MinWidth="0"
-                                        Padding="6,4"
-                                        Content="左插入"
-                                        Command="{Binding InsertRowCommand}"
-                                        ToolTipService.ToolTip="在当前句之前插入新句" />
-                                    <Button
-                                        x:Name="InsertStoryRowAfterButton"
-                                        Grid.Row="1"
-                                        Grid.Column="2"
-                                        Grid.ColumnSpan="2"
-                                        MinWidth="0"
-                                        Padding="6,4"
-                                        Content="右插入"
-                                        Command="{Binding InsertAfterRowCommand}"
-                                        ToolTipService.ToolTip="在当前句之后插入新句" />
-                                    <Button
-                                        Grid.Row="1"
-                                        Grid.Column="4"
-                                        Grid.ColumnSpan="2"
-                                        MinWidth="0"
-                                        Padding="6,4"
-                                        Content="删除此句"
-                                        Command="{Binding DeleteRowCommand}" />
-                                </Grid>
+                                <StackPanel Spacing="8">
+                                    <Grid Height="36" ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Height="36" HorizontalAlignment="Stretch" Content="上一句" Command="{Binding PreviousRowCommand}" />
+                                        <Button Grid.Column="1" Height="36" HorizontalAlignment="Stretch" Content="下一句" Command="{Binding NextRowCommand}" />
+                                    </Grid>
+                                    <Grid Height="36" ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button
+                                            x:Name="InsertStoryRowBeforeButton"
+                                            Height="36"
+                                            MinWidth="0"
+                                            Padding="4"
+                                            HorizontalAlignment="Stretch"
+                                            Content="左插入"
+                                            Command="{Binding InsertRowCommand}"
+                                            ToolTipService.ToolTip="在当前句之前插入新句" />
+                                        <Button
+                                            x:Name="InsertStoryRowAfterButton"
+                                            Grid.Column="1"
+                                            Height="36"
+                                            MinWidth="0"
+                                            Padding="4"
+                                            HorizontalAlignment="Stretch"
+                                            Content="右插入"
+                                            Command="{Binding InsertAfterRowCommand}"
+                                            ToolTipService.ToolTip="在当前句之后插入新句" />
+                                        <Button
+                                            Grid.Column="2"
+                                            Height="36"
+                                            MinWidth="0"
+                                            Padding="4"
+                                            HorizontalAlignment="Stretch"
+                                            Content="删除此句"
+                                            Command="{Binding DeleteRowCommand}"
+                                            ToolTipService.ToolTip="删除当前句" />
+                                    </Grid>
+                                </StackPanel>
                             </StackPanel>
                         </Grid>
                     </Border>
                         </Grid>
                     </Grid>
 	                    <StackPanel
-	                        x:Name="StoryFloatingTipsPanel"
-	                        Grid.Row="0"
-	                        Grid.RowSpan="3"
-	                        MaxWidth="520"
-	                        Spacing="6"
-	                        Margin="0,10,22,0"
+                        x:Name="StoryFloatingTipsPanel"
+                        Grid.Row="1"
+                        MaxWidth="420"
+                        Spacing="6"
+                        Margin="0,12,322,0"
 	                        HorizontalAlignment="Right"
 	                        VerticalAlignment="Top"
 	                        Canvas.ZIndex="91" />

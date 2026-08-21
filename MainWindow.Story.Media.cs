@@ -174,7 +174,6 @@ namespace GalExcleTools
         private void ClearStoryTransientTips()
         {
             ClearFloatingTips(StoryFloatingTipsPanel);
-            StoryTransientTipsPanel.Children.Clear();
         }
 
         private void UpdateStoryFunctionInspector(string functionValue)
