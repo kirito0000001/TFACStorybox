@@ -32,6 +32,44 @@
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
                 <Setter Property="TextWrapping" Value="Wrap" />
             </Style>
+            <Style x:Key="StoryInspectorTitleStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="20" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            </Style>
+            <Style x:Key="StoryInspectorSectionTitleStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Style>
+            <Style x:Key="StoryInspectorLabelStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="StoryInspectorValueStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="StoryInspectorExpanderStyle" TargetType="Expander">
+                <Setter Property="IsExpanded" Value="False" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            </Style>
+            <Style x:Key="StoryOverlayButtonStyle" TargetType="Button">
+                <Setter Property="Height" Value="36" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Padding" Value="8,4" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Background" Value="#B8FFFFFF" />
+                <Setter Property="BorderBrush" Value="#55FFFFFF" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+            </Style>
             <Style TargetType="Expander">
                 <Setter Property="IsExpanded" Value="False" />
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -466,46 +504,72 @@
                                     HorizontalScrollBarVisibility="Disabled"
                                     VerticalScrollBarVisibility="Auto">
                                     <StackPanel Spacing="12">
-                                        <TextBlock Text="本句检查器" Foreground="#202020" FontSize="18" FontWeight="SemiBold" />
-                                        <Border Padding="0,4,0,8">
-                                            <StackPanel Spacing="10">
-                                                <StackPanel Spacing="4">
-                                                    <TextBlock Text="转场判断" Foreground="#666666" FontSize="12" />
-                                                    <Border
-                                                        Padding="10,6"
-                                                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
-                                                        BorderThickness="3,0,0,0">
-                                                        <TextBlock
-                                                            Text="{Binding CurrentTransitionText, Mode=OneWay}"
-                                                            TextWrapping="Wrap"
-                                                            FontWeight="SemiBold" />
-                                                    </Border>
-                                                </StackPanel>
-                                                <Rectangle Height="1" Fill="#16000000" />
-                                                <StackPanel Spacing="6">
-                                                    <TextBlock x:Name="StoryCurrentBackgroundText" Tag="BGindex" Text="{Binding CurrentBackgroundText, Mode=OneWay}" Foreground="#444444" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
-                                                    <TextBlock x:Name="StoryCurrentBgmText" Tag="BGM" Text="{Binding CurrentBgmText, Mode=OneWay}" Foreground="#444444" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
-                                                    <TextBlock x:Name="StoryCurrentSceneText" Tag="Scene" Text="{Binding CurrentSceneText, Mode=OneWay}" Foreground="#444444" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
-                                                </StackPanel>
-                                                <Rectangle Height="1" Fill="#16000000" />
-                                                <TextBlock Text="函数" Foreground="#666666" FontSize="12" />
-                                                <ItemsControl ItemsSource="{Binding CurrentFunctionItems}">
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Grid MinHeight="28" ColumnSpacing="8">
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="12" />
-                                                                    <ColumnDefinition Width="*" />
-                                                                </Grid.ColumnDefinitions>
-                                                                <Ellipse Width="5" Height="5" Fill="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" />
-                                                                <TextBlock Grid.Column="1" Text="{Binding}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                                            </Grid>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                            </StackPanel>
+                                        <TextBlock Text="本句检查器" Style="{StaticResource StoryInspectorTitleStyle}" />
+                                        <TextBlock Text="转场" Style="{StaticResource StoryInspectorSectionTitleStyle}" Margin="0,4,0,0" />
+                                        <Border
+                                            Padding="10,7"
+                                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                            BorderThickness="3,0,0,0">
+                                            <TextBlock
+                                                Text="{Binding CurrentTransitionText, Mode=OneWay}"
+                                                FontSize="14"
+                                                FontWeight="SemiBold"
+                                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                                TextWrapping="Wrap" />
                                         </Border>
-                                        <TextBlock Text="编辑工具" Foreground="#202020" FontSize="16" FontWeight="SemiBold" />
+                                        <Rectangle Height="1" Fill="#16000000" Margin="0,2" />
+                                        <TextBlock Text="素材状态" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+                                        <StackPanel Spacing="4">
+                                            <Grid MinHeight="28" ColumnSpacing="10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="48" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="背景" Style="{StaticResource StoryInspectorLabelStyle}" />
+                                                <TextBlock x:Name="StoryCurrentBackgroundText" Grid.Column="1" Tag="BGindex" Text="{Binding CurrentBackgroundValue, Mode=OneWay}" Style="{StaticResource StoryInspectorValueStyle}" ToolTipService.ToolTip="{Binding CurrentBackgroundText, Mode=OneWay}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                            </Grid>
+                                            <Grid MinHeight="28" ColumnSpacing="10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="48" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="BGM" Style="{StaticResource StoryInspectorLabelStyle}" />
+                                                <TextBlock x:Name="StoryCurrentBgmText" Grid.Column="1" Tag="BGM" Text="{Binding CurrentBgmValue, Mode=OneWay}" Style="{StaticResource StoryInspectorValueStyle}" ToolTipService.ToolTip="{Binding CurrentBgmText, Mode=OneWay}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                            </Grid>
+                                            <Grid MinHeight="28" ColumnSpacing="10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="48" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="环境音" Style="{StaticResource StoryInspectorLabelStyle}" />
+                                                <TextBlock x:Name="StoryCurrentSceneText" Grid.Column="1" Tag="Scene" Text="{Binding CurrentSceneValue, Mode=OneWay}" Style="{StaticResource StoryInspectorValueStyle}" ToolTipService.ToolTip="{Binding CurrentSceneText, Mode=OneWay}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                            </Grid>
+                                        </StackPanel>
+                                        <Rectangle Height="1" Fill="#16000000" Margin="0,2" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="函数" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding CurrentFunctionCountText, Mode=OneWay}" Style="{StaticResource StoryInspectorLabelStyle}" />
+                                        </Grid>
+                                        <ItemsControl ItemsSource="{Binding CurrentFunctionItems}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid MinHeight="30" ColumnSpacing="8">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="12" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Ellipse Width="5" Height="5" Fill="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding}" Style="{StaticResource StoryInspectorValueStyle}" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <Rectangle Height="1" Fill="#16000000" Margin="0,4,0,2" />
+                                        <TextBlock Text="编辑工具" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
                                         <Grid ColumnSpacing="8">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -514,7 +578,8 @@
                                             <Button
                                                 x:Name="StoryUndoButton"
                                                 Content="撤回"
-                                                Height="36"
+                                                Height="34"
+                                                FontSize="13"
                                                 HorizontalAlignment="Stretch"
                                                 Command="{Binding UndoCommand}"
                                                 IsEnabled="{Binding CanUndo, Mode=OneWay}" />
@@ -522,7 +587,8 @@
                                                 x:Name="StoryRedoButton"
                                                 Grid.Column="1"
                                                 Content="重做"
-                                                Height="36"
+                                                Height="34"
+                                                FontSize="13"
                                                 HorizontalAlignment="Stretch"
                                                 Command="{Binding RedoCommand}"
                                                 IsEnabled="{Binding CanRedo, Mode=OneWay}" />
@@ -532,10 +598,10 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="调试模式" Foreground="#202020" VerticalAlignment="Center" />
+                                            <TextBlock Text="调试模式" Style="{StaticResource StoryInspectorValueStyle}" />
                                             <CheckBox x:Name="StoryDebugModeCheckBox" Grid.Column="1" VerticalAlignment="Center" Checked="StoryDebugModeCheckBox_Changed" Unchecked="StoryDebugModeCheckBox_Changed" />
                                         </Grid>
-                                        <Expander Header="快捷跳转">
+                                        <Expander Header="快捷跳转" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
                                             <Grid ColumnSpacing="8">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
@@ -545,14 +611,14 @@
                                                 <Button Grid.Column="1" Content="下一节" Height="36" HorizontalAlignment="Stretch" Command="{Binding NextSectionCommand}" />
                                             </Grid>
                                         </Expander>
-                                        <Expander Header="基础素材">
+                                        <Expander Header="基础素材" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
                                             <StackPanel Spacing="10">
                                         <Button Content="更换背景图" Tag="BGindex" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeBackgroundCommand}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
                                         <Button Content="更换BGM" Tag="BGM" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeBgmCommand}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
                                         <Button Content="更换环境音" Tag="Scene" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeSceneCommand}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
                                             </StackPanel>
                                         </Expander>
-                                        <Expander Header="函数">
+                                        <Expander Header="函数" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
                                             <StackPanel Spacing="10">
                                                 <Button Content="添加函数" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChooseFunctionCommand}" />
                                                 <Button x:Name="StoryViewChoicesButton" Content="查看选项" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasCurrentChoices, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding ViewChoicesCommand}" />
@@ -560,12 +626,12 @@
                                                 <Button x:Name="StoryClearFunctionButton" Content="清空函数" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasCurrentFunction, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding ClearFunctionCommand}" />
                                             </StackPanel>
                                         </Expander>
-                                        <Expander Header="行数据">
+                                        <Expander Header="行数据" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
                                             <StackPanel Spacing="10">
                                                 <Button Content="清空当前行数据" Height="36" HorizontalAlignment="Stretch" Command="{Binding ClearCurrentRowCommand}" />
                                             </StackPanel>
                                         </Expander>
-                                        <Expander Header="显示设置">
+                                        <Expander Header="显示设置" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
                                             <StackPanel Spacing="8">
                                                 <Grid Height="40" ColumnSpacing="12">
                                                     <Grid.ColumnDefinitions>
@@ -700,6 +766,8 @@
                                         Width="64"
                                         MinHeight="34"
                                         FontSize="16"
+                                        Background="#B8FFFFFF"
+                                        BorderBrush="#55FFFFFF"
                                         TextAlignment="Center"
                                         Text="{Binding RowIndexText, Mode=OneWay}"
                                         InputScope="Number"
@@ -723,12 +791,15 @@
                                         x:Name="StorySectionComboBox"
                                         Grid.Column="1"
                                         MinWidth="120"
+                                        Background="#B8FFFFFF"
+                                        BorderBrush="#55FFFFFF"
                                         SelectionChanged="StorySectionComboBox_SelectionChanged" />
                                     <Button
                                         Grid.Column="2"
                                         Width="34"
                                         Height="32"
                                         Padding="0"
+                                        Style="{StaticResource StoryOverlayButtonStyle}"
                                         Command="{Binding AddSectionCommand}"
                                         ToolTipService.ToolTip="从当前句开始拆分一个新小节">
                                         <SymbolIcon Symbol="Add" />
@@ -740,8 +811,8 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
-                                        <Button Height="36" HorizontalAlignment="Stretch" Content="上一句" Command="{Binding PreviousRowCommand}" />
-                                        <Button Grid.Column="1" Height="36" HorizontalAlignment="Stretch" Content="下一句" Command="{Binding NextRowCommand}" />
+                                        <Button Style="{StaticResource StoryOverlayButtonStyle}" Content="上一句" Command="{Binding PreviousRowCommand}" />
+                                        <Button Grid.Column="1" Style="{StaticResource StoryOverlayButtonStyle}" Content="下一句" Command="{Binding NextRowCommand}" />
                                     </Grid>
                                     <Grid Height="36" ColumnSpacing="8">
                                         <Grid.ColumnDefinitions>
@@ -755,6 +826,7 @@
                                             MinWidth="0"
                                             Padding="4"
                                             HorizontalAlignment="Stretch"
+                                            Style="{StaticResource StoryOverlayButtonStyle}"
                                             Content="左插入"
                                             Command="{Binding InsertRowCommand}"
                                             ToolTipService.ToolTip="在当前句之前插入新句" />
@@ -765,6 +837,7 @@
                                             MinWidth="0"
                                             Padding="4"
                                             HorizontalAlignment="Stretch"
+                                            Style="{StaticResource StoryOverlayButtonStyle}"
                                             Content="右插入"
                                             Command="{Binding InsertAfterRowCommand}"
                                             ToolTipService.ToolTip="在当前句之后插入新句" />
@@ -774,6 +847,7 @@
                                             MinWidth="0"
                                             Padding="4"
                                             HorizontalAlignment="Stretch"
+                                            Style="{StaticResource StoryOverlayButtonStyle}"
                                             Content="删除此句"
                                             Command="{Binding DeleteRowCommand}"
                                             ToolTipService.ToolTip="删除当前句" />

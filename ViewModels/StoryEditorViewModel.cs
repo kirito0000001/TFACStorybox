@@ -31,6 +31,10 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private string _currentSceneText = "当前环境音：无";
     private string _currentFunctionText = "当前函数：无";
     private string _currentTransitionText = "默认转场";
+    private string _currentBackgroundValue = "无";
+    private string _currentBgmValue = "无";
+    private string _currentSceneValue = "无";
+    private string _currentFunctionCountText = "0 项";
     private string _assetStatusText = string.Empty;
     private string _saveStatusText = "已加载";
     private bool _hasCurrentFunction;
@@ -270,6 +274,30 @@ internal sealed class StoryEditorViewModel : ObservableObject
         set => SetProperty(ref _currentTransitionText, value);
     }
 
+    public string CurrentBackgroundValue
+    {
+        get => _currentBackgroundValue;
+        set => SetProperty(ref _currentBackgroundValue, value);
+    }
+
+    public string CurrentBgmValue
+    {
+        get => _currentBgmValue;
+        set => SetProperty(ref _currentBgmValue, value);
+    }
+
+    public string CurrentSceneValue
+    {
+        get => _currentSceneValue;
+        set => SetProperty(ref _currentSceneValue, value);
+    }
+
+    public string CurrentFunctionCountText
+    {
+        get => _currentFunctionCountText;
+        set => SetProperty(ref _currentFunctionCountText, value);
+    }
+
     public string AssetStatusText
     {
         get => _assetStatusText;
@@ -374,6 +402,8 @@ internal sealed class StoryEditorViewModel : ObservableObject
         {
             CurrentFunctionItems.Add(value);
         }
+
+        CurrentFunctionCountText = $"{values.Count} 项";
 
         OnPropertyChanged(nameof(CurrentFunctionItems));
     }

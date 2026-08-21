@@ -150,9 +150,18 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            _storyEditorViewModel.CurrentBackgroundText = FormatStoryAssetStatus("当前背景图", ParseInt(row.Get("BGindex")), GetStoryBackgroundChoices());
-            _storyEditorViewModel.CurrentBgmText = FormatStoryAssetStatus("当前BGM", ParseInt(row.Get("BGM")), GetStoryBgmChoices());
-            _storyEditorViewModel.CurrentSceneText = FormatStoryAssetStatus("当前环境音", ParseInt(row.Get("Scene")), GetStorySceneChoices());
+            var backgroundIndex = ParseInt(row.Get("BGindex"));
+            var bgmIndex = ParseInt(row.Get("BGM"));
+            var sceneIndex = ParseInt(row.Get("Scene"));
+            var backgroundChoices = GetStoryBackgroundChoices();
+            var bgmChoices = GetStoryBgmChoices();
+            var sceneChoices = GetStorySceneChoices();
+            _storyEditorViewModel.CurrentBackgroundText = FormatStoryAssetStatus("当前背景图", backgroundIndex, backgroundChoices);
+            _storyEditorViewModel.CurrentBgmText = FormatStoryAssetStatus("当前BGM", bgmIndex, bgmChoices);
+            _storyEditorViewModel.CurrentSceneText = FormatStoryAssetStatus("当前环境音", sceneIndex, sceneChoices);
+            _storyEditorViewModel.CurrentBackgroundValue = FormatStoryAssetValue(backgroundIndex, backgroundChoices);
+            _storyEditorViewModel.CurrentBgmValue = FormatStoryAssetValue(bgmIndex, bgmChoices);
+            _storyEditorViewModel.CurrentSceneValue = FormatStoryAssetValue(sceneIndex, sceneChoices);
             var custom = row.Get("Custom").Trim();
             var hasFunction = !string.IsNullOrWhiteSpace(custom);
             _storyEditorViewModel.CurrentFunctionText = string.IsNullOrWhiteSpace(custom)
@@ -167,6 +176,14 @@ namespace GalExcleTools
         private static string FormatStoryAssetStatus(string label, int rawIndex, IReadOnlyList<StoryAssetChoice> choices)
         {
             return StoryFunctionService.FormatAssetStatus(label, rawIndex, choices, ResolveStoryAssetIndex);
+        }
+
+        private static string FormatStoryAssetValue(int rawIndex, IReadOnlyList<StoryAssetChoice> choices)
+        {
+            var resolvedIndex = ResolveStoryAssetIndex(rawIndex, choices.Count);
+            return resolvedIndex is null
+                ? "无"
+                : $"{choices[resolvedIndex.Value].Index}: {choices[resolvedIndex.Value].Name}";
         }
         private void ClearStoryFunction()
         {
