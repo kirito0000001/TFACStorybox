@@ -35,6 +35,7 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private string _currentBgmValue = "无";
     private string _currentSceneValue = "无";
     private string _currentFunctionCountText = "0 项";
+    private bool _hasCurrentTransitionFunction;
     private string _assetStatusText = string.Empty;
     private string _saveStatusText = "已加载";
     private bool _hasCurrentFunction;
@@ -296,6 +297,12 @@ internal sealed class StoryEditorViewModel : ObservableObject
     {
         get => _currentFunctionCountText;
         set => SetProperty(ref _currentFunctionCountText, value);
+    }
+
+    public bool HasCurrentTransitionFunction
+    {
+        get => _hasCurrentTransitionFunction;
+        set => SetProperty(ref _hasCurrentTransitionFunction, value);
     }
 
     public string AssetStatusText

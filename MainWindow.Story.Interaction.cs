@@ -50,6 +50,15 @@ namespace GalExcleTools
         {
         }
 
+        private void StoryInspectorTabButton_Click(object sender, RoutedEventArgs e)
+        {
+            var showState = ReferenceEquals(sender, StoryInspectorStateTabButton);
+            StoryInspectorStateTabButton.IsChecked = showState;
+            StoryInspectorToolsTabButton.IsChecked = !showState;
+            StorySidePanelContent.Visibility = showState ? Visibility.Visible : Visibility.Collapsed;
+            StoryInspectorToolsScrollViewer.Visibility = showState ? Visibility.Collapsed : Visibility.Visible;
+        }
+
         private void StorySlotVisibilityCheckBox_Changed(object sender, RoutedEventArgs e)
         {
             UpdateStoryCharacterSlotLayout();

@@ -167,6 +167,7 @@ namespace GalExcleTools
         private void ClearStoryFunctionTips()
         {
             _storyEditorViewModel.SetCurrentFunctionItems([]);
+            _storyEditorViewModel.HasCurrentTransitionFunction = false;
             _storyEditorViewModel.CurrentTransitionText =
                 $"沿用：{StoryFunctionService.GetBackgroundTransitionModeDisplay(_storyBackgroundTransitionMode)}";
         }
@@ -195,6 +196,7 @@ namespace GalExcleTools
             _storyEditorViewModel.CurrentTransitionText = hasCurrentTransition
                 ? $"本句先应用：{StoryFunctionService.GetBackgroundTransitionModeDisplay(_storyBackgroundTransitionMode)}"
                 : $"沿用：{StoryFunctionService.GetBackgroundTransitionModeDisplay(_storyBackgroundTransitionMode)}";
+            _storyEditorViewModel.HasCurrentTransitionFunction = hasCurrentTransition;
             _storyEditorViewModel.SetCurrentFunctionItems(functionNames);
         }
 

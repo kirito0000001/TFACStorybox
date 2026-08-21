@@ -33,22 +33,22 @@
                 <Setter Property="TextWrapping" Value="Wrap" />
             </Style>
             <Style x:Key="StoryInspectorTitleStyle" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="20" />
+                <Setter Property="FontSize" Value="22" />
                 <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
             </Style>
             <Style x:Key="StoryInspectorSectionTitleStyle" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontSize" Value="13" />
                 <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
             </Style>
             <Style x:Key="StoryInspectorLabelStyle" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontSize" Value="13" />
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
                 <Setter Property="VerticalAlignment" Value="Center" />
             </Style>
             <Style x:Key="StoryInspectorValueStyle" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="13" />
+                <Setter Property="FontSize" Value="14" />
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
                 <Setter Property="TextTrimming" Value="CharacterEllipsis" />
                 <Setter Property="VerticalAlignment" Value="Center" />
@@ -488,35 +488,66 @@
                         Grid.Row="1">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="300" />
+                            <ColumnDefinition Width="360" />
                         </Grid.ColumnDefinitions>
                             <Grid
                                 x:Name="StorySettingsPane"
                                 Grid.Column="1"
-                                Width="300"
+                                Width="360"
                                 Background="#F7F7F7"
                                 BorderBrush="#1F000000"
                                 BorderThickness="1,0,0,0">
-                                <ScrollViewer
-                                    x:Name="StorySidePanelContent"
-                                    Margin="18,16"
-                                    Opacity="1"
-                                    HorizontalScrollBarVisibility="Disabled"
-                                    VerticalScrollBarVisibility="Auto">
-                                    <StackPanel Spacing="12">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="54" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Grid Margin="20,10,20,8" ColumnSpacing="4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <ToggleButton
+                                            x:Name="StoryInspectorStateTabButton"
+                                            Height="36"
+                                            Content="本句"
+                                            FontSize="14"
+                                            FontWeight="SemiBold"
+                                            IsChecked="True"
+                                            Click="StoryInspectorTabButton_Click" />
+                                        <ToggleButton
+                                            x:Name="StoryInspectorToolsTabButton"
+                                            Grid.Column="1"
+                                            Height="36"
+                                            Content="工具"
+                                            FontSize="14"
+                                            FontWeight="SemiBold"
+                                            Click="StoryInspectorTabButton_Click" />
+                                    </Grid>
+                                    <ScrollViewer
+                                        x:Name="StorySidePanelContent"
+                                        Grid.Row="1"
+                                        Margin="20,14,20,20"
+                                        HorizontalScrollBarVisibility="Disabled"
+                                        VerticalScrollBarVisibility="Auto">
+                                        <StackPanel Spacing="14">
                                         <TextBlock Text="本句检查器" Style="{StaticResource StoryInspectorTitleStyle}" />
-                                        <TextBlock Text="转场" Style="{StaticResource StoryInspectorSectionTitleStyle}" Margin="0,4,0,0" />
-                                        <Border
-                                            Padding="10,7"
-                                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
-                                            BorderThickness="3,0,0,0">
-                                            <TextBlock
-                                                Text="{Binding CurrentTransitionText, Mode=OneWay}"
-                                                FontSize="14"
-                                                FontWeight="SemiBold"
-                                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                                TextWrapping="Wrap" />
-                                        </Border>
+                                        <StackPanel
+                                            Spacing="6"
+                                            Visibility="{Binding HasCurrentTransitionFunction, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="转场" Style="{StaticResource StoryInspectorSectionTitleStyle}" Margin="0,4,0,0" />
+                                            <Border
+                                                Padding="10,7"
+                                                BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                                BorderThickness="3,0,0,0">
+                                                <TextBlock
+                                                    Text="{Binding CurrentTransitionText, Mode=OneWay}"
+                                                    FontSize="15"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                                    TextWrapping="Wrap" />
+                                            </Border>
+                                        </StackPanel>
                                         <Rectangle Height="1" Fill="#16000000" Margin="0,2" />
                                         <TextBlock Text="素材状态" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
                                         <StackPanel Spacing="4">
@@ -568,8 +599,17 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
-                                        <Rectangle Height="1" Fill="#16000000" Margin="0,4,0,2" />
-                                        <TextBlock Text="编辑工具" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                    <ScrollViewer
+                                        x:Name="StoryInspectorToolsScrollViewer"
+                                        Grid.Row="1"
+                                        Margin="20,14,20,20"
+                                        HorizontalScrollBarVisibility="Disabled"
+                                        VerticalScrollBarVisibility="Auto"
+                                        Visibility="Collapsed">
+                                        <StackPanel Spacing="14">
+                                        <TextBlock Text="编辑工具" Style="{StaticResource StoryInspectorTitleStyle}" />
                                         <Grid ColumnSpacing="8">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -670,6 +710,7 @@
                                         <TextBlock x:Name="StoryAssetStatusText" Text="{Binding AssetStatusText, Mode=OneWay}" Foreground="#555555" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </ScrollViewer>
+                            </Grid>
                             </Grid>
                         <Grid
                             x:Name="StoryEditorCanvasHost"
@@ -863,7 +904,7 @@
                         Grid.Row="1"
                         MaxWidth="420"
                         Spacing="6"
-                        Margin="0,12,322,0"
+                        Margin="0,12,382,0"
 	                        HorizontalAlignment="Right"
 	                        VerticalAlignment="Top"
 	                        Canvas.ZIndex="91" />
