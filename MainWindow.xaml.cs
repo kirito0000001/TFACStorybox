@@ -403,9 +403,7 @@ namespace GalExcleTools
         private double _backgroundImageViewerScale = 1;
         private readonly DispatcherQueueTimer _refreshDelayTimer;
         private readonly DispatcherQueueTimer? _storyEditSaveTimer;
-        private readonly DispatcherQueueTimer _storyPaneAnimationTimer;
         private readonly DispatcherQueueTimer _globalProgressElapsedTimer;
-        private double _storyPaneAnimationTargetWidth = 46;
         private readonly Dictionary<InfoBar, DispatcherQueueTimer> _floatingTipTimers = new();
         private readonly Stopwatch _globalProgressStopwatch = new();
         private string _globalProgressOperationTitle = string.Empty;
@@ -544,9 +542,6 @@ namespace GalExcleTools
             _storyEditSaveTimer = DispatcherQueue.CreateTimer();
             _storyEditSaveTimer.Interval = TimeSpan.FromMilliseconds(350);
             _storyEditSaveTimer.Tick += StoryEditSaveTimer_Tick;
-            _storyPaneAnimationTimer = DispatcherQueue.CreateTimer();
-            _storyPaneAnimationTimer.Interval = TimeSpan.FromMilliseconds(16);
-            _storyPaneAnimationTimer.Tick += StoryPaneAnimationTimer_Tick;
             _globalProgressElapsedTimer = DispatcherQueue.CreateTimer();
             _globalProgressElapsedTimer.Interval = TimeSpan.FromSeconds(1);
             _globalProgressElapsedTimer.Tick += GlobalProgressElapsedTimer_Tick;

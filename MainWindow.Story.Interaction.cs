@@ -50,31 +50,6 @@ namespace GalExcleTools
         {
         }
 
-        private void ToggleStorySettingsPaneButton_Click(object sender, RoutedEventArgs e)
-        {
-            var shouldOpen = StorySettingsPane.Width <= 46;
-            _storyPaneAnimationTargetWidth = shouldOpen ? 380 : 46;
-            _storyPaneAnimationTimer.Stop();
-            _storyPaneAnimationTimer.Start();
-        }
-
-        private void StoryPaneAnimationTimer_Tick(DispatcherQueueTimer sender, object args)
-        {
-            var currentWidth = StorySettingsPane.Width;
-            var delta = _storyPaneAnimationTargetWidth - currentWidth;
-            if (Math.Abs(delta) < 1)
-            {
-                StorySettingsPane.Width = _storyPaneAnimationTargetWidth;
-                StorySidePanelContent.Opacity = StorySettingsPane.Width > 46 ? 1 : 0;
-                sender.Stop();
-                return;
-            }
-
-            StorySettingsPane.Width = currentWidth + delta * 0.28;
-            var openProgress = Math.Clamp((StorySettingsPane.Width - 46) / (380 - 46), 0, 1);
-            StorySidePanelContent.Opacity = openProgress;
-        }
-
         private void StorySlotVisibilityCheckBox_Changed(object sender, RoutedEventArgs e)
         {
             UpdateStoryCharacterSlotLayout();

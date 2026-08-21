@@ -399,18 +399,17 @@
                 <Grid
                     x:Name="StoryEditorPage"
                     Visibility="Collapsed"
-                    RowSpacing="12"
+                    RowSpacing="0"
                     IsTabStop="True"
                     PointerPressed="StoryEditorPage_PointerPressed"
                     PreviewKeyDown="StoryEditorPage_PreviewKeyDown"
                     KeyDown="StoryEditorPage_KeyDown">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="48" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Grid ColumnSpacing="10">
+                    <Grid Height="48" Margin="0,0,0,8" ColumnSpacing="10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -425,44 +424,45 @@
                             ToolTipService.ToolTip="返回章节列表">
                             <SymbolIcon Symbol="Back" />
                         </Button>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <TextBlock x:Name="StoryEditorTitleText" Text="{Binding Title, Mode=OneWay}" Style="{StaticResource SectionTitleStyle}" />
-                            <TextBlock x:Name="StoryEditorDocumentPathText" Text="{Binding DocumentPathText, Mode=OneWay}" Style="{StaticResource SubtleTextStyle}" />
-                            <TextBlock Text="{Binding SaveStatusText, Mode=OneWay}" Style="{StaticResource SubtleTextStyle}" />
-                        </StackPanel>
-                        <StackPanel
-                            x:Name="StoryTransientTipsPanel"
-                            Grid.Column="2"
-                            MinWidth="320"
-                            Spacing="8" />
+                        <TextBlock
+                            x:Name="StoryEditorTitleText"
+                            Grid.Column="1"
+                            Text="{Binding Title, Mode=OneWay}"
+                            Style="{StaticResource SectionTitleStyle}"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTipService.ToolTip="{Binding DocumentPathText, Mode=OneWay}"
+                            VerticalAlignment="Center" />
+                        <Grid Grid.Column="2" VerticalAlignment="Center">
+                            <TextBlock
+                                Text="{Binding SaveStatusText, Mode=OneWay}"
+                                Style="{StaticResource SubtleTextStyle}"
+                                HorizontalAlignment="Right" />
+                            <StackPanel
+                                x:Name="StoryTransientTipsPanel"
+                                MinWidth="280"
+                                Spacing="6"
+                                HorizontalAlignment="Right" />
+                        </Grid>
                     </Grid>
 
                     <Grid
                         x:Name="StoryEditorBodyGrid"
-                        Grid.Row="1"
-                        Grid.RowSpan="2">
+                        Grid.Row="1">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="300" />
                         </Grid.ColumnDefinitions>
                             <Grid
                                 x:Name="StorySettingsPane"
                                 Grid.Column="1"
-                                Width="46"
-                                Background="#B3FFFFFF">
-                                <Button
-                                    Width="46"
-                                    Height="56"
-                                    Padding="0"
-                                    HorizontalAlignment="Left"
-                                    VerticalAlignment="Center"
-                                    Click="ToggleStorySettingsPaneButton_Click">
-                                    <SymbolIcon Symbol="Setting" />
-                                </Button>
+                                Width="300"
+                                Background="#F7F7F7"
+                                BorderBrush="#1F000000"
+                                BorderThickness="1,0,0,0">
                                 <ScrollViewer
                                     x:Name="StorySidePanelContent"
-                                    Margin="58,24,18,24"
-                                    Opacity="0"
+                                    Margin="18,16"
+                                    Opacity="1"
                                     HorizontalScrollBarVisibility="Disabled"
                                     VerticalScrollBarVisibility="Auto">
                                     <StackPanel Spacing="12">
@@ -570,10 +570,10 @@
                                     </StackPanel>
                                 </ScrollViewer>
                             </Grid>
-                        <Grid Grid.Column="0">
+                        <Grid Grid.Column="0" MinWidth="640">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="*" />
-                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="220" />
                             </Grid.RowDefinitions>
                     <Grid Grid.Row="0" Background="Black">
                         <Image x:Name="StoryBackgroundImage" Stretch="UniformToFill" Opacity="0.72" />
@@ -590,23 +590,21 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Border x:Name="StoryCharacterSlot1" Grid.Column="0" Grid.ColumnSpan="2" Margin="10,28,6,172" />
-                            <Border x:Name="StoryCharacterSlot2" Grid.Column="2" Grid.ColumnSpan="2" Margin="6,50,6,172" />
-                            <Border x:Name="StoryCharacterSlot3" Grid.Column="4" Grid.ColumnSpan="2" Margin="6,16,6,172" />
-                            <Border x:Name="StoryCharacterSlot4" Grid.Column="6" Grid.ColumnSpan="2" Margin="6,50,6,172" Visibility="Collapsed" />
-                            <Border x:Name="StoryCharacterSlot5" Grid.Column="8" Grid.ColumnSpan="2" Margin="6,28,10,172" Visibility="Collapsed" />
+                            <Border x:Name="StoryCharacterSlot1" Grid.Column="0" Grid.ColumnSpan="2" Margin="10,28,6,0" />
+                            <Border x:Name="StoryCharacterSlot2" Grid.Column="2" Grid.ColumnSpan="2" Margin="6,50,6,0" />
+                            <Border x:Name="StoryCharacterSlot3" Grid.Column="4" Grid.ColumnSpan="2" Margin="6,16,6,0" />
+                            <Border x:Name="StoryCharacterSlot4" Grid.Column="6" Grid.ColumnSpan="2" Margin="6,50,6,0" Visibility="Collapsed" />
+                            <Border x:Name="StoryCharacterSlot5" Grid.Column="8" Grid.ColumnSpan="2" Margin="6,28,10,0" Visibility="Collapsed" />
                         </Grid>
 
                     </Grid>
 
                     <Border
-                        Grid.Row="2"
-                        Margin="0,-170,0,0"
-                        MinHeight="170"
-                        Background="#B3FFFFFF"
-                        BorderBrush="#66FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="6">
+                        Grid.Row="1"
+                        Height="220"
+                        Background="#F2FFFFFF"
+                        BorderBrush="#24000000"
+                        BorderThickness="0,1,0,0">
                         <Grid Padding="18" ColumnSpacing="16">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="220" />
