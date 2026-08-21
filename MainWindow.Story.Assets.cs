@@ -85,52 +85,21 @@ namespace GalExcleTools
                 new[] { new StoryObjectChoice(NoStoryCharacterChoice, "无角色", NoStoryCharacterChoice) }
                     .Concat(characters.Select(character => new StoryObjectChoice(character.Code, $"{character.Name} / {character.Code}", character)))
                     .ToList());
+            string replacementCharacterCode;
             if (selected is string noCharacter && string.Equals(noCharacter, NoStoryCharacterChoice, StringComparison.Ordinal))
             {
-                var emptyRow = _storyRows[_currentStoryRowIndex];
-                if (string.IsNullOrWhiteSpace(emptyRow.Get($"Chara{slotIndex}")) &&
-                    ParseInt(emptyRow.Get($"Body{slotIndex}")) == 0 &&
-                    ParseInt(emptyRow.Get($"Face{slotIndex}")) == 0 &&
-                    ParseInt(emptyRow.Get($"Adorn{slotIndex}")) == 0 &&
-                    ParseInt(emptyRow.Get($"Vfx{slotIndex}")) == 0)
-                {
-                    return;
-                }
-
-                CaptureStoryUndoState($"清空{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}角色");
-                emptyRow.Set($"Chara{slotIndex}", string.Empty);
-                emptyRow.Set($"Body{slotIndex}", "0");
-                emptyRow.Set($"Face{slotIndex}", "0");
-                emptyRow.Set($"Adorn{slotIndex}", "0");
-                emptyRow.Set($"Vfx{slotIndex}", "0");
-                QueueCurrentStoryDocumentSave();
-                await RefreshStoryPreviewAsync();
-                return;
+                replacementCharacterCode = string.Empty;
             }
-
-            if (selected is not CharacterInfo character)
+            else if (selected is CharacterInfo character)
+            {
+                replacementCharacterCode = character.Code;
+            }
+            else
             {
                 return;
             }
 
-            var row = _storyRows[_currentStoryRowIndex];
-            if (string.Equals(row.Get($"Chara{slotIndex}"), character.Code, StringComparison.Ordinal) &&
-                ParseInt(row.Get($"Body{slotIndex}")) == 0 &&
-                ParseInt(row.Get($"Face{slotIndex}")) == 0 &&
-                ParseInt(row.Get($"Adorn{slotIndex}")) == 0 &&
-                ParseInt(row.Get($"Vfx{slotIndex}")) == 0)
-            {
-                return;
-            }
-
-            CaptureStoryUndoState($"更换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}角色");
-            row.Set($"Chara{slotIndex}", character.Code);
-            row.Set($"Body{slotIndex}", "0");
-            row.Set($"Face{slotIndex}", "0");
-            row.Set($"Adorn{slotIndex}", "0");
-            row.Set($"Vfx{slotIndex}", "0");
-            QueueCurrentStoryDocumentSave();
-            await RefreshStoryPreviewAsync();
+            await ReplaceStoryCharacterForwardAsync(slotIndex, replacementCharacterCode, characters);
         }
 
         private async Task ChooseStoryCharacterLayerAsync(int slotIndex, CharacterLayerKind layerKind)
@@ -178,11 +147,13 @@ namespace GalExcleTools
                     return;
                 }
 
-                CaptureStoryUndoState($"更换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}{layerSpec.DisplayName}");
-                row.Set(filterColumn, selectedFilterIndex.ToString());
-                QueueCurrentStoryDocumentSave();
-                ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, selectedFilterIndex, CharacterFilterService.GetDisplayName(filters[selectedFilterIndex], selectedFilterIndex));
-                await RefreshStoryPreviewAsync();
+                await ReplaceStoryCharacterLayerForwardAsync(
+                    slotIndex,
+                    layerSpec,
+                    selectedFilterIndex,
+                    index => index >= 0 && index < filters.Count
+                        ? CharacterFilterService.GetDisplayName(filters[index], index)
+                        : index.ToString(CultureInfo.InvariantCulture));
                 return;
             }
 
@@ -207,16 +178,129 @@ namespace GalExcleTools
                 return;
             }
 
-            CaptureStoryUndoState($"更换{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}{layerSpec.DisplayName}");
-            row.Set(StoryCharacterSlotService.GetLayerColumn(slotIndex, layerSpec.FieldPrefix), selectedIndex.ToString());
-            if (layerSpec.Kind == CharacterLayerKind.Cloth)
+            await ReplaceStoryCharacterLayerForwardAsync(
+                slotIndex,
+                layerSpec,
+                selectedIndex,
+                index => StoryCharacterLayerChoiceFactory.GetDisplayName(layerSpec, paths, index));
+        }
+
+        private async Task ReplaceStoryCharacterForwardAsync(
+            int slotIndex,
+            string replacementCharacterCode,
+            IReadOnlyList<CharacterInfo> characters)
+        {
+            var characterField = StoryCharacterSlotService.GetCharacterColumn(slotIndex);
+            var row = _storyRows[_currentStoryRowIndex];
+            var replacementPlan = StoryAssetFieldService.BuildForwardContiguousValuePlan(
+                _storyRows,
+                _currentStoryRowIndex,
+                characterField,
+                replacementCharacterCode);
+            var displayName = $"{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}角色";
+            if (replacementPlan.Count == 0)
             {
-                NormalizeStoryRowLayerCompatibility(row, character, slotIndex);
+                if (ParseInt(row.Get(StoryCharacterSlotService.GetLayerColumn(slotIndex, "Body"))) == 0 &&
+                    ParseInt(row.Get(StoryCharacterSlotService.GetLayerColumn(slotIndex, "Face"))) == 0 &&
+                    ParseInt(row.Get(StoryCharacterSlotService.GetLayerColumn(slotIndex, "Adorn"))) == 0 &&
+                    ParseInt(row.Get(StoryCharacterSlotService.GetLayerColumn(slotIndex, "Vfx"))) == 0)
+                {
+                    return;
+                }
+
+                CaptureStoryUndoState($"重置{displayName}分层");
+                StoryCharacterSlotService.ResetLayerColumns(row, slotIndex);
+                QueueCurrentStoryDocumentSave();
+                await RefreshStoryPreviewAsync();
+                return;
+            }
+
+            if (!await ConfirmStoryValueReplacementAsync(
+                    replacementPlan,
+                    displayName,
+                    value => FormatStoryCharacterValue(characters, value)))
+            {
+                return;
+            }
+
+            CaptureStoryUndoState(replacementPlan.Count > 1 ? $"连续更换{displayName}" : $"更换{displayName}");
+            var changedCount = StoryAssetFieldService.ApplyForwardContiguousValuePlan(_storyRows, replacementPlan);
+            for (var index = replacementPlan.StartIndex; index <= replacementPlan.EndIndex; index++)
+            {
+                StoryCharacterSlotService.ResetLayerColumns(_storyRows[index], slotIndex);
             }
 
             QueueCurrentStoryDocumentSave();
-            ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, selectedIndex, StoryCharacterLayerChoiceFactory.GetDisplayName(layerSpec, paths, selectedIndex));
+            ShowStoryStatus(
+                InfoBarSeverity.Success,
+                changedCount > 1 ? $"{displayName}已连续更换" : $"{displayName}已更换",
+                changedCount > 1
+                    ? $"共修改 {changedCount} 句（第 {_currentStoryRowIndex + 1}-{replacementPlan.EndIndex + 1} 句）。"
+                    : FormatStoryCharacterValue(characters, replacementCharacterCode));
             await RefreshStoryPreviewAsync();
+        }
+
+        private async Task ReplaceStoryCharacterLayerForwardAsync(
+            int slotIndex,
+            StoryCharacterLayerSpec layerSpec,
+            int replacementIndex,
+            Func<int, string> formatValue)
+        {
+            var layerField = StoryCharacterSlotService.GetLayerColumn(slotIndex, layerSpec.FieldPrefix);
+            var characterField = StoryCharacterSlotService.GetCharacterColumn(slotIndex);
+            var replacementPlan = StoryAssetFieldService.BuildForwardContiguousCharacterLayerPlan(
+                _storyRows,
+                _currentStoryRowIndex,
+                layerField,
+                replacementIndex,
+                characterField);
+            var displayName = $"{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}{layerSpec.DisplayName}";
+            if (!await ConfirmStoryAssetReplacementAsync(replacementPlan, displayName, formatValue))
+            {
+                return;
+            }
+
+            CaptureStoryUndoState(replacementPlan.Count > 1 ? $"连续更换{displayName}" : $"更换{displayName}");
+            var changedCount = StoryAssetFieldService.ApplyForwardContiguousPlan(_storyRows, replacementPlan);
+            if (layerSpec.Kind == CharacterLayerKind.Cloth)
+            {
+                for (var index = replacementPlan.StartIndex; index <= replacementPlan.EndIndex; index++)
+                {
+                    var rowCharacter = ResolveStoryCharacter(_storyRows[index].Get(characterField));
+                    if (rowCharacter is not null)
+                    {
+                        NormalizeStoryRowLayerCompatibility(_storyRows[index], rowCharacter, slotIndex);
+                    }
+                }
+            }
+
+            QueueCurrentStoryDocumentSave();
+            if (changedCount > 1)
+            {
+                ShowStoryStatus(
+                    InfoBarSeverity.Success,
+                    $"{displayName}已连续更换",
+                    $"共修改 {changedCount} 句（第 {_currentStoryRowIndex + 1}-{replacementPlan.EndIndex + 1} 句）。");
+            }
+            else
+            {
+                ShowStoryLayerChangedStatus(slotIndex, layerSpec.DisplayName, replacementIndex, formatValue(replacementIndex));
+            }
+            await RefreshStoryPreviewAsync();
+        }
+
+        private static string FormatStoryCharacterValue(
+            IReadOnlyList<CharacterInfo> characters,
+            string characterCode)
+        {
+            if (string.IsNullOrWhiteSpace(characterCode))
+            {
+                return "无角色";
+            }
+
+            var character = characters.FirstOrDefault(item =>
+                string.Equals(item.Code, characterCode, StringComparison.OrdinalIgnoreCase));
+            return character is null ? characterCode : $"{character.Name} / {character.Code}";
         }
 
         private List<StoryObjectChoice> CreateStoryLayerChoices(
