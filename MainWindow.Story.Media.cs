@@ -161,18 +161,14 @@ namespace GalExcleTools
 
         private void ShowStoryFunctionTriggeredStatus(string functionValue)
         {
-            ClearStoryFunctionTips();
-            foreach (var functionName in StoryFunctionService.EnumerateFunctionDisplayNames(functionValue))
-            {
-                AddStoryTipWithEntrance(
-                    StoryFunctionTipsPanel,
-                    CreateFloatingTipBar(InfoBarSeverity.Success, $"触发函数：{functionName}", string.Empty));
-            }
+            UpdateStoryFunctionInspector(functionValue);
         }
 
         private void ClearStoryFunctionTips()
         {
-            StoryFunctionTipsPanel.Children.Clear();
+            _storyEditorViewModel.SetCurrentFunctionItems([]);
+            _storyEditorViewModel.CurrentTransitionText =
+                $"沿用：{StoryFunctionService.GetBackgroundTransitionModeDisplay(_storyBackgroundTransitionMode)}";
         }
 
         private void ClearStoryTransientTips()
@@ -181,9 +177,26 @@ namespace GalExcleTools
             StoryTransientTipsPanel.Children.Clear();
         }
 
-        private void AddStoryTipWithEntrance(Panel panel, InfoBar tip)
+        private void UpdateStoryFunctionInspector(string functionValue)
         {
-            AddFloatingTipWithEntrance(panel, tip);
+            var functionNames = new List<string>();
+            var hasCurrentTransition = false;
+            foreach (var function in StoryFunctionService.SplitFunctionValues(functionValue))
+            {
+                if (StoryFunctionService.TryParseBackgroundTransitionMode(function, out var transitionMode))
+                {
+                    _storyBackgroundTransitionMode = transitionMode;
+                    hasCurrentTransition = true;
+                    continue;
+                }
+
+                functionNames.AddRange(StoryFunctionService.EnumerateFunctionDisplayNames(function));
+            }
+
+            _storyEditorViewModel.CurrentTransitionText = hasCurrentTransition
+                ? $"本句先应用：{StoryFunctionService.GetBackgroundTransitionModeDisplay(_storyBackgroundTransitionMode)}"
+                : $"沿用：{StoryFunctionService.GetBackgroundTransitionModeDisplay(_storyBackgroundTransitionMode)}";
+            _storyEditorViewModel.SetCurrentFunctionItems(functionNames);
         }
 
         private void RebuildStoryPersistentFunctionState(int rowIndex)

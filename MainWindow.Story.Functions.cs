@@ -161,6 +161,7 @@ namespace GalExcleTools
             _storyEditorViewModel.HasCurrentFunction = hasFunction;
             _storyEditorViewModel.HasMultipleCurrentFunctions = StoryFunctionService.SplitFunctionValues(custom).Skip(1).Any();
             _storyEditorViewModel.HasCurrentChoices = GetCurrentStoryChoiceValues().Count > 0;
+            UpdateStoryFunctionInspector(custom);
         }
 
         private static string FormatStoryAssetStatus(string label, int rawIndex, IReadOnlyList<StoryAssetChoice> choices)

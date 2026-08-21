@@ -466,7 +466,51 @@
                                     HorizontalScrollBarVisibility="Disabled"
                                     VerticalScrollBarVisibility="Auto">
                                     <StackPanel Spacing="12">
-                                        <TextBlock Text="章节工具栏" Foreground="#202020" FontSize="18" FontWeight="SemiBold" />
+                                        <TextBlock Text="本句检查器" Foreground="#202020" FontSize="18" FontWeight="SemiBold" />
+                                        <Border
+                                            Padding="12"
+                                            Background="White"
+                                            BorderBrush="#18000000"
+                                            BorderThickness="1"
+                                            CornerRadius="6">
+                                            <StackPanel Spacing="10">
+                                                <StackPanel Spacing="4">
+                                                    <TextBlock Text="转场判断" Foreground="#666666" FontSize="12" />
+                                                    <Border
+                                                        Padding="10,6"
+                                                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                                        BorderThickness="3,0,0,0">
+                                                        <TextBlock
+                                                            Text="{Binding CurrentTransitionText, Mode=OneWay}"
+                                                            TextWrapping="Wrap"
+                                                            FontWeight="SemiBold" />
+                                                    </Border>
+                                                </StackPanel>
+                                                <Rectangle Height="1" Fill="#16000000" />
+                                                <StackPanel Spacing="6">
+                                                    <TextBlock x:Name="StoryCurrentBackgroundText" Tag="BGindex" Text="{Binding CurrentBackgroundText, Mode=OneWay}" Foreground="#444444" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                                    <TextBlock x:Name="StoryCurrentBgmText" Tag="BGM" Text="{Binding CurrentBgmText, Mode=OneWay}" Foreground="#444444" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                                    <TextBlock x:Name="StoryCurrentSceneText" Tag="Scene" Text="{Binding CurrentSceneText, Mode=OneWay}" Foreground="#444444" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                                </StackPanel>
+                                                <Rectangle Height="1" Fill="#16000000" />
+                                                <TextBlock Text="函数" Foreground="#666666" FontSize="12" />
+                                                <ItemsControl ItemsSource="{Binding CurrentFunctionItems}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid MinHeight="28" ColumnSpacing="8">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="12" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <Ellipse Width="5" Height="5" Fill="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" />
+                                                                <TextBlock Grid.Column="1" Text="{Binding}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock Text="编辑工具" Foreground="#202020" FontSize="16" FontWeight="SemiBold" />
                                         <Grid ColumnSpacing="8">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -508,17 +552,13 @@
                                         </Expander>
                                         <Expander Header="基础素材">
                                             <StackPanel Spacing="10">
-                                                <TextBlock x:Name="StoryCurrentBackgroundText" Tag="BGindex" Text="{Binding CurrentBackgroundText, Mode=OneWay}" Foreground="#555555" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
                                         <Button Content="更换背景图" Tag="BGindex" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeBackgroundCommand}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
-                                        <TextBlock x:Name="StoryCurrentBgmText" Tag="BGM" Text="{Binding CurrentBgmText, Mode=OneWay}" Foreground="#555555" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
                                         <Button Content="更换BGM" Tag="BGM" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeBgmCommand}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
-                                        <TextBlock x:Name="StoryCurrentSceneText" Tag="Scene" Text="{Binding CurrentSceneText, Mode=OneWay}" Foreground="#555555" TextWrapping="Wrap" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
                                         <Button Content="更换环境音" Tag="Scene" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeSceneCommand}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
                                             </StackPanel>
                                         </Expander>
                                         <Expander Header="函数">
                                             <StackPanel Spacing="10">
-                                                <TextBlock x:Name="StoryCurrentFunctionText" Text="{Binding CurrentFunctionText, Mode=OneWay}" Foreground="#555555" TextWrapping="Wrap" />
                                                 <Button Content="添加函数" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChooseFunctionCommand}" />
                                                 <Button x:Name="StoryViewChoicesButton" Content="查看选项" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasCurrentChoices, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding ViewChoicesCommand}" />
                                                 <Button x:Name="StoryRemoveFunctionButton" Content="移除函数" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasMultipleCurrentFunctions, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding RemoveFunctionCommand}" />
@@ -737,16 +777,6 @@
                     </Border>
                         </Grid>
                     </Grid>
-	                    <StackPanel
-	                        x:Name="StoryFunctionTipsPanel"
-                        Grid.Row="0"
-                        Grid.RowSpan="3"
-                        MaxWidth="520"
-                        Spacing="6"
-                        Margin="0,10,22,0"
-                        HorizontalAlignment="Right"
-                        VerticalAlignment="Top"
-	                        Canvas.ZIndex="90" />
 	                    <StackPanel
 	                        x:Name="StoryFloatingTipsPanel"
 	                        Grid.Row="0"

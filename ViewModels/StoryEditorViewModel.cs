@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using GalExcleTools.Services;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -29,6 +30,7 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private string _currentBgmText = "当前BGM：无";
     private string _currentSceneText = "当前环境音：无";
     private string _currentFunctionText = "当前函数：无";
+    private string _currentTransitionText = "默认转场";
     private string _assetStatusText = string.Empty;
     private string _saveStatusText = "已加载";
     private bool _hasCurrentFunction;
@@ -77,6 +79,8 @@ internal sealed class StoryEditorViewModel : ObservableObject
     public Dictionary<string, BitmapImage> PreviewImageCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public Dictionary<int, string> CharacterPreviewKeys { get; } = [];
+
+    public ObservableCollection<string> CurrentFunctionItems { get; } = [];
 
     public RelayCommand UndoCommand { get; private set; }
 
@@ -260,6 +264,12 @@ internal sealed class StoryEditorViewModel : ObservableObject
         set => SetProperty(ref _currentFunctionText, value);
     }
 
+    public string CurrentTransitionText
+    {
+        get => _currentTransitionText;
+        set => SetProperty(ref _currentTransitionText, value);
+    }
+
     public string AssetStatusText
     {
         get => _assetStatusText;
@@ -355,6 +365,17 @@ internal sealed class StoryEditorViewModel : ObservableObject
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowSections));
         OnPropertyChanged(nameof(CurrentRowNumber));
+    }
+
+    public void SetCurrentFunctionItems(IReadOnlyList<string> values)
+    {
+        CurrentFunctionItems.Clear();
+        foreach (var value in values)
+        {
+            CurrentFunctionItems.Add(value);
+        }
+
+        OnPropertyChanged(nameof(CurrentFunctionItems));
     }
 
     public void RefreshUndoState()
