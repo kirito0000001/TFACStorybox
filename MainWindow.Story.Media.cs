@@ -221,6 +221,33 @@ namespace GalExcleTools
             _persistentStoryStatusTip = null;
         }
 
+        private void RefreshCurrentStoryPersistentStatus()
+        {
+            ClearStoryTransientTips();
+            if (_storyRows.Count == 0)
+            {
+                return;
+            }
+
+            int? currentTransitionMode = null;
+            var functionValue = _storyRows[_currentStoryRowIndex].Get("Custom");
+            foreach (var function in StoryFunctionService.SplitFunctionValues(functionValue))
+            {
+                if (StoryFunctionService.TryParseBackgroundTransitionMode(function, out var transitionMode))
+                {
+                    currentTransitionMode = transitionMode;
+                }
+            }
+
+            if (currentTransitionMode is int mode)
+            {
+                ShowPersistentStoryStatus(
+                    InfoBarSeverity.Informational,
+                    "背景切换模式",
+                    StoryFunctionService.GetBackgroundTransitionModeRemark(mode));
+            }
+        }
+
         private void UpdateStoryFunctionInspector(string functionValue)
         {
             var functionNames = new List<string>();

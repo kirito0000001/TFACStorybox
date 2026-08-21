@@ -309,7 +309,6 @@ namespace GalExcleTools
                 return;
             }
 
-            ClearStoryTransientTips();
             ClearStoryFunctionTips();
             _isLoadingStoryRow = true;
             _storyTextEditUndoCaptured = false;
@@ -331,6 +330,7 @@ namespace GalExcleTools
                 _isLoadingStoryRow = false;
             }
 
+            RefreshCurrentStoryPersistentStatus();
             _ = RefreshStoryPreviewAsync();
             if (!playMedia)
             {

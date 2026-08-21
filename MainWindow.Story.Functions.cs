@@ -173,6 +173,13 @@ namespace GalExcleTools
             UpdateStoryFunctionInspector(custom);
         }
 
+        private void RefreshCurrentStoryFunctionStateAfterEdit()
+        {
+            RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
+            UpdateStoryToolbarCurrentInfo();
+            RefreshCurrentStoryPersistentStatus();
+        }
+
         private static string FormatStoryAssetStatus(string label, int rawIndex, IReadOnlyList<StoryAssetChoice> choices)
         {
             return StoryFunctionService.FormatAssetStatus(label, rawIndex, choices, ResolveStoryAssetIndex);
@@ -201,8 +208,7 @@ namespace GalExcleTools
             _storyRows[_currentStoryRowIndex].Set("Custom", string.Empty);
             var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes(removedChoices);
             QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
-            UpdateStoryToolbarCurrentInfo();
-            ClearStoryFunctionTips();
+            RefreshCurrentStoryFunctionStateAfterEdit();
             ShowStoryStatus(InfoBarSeverity.Success, "函数已清空", "当前句的 Custom 字段已清空。");
         }
 
@@ -267,7 +273,7 @@ namespace GalExcleTools
             row.Set("Custom", string.IsNullOrWhiteSpace(currentValue) ? functionValue : $"{currentValue}/{functionValue}");
             QueueCurrentStoryDocumentSave(choiceNotes: _pendingStoryChoiceNotes);
             _pendingStoryChoiceNotes = null;
-            UpdateStoryToolbarCurrentInfo();
+            RefreshCurrentStoryFunctionStateAfterEdit();
             ShowStoryStatus(InfoBarSeverity.Success, "函数已填写", functionValue);
             await ApplyCurrentStoryRowMediaAndFunctionAsync();
         }
@@ -301,8 +307,7 @@ namespace GalExcleTools
             row.Set("Custom", string.Join("/", functions));
             var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes([removed]);
             QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
-            UpdateStoryToolbarCurrentInfo();
-            ClearStoryFunctionTips();
+            RefreshCurrentStoryFunctionStateAfterEdit();
             ShowStoryStatus(InfoBarSeverity.Success, "函数已移除", removed);
             await ApplyCurrentStoryRowMediaAndFunctionAsync();
         }
