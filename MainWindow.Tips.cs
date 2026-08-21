@@ -10,6 +10,7 @@ namespace GalExcleTools
     public sealed partial class MainWindow
     {
         private const int MaxFloatingTipCount = 2;
+        private const string PersistentStoryStatusTag = "PersistentStoryStatus";
 
         private void ShowFloatingTip(
             InfoBarSeverity severity,
@@ -131,9 +132,12 @@ namespace GalExcleTools
         {
             while (panel.Children.OfType<InfoBar>().Count() >= MaxFloatingTipCount)
             {
-                var oldestTip = panel.Children
+                var removableTips = panel.Children
                     .OfType<InfoBar>()
-                    .FirstOrDefault(item => item.Severity != InfoBarSeverity.Error)
+                    .Where(item => !string.Equals(item.Tag as string, PersistentStoryStatusTag, StringComparison.Ordinal))
+                    .ToList();
+                var oldestTip = removableTips.FirstOrDefault(item => item.Severity != InfoBarSeverity.Error)
+                    ?? removableTips.FirstOrDefault()
                     ?? panel.Children.OfType<InfoBar>().First();
                 RemoveFloatingTip(panel, oldestTip);
             }

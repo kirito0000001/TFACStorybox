@@ -218,5 +218,33 @@ namespace GalExcleTools
             ShowFloatingTip(StoryFloatingTipsPanel, severity, title, message, exception, logMessage);
         }
 
+        private InfoBar? _persistentStoryStatusTip;
+
+        private void ShowPersistentStoryStatus(
+            InfoBarSeverity severity,
+            string title,
+            string message)
+        {
+            if (_persistentStoryStatusTip is not null)
+            {
+                RemoveFloatingTip(StoryFloatingTipsPanel, _persistentStoryStatusTip);
+            }
+
+            var normalizedSeverity = NormalizeFloatingTipSeverity(severity);
+            AppendLog(GetFloatingTipLogKind(normalizedSeverity), $"{title}：{message}");
+            var tip = CreateFloatingTipBar(normalizedSeverity, title, message);
+            tip.Tag = PersistentStoryStatusTag;
+            tip.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_persistentStoryStatusTip, tip))
+                {
+                    _persistentStoryStatusTip = null;
+                }
+            };
+            _persistentStoryStatusTip = tip;
+            TrimFloatingTipsBeforeAdd(StoryFloatingTipsPanel);
+            AddFloatingTipWithEntrance(StoryFloatingTipsPanel, tip);
+        }
+
     }
 }

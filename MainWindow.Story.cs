@@ -309,6 +309,7 @@ namespace GalExcleTools
                 return;
             }
 
+            ClearStoryTransientTips();
             ClearStoryFunctionTips();
             _isLoadingStoryRow = true;
             _storyTextEditUndoCaptured = false;

@@ -134,7 +134,7 @@ namespace GalExcleTools
             if (!string.IsNullOrWhiteSpace(previousPreviewKey) &&
                 !string.Equals(previousPreviewKey, path, StringComparison.OrdinalIgnoreCase))
             {
-                ShowStoryStatus(
+                ShowPersistentStoryStatus(
                     InfoBarSeverity.Informational,
                     "背景切换模式",
                     StoryFunctionService.GetBackgroundTransitionModeRemark(_storyBackgroundTransitionMode));

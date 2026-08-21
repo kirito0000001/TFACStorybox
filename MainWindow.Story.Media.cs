@@ -218,6 +218,7 @@ namespace GalExcleTools
         private void ClearStoryTransientTips()
         {
             ClearFloatingTips(StoryFloatingTipsPanel);
+            _persistentStoryStatusTip = null;
         }
 
         private void UpdateStoryFunctionInspector(string functionValue)
