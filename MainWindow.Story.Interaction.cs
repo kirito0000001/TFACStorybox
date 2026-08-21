@@ -70,7 +70,6 @@ namespace GalExcleTools
                 if (slot.Tag is int slotIndex)
                 {
                     _hoveredStoryCharacterSlotIndex = slotIndex;
-                    ToolTipService.SetToolTip(slot, "《F12打开快捷键提示》");
                     StoryEditorPage.Focus(FocusState.Programmatic);
                 }
 
@@ -102,7 +101,7 @@ namespace GalExcleTools
             if (sender is FrameworkElement element && element.Tag is string fieldName)
             {
                 _hoveredStoryAssetFieldName = fieldName;
-                ToolTipService.SetToolTip(element, "《F12打开快捷键提示》");
+                ToolTipService.SetToolTip(element, "Ctrl+C / Ctrl+V：复制或粘贴当前素材");
                 StoryEditorPage.Focus(FocusState.Programmatic);
             }
         }

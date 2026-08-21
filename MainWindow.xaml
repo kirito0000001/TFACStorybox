@@ -462,12 +462,7 @@
                                     VerticalScrollBarVisibility="Auto">
                                     <StackPanel Spacing="12">
                                         <TextBlock Text="本句检查器" Foreground="#202020" FontSize="18" FontWeight="SemiBold" />
-                                        <Border
-                                            Padding="12"
-                                            Background="White"
-                                            BorderBrush="#18000000"
-                                            BorderThickness="1"
-                                            CornerRadius="6">
+                                        <Border Padding="0,4,0,8">
                                             <StackPanel Spacing="10">
                                                 <StackPanel Spacing="4">
                                                     <TextBlock Text="转场判断" Foreground="#666666" FontSize="12" />
@@ -610,7 +605,7 @@
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="220" />
                             </Grid.RowDefinitions>
-                    <Grid Grid.Row="0" Background="Black">
+                    <Grid Grid.Row="0" Grid.RowSpan="2" Background="Black">
                         <Image x:Name="StoryBackgroundImage" Stretch="UniformToFill" Opacity="0.72" />
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -637,19 +632,21 @@
                     <Border
                         Grid.Row="1"
                         Height="220"
-                        Background="#F2FFFFFF"
-                        BorderBrush="#24000000"
+                        Background="#99FFFFFF"
+                        BorderBrush="#40FFFFFF"
                         BorderThickness="0,1,0,0">
                         <Grid Padding="18" ColumnSpacing="16">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="220" />
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="280" />
                             </Grid.ColumnDefinitions>
                             <StackPanel Spacing="8">
                                 <TextBox
                                     x:Name="StorySpeakerTextBox"
                                     Header="当前说话人"
+                                    Background="#66FFFFFF"
+                                    BorderBrush="#50000000"
                                     Text="{Binding SpeakerText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                     TextChanged="StorySpeakerTextBox_TextChanged"
                                     BeforeTextChanging="StoryTextEditor_BeforeTextChanging"
@@ -678,6 +675,8 @@
                                 TextWrapping="Wrap"
                                 FontSize="20"
                                 MinHeight="118"
+                                Background="#66FFFFFF"
+                                BorderBrush="#50000000"
                                 Text="{Binding StoryText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                 TextChanged="StoryTextTextBox_TextChanged"
                                 BeforeTextChanging="StoryTextEditor_BeforeTextChanging"
@@ -685,12 +684,12 @@
                                 LostFocus="StoryTextEditor_LostFocus" />
                             <StackPanel Grid.Column="2" Spacing="10" VerticalAlignment="Bottom">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
-                                    <TextBlock Text="第" Foreground="#202020" FontSize="20" VerticalAlignment="Center" />
+                                    <TextBlock Text="第" Foreground="#202020" FontSize="16" VerticalAlignment="Center" />
                                     <TextBox
                                         x:Name="StoryRowIndexTextBox"
-                                        Width="72"
+                                        Width="64"
                                         MinHeight="34"
-                                        FontSize="18"
+                                        FontSize="16"
                                         TextAlignment="Center"
                                         Text="{Binding RowIndexText, Mode=OneWay}"
                                         InputScope="Number"
@@ -700,7 +699,7 @@
                                         x:Name="StoryRowTotalText"
                                         Text="{Binding RowTotalText, Mode=OneWay}"
                                         Foreground="#202020"
-                                        FontSize="20"
+                                        FontSize="16"
                                         VerticalAlignment="Center" />
                                 </StackPanel>
                                 <Grid ColumnSpacing="8">
