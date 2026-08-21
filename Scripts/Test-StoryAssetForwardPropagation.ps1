@@ -8,11 +8,14 @@ if (-not (Test-Path -LiteralPath $assemblyPath)) {
 $assembly = [System.Reflection.Assembly]::LoadFrom((Resolve-Path $assemblyPath))
 $rowType = $assembly.GetType('GalExcleTools.StoryRow', $true)
 $serviceType = $assembly.GetType('GalExcleTools.Services.StoryAssetFieldService', $true)
-$replaceMethod = $serviceType.GetMethod(
-    'ReplaceForwardContiguousIndex',
+$buildPlanMethod = $serviceType.GetMethod(
+    'BuildForwardContiguousPlan',
     [System.Reflection.BindingFlags]'Public,Static')
-if ($null -eq $replaceMethod) {
-    throw 'ReplaceForwardContiguousIndex is missing.'
+$applyPlanMethod = $serviceType.GetMethod(
+    'ApplyForwardContiguousPlan',
+    [System.Reflection.BindingFlags]'Public,Static')
+if ($null -eq $buildPlanMethod -or $null -eq $applyPlanMethod) {
+    throw 'Forward replacement must expose separate build/apply operations.'
 }
 
 $setMethod = $rowType.GetMethod('Set')
@@ -25,7 +28,20 @@ foreach ($value in @('13', '13', '13', '8', '13')) {
     [void]$rows.Add($row)
 }
 
-$changedCount = $replaceMethod.Invoke($null, @($rows, 1, 'BGM', 21))
+$plan = $buildPlanMethod.Invoke($null, @($rows, 1, 'BGM', 21))
+$unchangedBeforeApply = @($rows | ForEach-Object { $getMethod.Invoke($_, @('BGM')) })
+if (Compare-Object @('13', '13', '13', '8', '13') $unchangedBeforeApply -SyncWindow 0) {
+    throw 'Building a replacement plan must not mutate story rows.'
+}
+
+$planType = $plan.GetType()
+if ([int]$planType.GetProperty('StartIndex').GetValue($plan) -ne 1 -or
+    [int]$planType.GetProperty('EndIndex').GetValue($plan) -ne 2 -or
+    [int]$planType.GetProperty('Count').GetValue($plan) -ne 2) {
+    throw 'Forward replacement plan calculated the wrong row range.'
+}
+
+$changedCount = $applyPlanMethod.Invoke($null, @($rows, $plan))
 $actual = @($rows | ForEach-Object { $getMethod.Invoke($_, @('BGM')) })
 $expected = @('13', '21', '21', '8', '13')
 if ([int]$changedCount -ne 2 -or (Compare-Object $expected $actual -SyncWindow 0)) {
@@ -34,7 +50,7 @@ if ([int]$changedCount -ne 2 -or (Compare-Object $expected $actual -SyncWindow 0
 
 $unsupportedRejected = $false
 try {
-    [void]$replaceMethod.Invoke($null, @($rows, 0, 'TalkBody', 4))
+    [void]$buildPlanMethod.Invoke($null, @($rows, 0, 'TalkBody', 4))
 }
 catch {
     $exception = $_.Exception
@@ -50,6 +66,26 @@ catch {
 
 if (-not $unsupportedRejected) {
     throw 'Portrait fields must not support forward propagation.'
+}
+
+$stalePlan = $buildPlanMethod.Invoke($null, @($rows, 1, 'BGM', 5))
+[void]$setMethod.Invoke($rows[2], @('BGM', '99'))
+$staleRejected = $false
+try {
+    [void]$applyPlanMethod.Invoke($null, @($rows, $stalePlan))
+}
+catch {
+    $exception = $_.Exception
+    while ($null -ne $exception) {
+        if ($exception -is [System.InvalidOperationException]) {
+            $staleRejected = $true
+            break
+        }
+        $exception = $exception.InnerException
+    }
+}
+if (-not $staleRejected) {
+    throw 'Applying a stale replacement plan must be rejected.'
 }
 
 Write-Host 'Story asset forward propagation tests passed.'

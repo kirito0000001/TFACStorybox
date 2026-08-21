@@ -599,12 +599,35 @@ namespace GalExcleTools
             }
 
             var displayName = StoryAssetFieldService.GetDisplayName(fieldName);
-            CaptureStoryUndoState($"连续更换{displayName}");
-            var changedCount = StoryAssetFieldService.ReplaceForwardContiguousIndex(
+            var replacementPlan = StoryAssetFieldService.BuildForwardContiguousPlan(
                 _storyRows,
                 _currentStoryRowIndex,
                 fieldName,
                 selectedChoice.Index);
+            if (replacementPlan.Count > 1)
+            {
+                var stopText = replacementPlan.StopReason switch
+                {
+                    StoryAssetReplacementStopReason.DifferentValue =>
+                        $"到第 {replacementPlan.StoppingIndex!.Value + 1} 句遇到不同素材“{FormatStoryAssetChoiceValue(choices, replacementPlan.StoppingValue!.Value)}”后停止。",
+                    StoryAssetReplacementStopReason.EndOfChapter => "连续范围一直到本章最后一句。",
+                    _ => string.Empty
+                };
+                var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                    $"连续更换{displayName}",
+                    $"将第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句，共 {replacementPlan.Count} 句，从“{FormatStoryAssetChoiceValue(choices, replacementPlan.OriginalIndex)}”改为“{FormatStoryAssetChoiceValue(choices, replacementPlan.ReplacementIndex)}”。\n{stopText}",
+                    "连续更换",
+                    "取消"));
+                if (!confirmed)
+                {
+                    return;
+                }
+            }
+
+            CaptureStoryUndoState($"连续更换{displayName}");
+            var changedCount = StoryAssetFieldService.ApplyForwardContiguousPlan(
+                _storyRows,
+                replacementPlan);
             QueueCurrentStoryDocumentSave();
             UpdateStoryToolbarCurrentInfo();
             await RefreshStoryPreviewAsync();
@@ -617,11 +640,19 @@ namespace GalExcleTools
                 await PlayCurrentStorySceneFromUiAsync();
             }
 
-            var endRowNumber = _currentStoryRowIndex + changedCount;
+            var endRowNumber = replacementPlan.EndIndex + 1;
             ShowStoryStatus(
                 InfoBarSeverity.Success,
                 $"{displayName}已连续更换",
                 $"共修改 {changedCount} 句（第 {_currentStoryRowIndex + 1}-{endRowNumber} 句）。");
+        }
+
+        private static string FormatStoryAssetChoiceValue(
+            IReadOnlyList<StoryAssetChoice> choices,
+            int index)
+        {
+            var choice = choices.FirstOrDefault(item => item.Index == index);
+            return choice is null ? index.ToString(CultureInfo.InvariantCulture) : $"{choice.Index}: {choice.Name}";
         }
 
     }
