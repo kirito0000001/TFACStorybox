@@ -134,21 +134,9 @@ internal sealed class ChapterEditorDialogContent
 internal sealed class FunctionEditorDialogContent
 {
     private const string ChoiceFunctionCategory = "触发选项";
-    private static readonly string[] FunctionCategories =
-    [
-        "音频",
-        "背景",
-        "特效",
-        "动画",
-        "视频",
-        "标题",
-        "跳转",
-        ChoiceFunctionCategory,
-        "自定义"
-    ];
     private readonly TextBox _nameBox;
     private readonly TextBox _indicatorBox;
-    private readonly ComboBox _categoryBox;
+    private readonly TextBox _categoryBox;
     private readonly StackPanel _choiceNotesPanel;
     private readonly Action _playPositiveSound;
     private readonly Action _playNegativeSound;
@@ -175,17 +163,12 @@ internal sealed class FunctionEditorDialogContent
             Text = function?.Indicator ?? suggestedChoiceIndicator,
             PlaceholderText = "例如：Scene_、BGM_Stop、M2-04-Choice2"
         };
-        var selectedCategory = function?.Category ??
-            (string.IsNullOrWhiteSpace(suggestedChoiceIndicator) ? "自定义" : ChoiceFunctionCategory);
-        var categories = FunctionCategories.Contains(selectedCategory, StringComparer.Ordinal)
-            ? FunctionCategories.ToList()
-            : FunctionCategories.Append(selectedCategory).ToList();
-        _categoryBox = new ComboBox
+        _categoryBox = new TextBox
         {
             Width = 420,
             Header = "分类",
-            ItemsSource = categories,
-            SelectedItem = selectedCategory
+            Text = function?.Category ?? (string.IsNullOrWhiteSpace(suggestedChoiceIndicator) ? "自定义" : ChoiceFunctionCategory),
+            PlaceholderText = "音频 / 背景 / 特效 / 动画 / 视频 / 标题 / 触发选项 / 自定义"
         };
         _choiceNotesPanel = new StackPanel
         {
@@ -210,21 +193,6 @@ internal sealed class FunctionEditorDialogContent
             _playPositiveSound();
             AddChoiceNoteRow();
         };
-        var choiceNotesExpander = new Expander
-        {
-            Header = "Choice 备注",
-            IsExpanded = false,
-            Content = new StackPanel
-            {
-                Spacing = 8,
-                Children =
-                {
-                    _choiceNotesPanel,
-                    addChoiceNoteButton,
-                    DialogContentFactory.CreateSubtleParagraph("备注只保存在函数卡里，不会写入剧情表 Custom 字段。")
-                }
-            }
-        };
 
         Content = new StackPanel
         {
@@ -234,7 +202,10 @@ internal sealed class FunctionEditorDialogContent
                 _nameBox,
                 _indicatorBox,
                 _categoryBox,
-                choiceNotesExpander
+                DialogContentFactory.CreateResultHeading("选项备注"),
+                _choiceNotesPanel,
+                addChoiceNoteButton,
+                DialogContentFactory.CreateSubtleParagraph("备注只保存在函数卡里，方便查看选项内容，不会写入剧情表 Custom 字段。")
             }
         };
     }
@@ -245,7 +216,7 @@ internal sealed class FunctionEditorDialogContent
     {
         var name = _nameBox.Text.Trim();
         var indicator = _indicatorBox.Text.Trim();
-        var category = _categoryBox.SelectedItem as string ?? "自定义";
+        var category = string.IsNullOrWhiteSpace(_categoryBox.Text) ? "自定义" : _categoryBox.Text.Trim();
         var choiceNotes = _choiceNotesPanel.Children
             .OfType<Grid>()
             .Select(row => row.Children.OfType<TextBox>().FirstOrDefault()?.Text)

@@ -154,7 +154,6 @@ namespace GalExcleTools
             _storyEditorViewModel.CurrentBgmText = FormatStoryAssetStatus("当前BGM", ParseInt(row.Get("BGM")), GetStoryBgmChoices());
             _storyEditorViewModel.CurrentSceneText = FormatStoryAssetStatus("当前环境音", ParseInt(row.Get("Scene")), GetStorySceneChoices());
             var custom = row.Get("Custom").Trim();
-            var functionValues = StoryFunctionListService.GetValues(row);
             var hasFunction = !string.IsNullOrWhiteSpace(custom);
             _storyEditorViewModel.CurrentFunctionText = string.IsNullOrWhiteSpace(custom)
                 ? "当前函数：无"
@@ -162,42 +161,28 @@ namespace GalExcleTools
             _storyEditorViewModel.HasCurrentFunction = hasFunction;
             _storyEditorViewModel.HasMultipleCurrentFunctions = StoryFunctionService.SplitFunctionValues(custom).Skip(1).Any();
             _storyEditorViewModel.HasCurrentChoices = GetCurrentStoryChoiceValues().Count > 0;
-            _storyEditorViewModel.SetFunctionItems(functionValues);
         }
 
         private static string FormatStoryAssetStatus(string label, int rawIndex, IReadOnlyList<StoryAssetChoice> choices)
         {
             return StoryFunctionService.FormatAssetStatus(label, rawIndex, choices, ResolveStoryAssetIndex);
         }
-        private async Task ClearStoryFunctionAsync()
+        private void ClearStoryFunction()
         {
             if (!CanEditStoryData() || _currentStoryDocumentPath is null || _storyRows.Count == 0)
             {
                 return;
             }
 
-            var row = _storyRows[_currentStoryRowIndex];
-            var functionValues = StoryFunctionListService.GetValues(row);
-            if (functionValues.Count == 0)
+            var removedChoices = GetCurrentStoryChoiceValues();
+            if (!string.IsNullOrWhiteSpace(_storyRows[_currentStoryRowIndex].Get("Custom")))
             {
-                return;
+                CaptureStoryUndoState("清空当前句函数");
             }
 
-            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
-                "清空当前句函数",
-                $"将删除当前句的 {functionValues.Count} 个函数。",
-                "清空",
-                "取消"));
-            if (!confirmed)
-            {
-                return;
-            }
-
-            CaptureStoryUndoState("清空当前句函数");
-            var removedFunctions = StoryFunctionListService.Clear(row);
-            var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes(removedFunctions);
+            _storyRows[_currentStoryRowIndex].Set("Custom", string.Empty);
+            var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes(removedChoices);
             QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
-            _storyEditorViewModel.SelectedFunctionIndex = -1;
             UpdateStoryToolbarCurrentInfo();
             ClearStoryFunctionTips();
             ShowStoryStatus(InfoBarSeverity.Success, "函数已清空", "当前句的 Custom 字段已清空。");
@@ -264,10 +249,10 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            var addedIndex = StoryFunctionListService.Add(row, functionValue);
+            var currentValue = row.Get("Custom").Trim();
+            row.Set("Custom", string.IsNullOrWhiteSpace(currentValue) ? functionValue : $"{currentValue}/{functionValue}");
             QueueCurrentStoryDocumentSave(choiceNotes: _pendingStoryChoiceNotes);
             _pendingStoryChoiceNotes = null;
-            _storyEditorViewModel.SelectedFunctionIndex = addedIndex;
             UpdateStoryToolbarCurrentInfo();
             ShowStoryStatus(InfoBarSeverity.Success, "函数已填写", functionValue);
             await ApplyCurrentStoryRowMediaAndFunctionAsync();
@@ -281,253 +266,31 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            var functions = StoryFunctionListService.GetValues(row);
-            var selectedIndex = _storyEditorViewModel.SelectedFunctionIndex;
-            if (selectedIndex < 0 || selectedIndex >= functions.Count)
+            var functions = StoryFunctionService.SplitFunctionValues(row.Get("Custom")).ToList();
+            if (functions.Count == 0)
             {
-                ShowStoryStatus(InfoBarSeverity.Informational, "请先选择函数", "在函数列表中选择要删除的一项。");
+                ShowStoryStatus(InfoBarSeverity.Warning, "没有可移除函数", "当前句还没有填写函数。");
                 return;
             }
 
-            var selectedValue = functions[selectedIndex];
-            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
-                "删除函数",
-                selectedValue,
-                "删除",
-                "取消"));
-            if (!confirmed)
+            var selected = await _storyDialogService.SelectSimpleChoiceAsync(
+                "移除函数",
+                functions.Select((function, index) => new StoryObjectChoice(index.ToString(), function, index)).ToList());
+            if (selected is not int selectedIndex || selectedIndex < 0 || selectedIndex >= functions.Count)
             {
                 return;
             }
 
+            var removed = functions[selectedIndex];
             CaptureStoryUndoState("移除函数");
-            var removed = StoryFunctionListService.RemoveAt(row, selectedIndex);
+            functions.RemoveAt(selectedIndex);
+            row.Set("Custom", string.Join("/", functions));
             var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes([removed]);
             QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
-            _storyEditorViewModel.SelectedFunctionIndex = Math.Min(selectedIndex, functions.Count - 2);
             UpdateStoryToolbarCurrentInfo();
             ClearStoryFunctionTips();
             ShowStoryStatus(InfoBarSeverity.Success, "函数已移除", removed);
             await ApplyCurrentStoryRowMediaAndFunctionAsync();
-        }
-
-        private async Task EditSelectedStoryFunctionAsync()
-        {
-            if (!CanEditStoryData() || _storyRows.Count == 0)
-            {
-                return;
-            }
-
-            var row = _storyRows[_currentStoryRowIndex];
-            var selectedIndex = _storyEditorViewModel.SelectedFunctionIndex;
-            var functions = StoryFunctionListService.GetValues(row);
-            if (selectedIndex < 0 || selectedIndex >= functions.Count)
-            {
-                return;
-            }
-
-            var original = functions[selectedIndex];
-            var replacement = await ShowNameInputDialogAsync("修改函数", "函数值", original);
-            if (string.IsNullOrWhiteSpace(replacement))
-            {
-                return;
-            }
-            replacement = replacement.Trim();
-            if (replacement.Contains('/', StringComparison.Ordinal))
-            {
-                ShowStoryStatus(InfoBarSeverity.Warning, "函数值不能包含 /", "请一次编辑一个函数。");
-                return;
-            }
-            if (string.Equals(original, replacement, StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            CaptureStoryUndoState("修改函数");
-            StoryFunctionListService.ReplaceAt(row, selectedIndex, replacement);
-            var migratedChoiceNotes = MigrateStoryChoiceNotesAfterFunctionReplacement(original, replacement);
-            QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
-            _storyEditorViewModel.SelectedFunctionIndex = selectedIndex;
-            UpdateStoryToolbarCurrentInfo();
-            ClearStoryFunctionTips();
-            ShowStoryStatus(InfoBarSeverity.Success, "函数已修改", $"{original} -> {replacement}");
-            await ApplyCurrentStoryRowMediaAndFunctionAsync();
-        }
-
-        private void MoveSelectedStoryFunction(int offset)
-        {
-            if (!CanEditStoryData() || _storyRows.Count == 0)
-            {
-                return;
-            }
-
-            var selectedIndex = _storyEditorViewModel.SelectedFunctionIndex;
-            var targetIndex = selectedIndex + Math.Sign(offset);
-            var row = _storyRows[_currentStoryRowIndex];
-            var values = StoryFunctionListService.GetValues(row);
-            if (selectedIndex < 0 || selectedIndex >= values.Count || targetIndex < 0 || targetIndex >= values.Count)
-            {
-                return;
-            }
-
-            CaptureStoryUndoState("调整函数顺序");
-            StoryFunctionListService.Move(row, selectedIndex, targetIndex);
-            QueueCurrentStoryDocumentSave();
-            _storyEditorViewModel.SelectedFunctionIndex = targetIndex;
-            UpdateStoryToolbarCurrentInfo();
-            ShowStoryStatus(InfoBarSeverity.Success, "函数顺序已调整", row.Get("Custom"));
-            _ = ApplyCurrentStoryRowMediaAndFunctionAsync();
-        }
-
-        private void CopySelectedStoryFunction()
-        {
-            if (_storyRows.Count == 0)
-            {
-                return;
-            }
-
-            var selectedIndex = _storyEditorViewModel.SelectedFunctionIndex;
-            var row = _storyRows[_currentStoryRowIndex];
-            var values = StoryFunctionListService.GetValues(row);
-            if (selectedIndex < 0 || selectedIndex >= values.Count)
-            {
-                return;
-            }
-
-            _storyFunctionClipboard = StoryFunctionListService.CopyAt(row, selectedIndex);
-            var dataPackage = new DataPackage { RequestedOperation = DataPackageOperation.Copy };
-            dataPackage.SetText(_storyFunctionClipboard);
-            Clipboard.SetContent(dataPackage);
-            ShowStoryStatus(InfoBarSeverity.Success, "函数已复制", _storyFunctionClipboard);
-        }
-
-        private async Task PasteStoryFunctionAsync()
-        {
-            if (!CanEditStoryData() || _storyRows.Count == 0)
-            {
-                return;
-            }
-
-            var value = _storyFunctionClipboard;
-            try
-            {
-                var clipboardContent = Clipboard.GetContent();
-                if (clipboardContent.Contains(StandardDataFormats.Text))
-                {
-                    value = await clipboardContent.GetTextAsync();
-                }
-            }
-            catch
-            {
-                // Use the internal function clipboard when the system clipboard is unavailable.
-            }
-
-            value = value?.Trim();
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                ShowStoryStatus(InfoBarSeverity.Informational, "没有可粘贴函数", "请先复制一个函数。");
-                return;
-            }
-            if (value.Contains('/', StringComparison.Ordinal))
-            {
-                ShowStoryStatus(InfoBarSeverity.Warning, "一次只能粘贴一个函数", value);
-                return;
-            }
-
-            var row = _storyRows[_currentStoryRowIndex];
-            CaptureStoryUndoState("粘贴函数");
-            var insertedIndex = StoryFunctionListService.InsertAfter(
-                row,
-                _storyEditorViewModel.SelectedFunctionIndex,
-                value);
-            QueueCurrentStoryDocumentSave();
-            _storyEditorViewModel.SelectedFunctionIndex = insertedIndex;
-            UpdateStoryToolbarCurrentInfo();
-            ShowStoryStatus(InfoBarSeverity.Success, "函数已粘贴", value);
-            await ApplyCurrentStoryRowMediaAndFunctionAsync();
-        }
-
-        private StoryChoiceNoteState? MigrateStoryChoiceNotesAfterFunctionReplacement(
-            string original,
-            string replacement)
-        {
-            if (!IsCurrentStoryChoiceFunctionValue(original) ||
-                !_storyEditorViewModel.Document.ChoiceNotes.Choices.TryGetValue(original, out var notes))
-            {
-                return null;
-            }
-
-            var state = _storyEditorViewModel.Document.ChoiceNotes.Clone();
-            var changed = false;
-            if (IsCurrentStoryChoiceFunctionValue(replacement) && !state.Choices.ContainsKey(replacement))
-            {
-                state.Choices[replacement] = notes.ToList();
-                changed = true;
-            }
-            if (!StoryChoiceExistsInRows(original))
-            {
-                changed |= state.Choices.Remove(original);
-            }
-
-            return changed ? state : null;
-        }
-
-        private void StoryFunctionListView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
-        {
-            _draggedStoryFunctionItem = e.Items.OfType<StoryFunctionListItem>().FirstOrDefault();
-            _storyFunctionDragOriginalOrder = _storyEditorViewModel.FunctionItems
-                .Select(item => item.Value)
-                .ToList();
-        }
-
-        private async void StoryFunctionListView_DragItemsCompleted(
-            ListViewBase sender,
-            DragItemsCompletedEventArgs args)
-        {
-            try
-            {
-                if (_storyRows.Count == 0 || _storyFunctionDragOriginalOrder is null)
-                {
-                    return;
-                }
-
-                var orderedValues = _storyEditorViewModel.FunctionItems.Select(item => item.Value).ToList();
-                if (_storyFunctionDragOriginalOrder.SequenceEqual(orderedValues, StringComparer.Ordinal))
-                {
-                    return;
-                }
-
-                var row = _storyRows[_currentStoryRowIndex];
-                CaptureStoryUndoState("拖拽调整函数顺序");
-                if (!StoryFunctionListService.ApplyOrder(row, orderedValues))
-                {
-                    _storyEditorViewModel.UndoService.CancelPending();
-                    return;
-                }
-
-                var selectedIndex = _draggedStoryFunctionItem is null
-                    ? _storyEditorViewModel.SelectedFunctionIndex
-                    : _storyEditorViewModel.FunctionItems.IndexOf(_draggedStoryFunctionItem);
-                QueueCurrentStoryDocumentSave();
-                _storyEditorViewModel.SelectedFunctionIndex = selectedIndex;
-                UpdateStoryToolbarCurrentInfo();
-                ShowStoryStatus(InfoBarSeverity.Success, "函数顺序已调整", row.Get("Custom"));
-                await ApplyCurrentStoryRowMediaAndFunctionAsync();
-            }
-            catch (Exception ex)
-            {
-                _storyEditorViewModel.UndoService.CancelPending();
-                ShowStoryStatus(InfoBarSeverity.Error, "函数排序失败", ex.Message, ex);
-                if (_storyFunctionDragOriginalOrder is not null)
-                {
-                    _storyEditorViewModel.SetFunctionItems(_storyFunctionDragOriginalOrder);
-                }
-            }
-            finally
-            {
-                _draggedStoryFunctionItem = null;
-                _storyFunctionDragOriginalOrder = null;
-            }
         }
 
         private List<FunctionEntry> GetStoryFunctions()

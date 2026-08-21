@@ -141,32 +141,12 @@ namespace GalExcleTools
             }
         }
 
-        private async void StoryEditorPage_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+        private void StoryEditorPage_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
         {
             if (_currentStoryDocumentPath is null ||
                 _storyRows.Count == 0 ||
+                _isStoryDebugModeEnabled ||
                 !IsControlKeyDown())
-            {
-                return;
-            }
-
-            if (IsStoryFunctionListInteraction(e.OriginalSource))
-            {
-                if (e.Key == Windows.System.VirtualKey.C)
-                {
-                    CopySelectedStoryFunction();
-                    e.Handled = true;
-                    return;
-                }
-                if (e.Key == Windows.System.VirtualKey.V && !_isStoryDebugModeEnabled)
-                {
-                    await PasteStoryFunctionAsync();
-                    e.Handled = true;
-                    return;
-                }
-            }
-
-            if (_isStoryDebugModeEnabled)
             {
                 return;
             }
@@ -182,26 +162,6 @@ namespace GalExcleTools
                 UndoStoryEditorOperation();
                 e.Handled = true;
             }
-        }
-
-        private bool IsStoryFunctionListInteraction(object originalSource)
-        {
-            if (StoryFunctionListView.FocusState != FocusState.Unfocused)
-            {
-                return true;
-            }
-
-            var current = originalSource as DependencyObject;
-            while (current is not null)
-            {
-                if (ReferenceEquals(current, StoryFunctionListView))
-                {
-                    return true;
-                }
-                current = VisualTreeHelper.GetParent(current);
-            }
-
-            return false;
         }
 
         private async void StoryEditorPage_KeyDown(object sender, KeyRoutedEventArgs e)
