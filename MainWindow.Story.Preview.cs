@@ -53,7 +53,7 @@ namespace GalExcleTools
             }
         }
 
-        private async Task RefreshStoryPreviewAsync(bool showTransitionStatus = true)
+        private async Task RefreshStoryPreviewAsync(bool showInheritedTransitionStatus = true)
         {
             _storyPreviewRefreshCancellation?.Cancel();
             _storyPreviewRefreshCancellation?.Dispose();
@@ -68,7 +68,7 @@ namespace GalExcleTools
             var row = _storyRows[_currentStoryRowIndex].Clone();
             try
             {
-                await SetStoryBackgroundAsync(ParseInt(row.Get("BGindex")), cancellationToken, showTransitionStatus);
+                await SetStoryBackgroundAsync(ParseInt(row.Get("BGindex")), cancellationToken, showInheritedTransitionStatus);
                 cancellationToken.ThrowIfCancellationRequested();
                 await SetStoryCharacterSlotAsync(StoryCharacterSlot1, 1, row.Get("Chara1"), ParseInt(row.Get("Body1")), ParseInt(row.Get("Face1")), ParseInt(row.Get("Adorn1")), ParseInt(row.Get("Vfx1")), cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
@@ -96,7 +96,7 @@ namespace GalExcleTools
         private async Task SetStoryBackgroundAsync(
             int index,
             CancellationToken cancellationToken,
-            bool showTransitionStatus)
+            bool showInheritedTransitionStatus)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (_currentStoryAssetLibrary is null)
@@ -134,7 +134,7 @@ namespace GalExcleTools
             _storyBackgroundPreviewKey = path;
             await LoadStoryPreviewImageAsync(StoryBackgroundImage, path, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            if (showTransitionStatus &&
+            if (showInheritedTransitionStatus &&
                 !string.IsNullOrWhiteSpace(previousPreviewKey) &&
                 !string.Equals(previousPreviewKey, path, StringComparison.OrdinalIgnoreCase))
             {

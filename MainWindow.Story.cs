@@ -301,7 +301,7 @@ namespace GalExcleTools
             AppendLog(LogKind.User, $"重做编辑器操作：{application.Description}");
         }
 
-        private void LoadStoryRowIntoUi(bool playMedia = true, bool showTransitionStatus = true)
+        private void LoadStoryRowIntoUi(bool playMedia = true, bool showInheritedTransitionStatus = true)
         {
             if (_storyRows.Count == 0)
             {
@@ -330,16 +330,8 @@ namespace GalExcleTools
                 _isLoadingStoryRow = false;
             }
 
-            if (showTransitionStatus)
-            {
-                RefreshCurrentStoryPersistentStatus();
-            }
-            else
-            {
-                ClearStoryTransientTips();
-            }
-
-            _ = RefreshStoryPreviewAsync(showTransitionStatus);
+            RefreshCurrentStoryPersistentStatus();
+            _ = RefreshStoryPreviewAsync(showInheritedTransitionStatus);
             if (!playMedia)
             {
                 return;
@@ -438,7 +430,7 @@ namespace GalExcleTools
         private void NavigateToStoryRow(
             int targetIndex,
             bool rebuildPersistentState,
-            bool showTransitionStatus = true)
+            bool showInheritedTransitionStatus = true)
         {
             if (_storyRows.Count == 0)
             {
@@ -461,7 +453,7 @@ namespace GalExcleTools
                 RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
             }
 
-            LoadStoryRowIntoUi(showTransitionStatus: showTransitionStatus);
+            LoadStoryRowIntoUi(showInheritedTransitionStatus: showInheritedTransitionStatus);
         }
 
         private void NavigatePreviousStoryRow()
@@ -474,7 +466,7 @@ namespace GalExcleTools
             NavigateToStoryRow(
                 _currentStoryRowIndex - 1,
                 rebuildPersistentState: true,
-                showTransitionStatus: false);
+                showInheritedTransitionStatus: false);
         }
 
         private void NavigateStorySection(int direction)

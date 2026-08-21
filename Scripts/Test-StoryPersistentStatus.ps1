@@ -47,18 +47,18 @@ Require-Pattern `
 
 Require-Pattern `
     (Join-Path $root 'MainWindow.Story.cs') `
-    'NavigatePreviousStoryRow[\s\S]*?NavigateToStoryRow\([^;]*?showTransitionStatus:\s*false\)' `
-    'Previous-row debugging must suppress forward-only transition status.'
+    'NavigatePreviousStoryRow[\s\S]*?NavigateToStoryRow\([^;]*?showInheritedTransitionStatus:\s*false\)' `
+    'Previous-row debugging must suppress inherited forward-only transition status.'
 
 Require-Pattern `
     (Join-Path $root 'MainWindow.Story.cs') `
-    'LoadStoryRowIntoUi\([^)]*showTransitionStatus[\s\S]*?if\s*\(showTransitionStatus\)[\s\S]*?RefreshCurrentStoryPersistentStatus\(\)[\s\S]*?else[\s\S]*?ClearStoryTransientTips\(\)[\s\S]*?RefreshStoryPreviewAsync\(showTransitionStatus\)' `
-    'Story-row loading must clear status and pass transition visibility to the preview.'
+    'LoadStoryRowIntoUi\([^)]*showInheritedTransitionStatus[\s\S]*?RefreshCurrentStoryPersistentStatus\(\)[\s\S]*?RefreshStoryPreviewAsync\(showInheritedTransitionStatus\)' `
+    'Story-row loading must always show explicit row functions while passing inherited transition visibility to the preview.'
 
 Require-Pattern `
     (Join-Path $root 'MainWindow.Story.Preview.cs') `
-    'SetStoryBackgroundAsync\([^)]*showTransitionStatus[\s\S]*?if\s*\(showTransitionStatus\s*&&[\s\S]*?ShowPersistentStoryStatus' `
-    'Background preview must not emit transition status when backward navigation suppresses it.'
+    'SetStoryBackgroundAsync\([^)]*showInheritedTransitionStatus[\s\S]*?if\s*\(showInheritedTransitionStatus\s*&&[\s\S]*?ShowPersistentStoryStatus' `
+    'Background preview must not emit inherited transition status when backward navigation suppresses it.'
 
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Error $_ }
