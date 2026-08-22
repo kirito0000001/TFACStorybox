@@ -466,6 +466,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
 {
     private readonly StackPanel _notesPanel;
     private readonly IReadOnlyList<StoryChoiceTargetOption> _targetOptions;
+    private readonly TextBlock _summaryText;
     private readonly Action _playPositiveSound;
     private readonly Action _playNegativeSound;
 
@@ -483,6 +484,12 @@ internal sealed class ChoiceFunctionNoteDialogContent
         {
             Spacing = 8
         };
+        _summaryText = new TextBlock
+        {
+            FontSize = 12,
+            Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush,
+            VerticalAlignment = VerticalAlignment.Center
+        };
 
         if (initialOptions is { Count: > 0 })
         {
@@ -495,13 +502,22 @@ internal sealed class ChoiceFunctionNoteDialogContent
         {
             AddChoiceRow();
         }
+
         var addButton = new Button
         {
-            Width = 36,
-            Height = 32,
-            Padding = new Thickness(0),
+            Height = 36,
+            Padding = new Thickness(12, 0, 12, 0),
             HorizontalAlignment = HorizontalAlignment.Left,
-            Content = "+"
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 7,
+                Children =
+                {
+                    new SymbolIcon(Symbol.Add),
+                    new TextBlock { Text = "添加选项", VerticalAlignment = VerticalAlignment.Center }
+                }
+            }
         };
         addButton.Click += (_, _) =>
         {
@@ -509,27 +525,69 @@ internal sealed class ChoiceFunctionNoteDialogContent
             AddChoiceRow();
         };
 
-        Content = new StackPanel
+        var heading = new StackPanel
         {
-            Spacing = 10,
+            Spacing = 3,
             Children =
             {
-                DialogContentFactory.CreateResultHeading(choiceIndicator),
-                DialogContentFactory.CreateSubtleParagraph("填写选项内容，并按需指定目标小节；不跳转的选项保持“无目标”。"),
-                _notesPanel,
-                addButton,
-                DialogContentFactory.CreateResultHeading($"表格只会写入 {choiceIndicator}。"),
-                DialogContentFactory.CreateSubtleParagraph("备注不会写入剧情表 Custom 字段。")
+                new TextBlock
+                {
+                    Text = choiceIndicator,
+                    FontSize = 16,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                },
+                new TextBlock
+                {
+                    Text = "选项内容与分支目标",
+                    FontSize = 12,
+                    Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
+                }
             }
         };
+        var columnHeader = CreateColumnHeader();
+        var optionsScroll = new ScrollViewer
+        {
+            MaxHeight = 420,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = _notesPanel
+        };
+        var footer = new Grid
+        {
+            ColumnSpacing = 12
+        };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(_summaryText, 1);
+        footer.Children.Add(addButton);
+        footer.Children.Add(_summaryText);
+
+        var content = new Grid
+        {
+            Width = 720,
+            RowSpacing = 12
+        };
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(columnHeader, 1);
+        Grid.SetRow(optionsScroll, 2);
+        Grid.SetRow(footer, 3);
+        content.Children.Add(heading);
+        content.Children.Add(columnHeader);
+        content.Children.Add(optionsScroll);
+        content.Children.Add(footer);
+        Content = content;
+        UpdateSummary();
     }
 
-    public StackPanel Content { get; }
+    public FrameworkElement Content { get; }
 
     public StoryChoiceEditorResult ReadResult()
     {
         var options = new List<StoryChoiceEditorOption>();
-        foreach (var row in _notesPanel.Children.OfType<Grid>())
+        foreach (var row in GetOptionRows())
         {
             var note = TextUtility.NormalizeFunctionChoiceNote(row.Children.OfType<TextBox>().FirstOrDefault()?.Text);
             var targetId = row.Children.OfType<ComboBox>().FirstOrDefault()?.SelectedItem is ComboBoxItem item
@@ -543,18 +601,36 @@ internal sealed class ChoiceFunctionNoteDialogContent
 
     private void AddChoiceRow(StoryChoiceEditorOption? initialOption = null)
     {
+        var row = CreateOptionRow(initialOption);
+        var container = new Border
+        {
+            MinHeight = 60,
+            Padding = new Thickness(10, 8, 10, 8),
+            CornerRadius = new CornerRadius(6),
+            Background = Application.Current.Resources["CardBackgroundFillColorSecondaryBrush"] as Brush,
+            BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
+            BorderThickness = new Thickness(1),
+            Child = row
+        };
+        _notesPanel.Children.Add(container);
+        RenumberRows();
+    }
+
+    private Grid CreateOptionRow(StoryChoiceEditorOption? initialOption)
+    {
         var row = new Grid
         {
-            ColumnSpacing = 8
+            ColumnSpacing = 10
         };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(76) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(152) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        AddOptionColumns(row);
 
         var optionLabel = new TextBlock
         {
-            Text = $"选项 {StoryBranchService.GetOptionKey(_notesPanel.Children.Count)}",
+            Text = StoryBranchService.GetOptionKey(_notesPanel.Children.Count),
+            FontSize = 15,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = Application.Current.Resources["AccentTextFillColorPrimaryBrush"] as Brush,
+            HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
@@ -563,13 +639,14 @@ internal sealed class ChoiceFunctionNoteDialogContent
             PlaceholderText = "例如：接受邀请",
             Text = initialOption?.Text ?? string.Empty,
             TextWrapping = TextWrapping.Wrap,
-            MinHeight = 42
+            MinHeight = 40,
+            VerticalAlignment = VerticalAlignment.Center
         };
         var targetBox = new ComboBox
         {
-            Header = "目标小节",
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            MinHeight = 42
+            MinHeight = 40,
+            VerticalAlignment = VerticalAlignment.Center
         };
         targetBox.Items.Add(new ComboBoxItem { Content = "无目标", Tag = string.Empty });
         foreach (var target in _targetOptions)
@@ -593,15 +670,27 @@ internal sealed class ChoiceFunctionNoteDialogContent
                 }
             }
         }
+        targetBox.SelectionChanged += (_, _) => UpdateSummary();
         var removeButton = new Button
         {
-            Content = "删除",
-            Margin = new Thickness(0, 28, 0, 0)
+            Width = 36,
+            Height = 36,
+            Padding = new Thickness(0),
+            Content = new SymbolIcon(Symbol.Delete),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
         };
+        ToolTipService.SetToolTip(removeButton, "删除这个选项");
         removeButton.Click += (_, _) =>
         {
             _playNegativeSound();
-            _notesPanel.Children.Remove(row);
+            var container = _notesPanel.Children
+                .OfType<Border>()
+                .FirstOrDefault(item => ReferenceEquals(item.Child, row));
+            if (container is not null)
+            {
+                _notesPanel.Children.Remove(container);
+            }
             if (_notesPanel.Children.Count == 0)
             {
                 AddChoiceRow();
@@ -618,29 +707,71 @@ internal sealed class ChoiceFunctionNoteDialogContent
         row.Children.Add(noteBox);
         row.Children.Add(targetBox);
         row.Children.Add(removeButton);
-        _notesPanel.Children.Add(row);
-        RenumberRows();
+        return row;
     }
 
     private void RenumberRows()
     {
-        for (var i = 0; i < _notesPanel.Children.Count; i++)
+        var rows = GetOptionRows().ToList();
+        for (var i = 0; i < rows.Count; i++)
         {
-            if (_notesPanel.Children[i] is not Grid row)
-            {
-                continue;
-            }
-
-            foreach (var textBox in row.Children.OfType<TextBox>())
-            {
-                textBox.Header = $"选项备注 {i + 1}";
-            }
-
-            foreach (var textBlock in row.Children.OfType<TextBlock>())
-            {
-                textBlock.Text = $"选项 {StoryBranchService.GetOptionKey(i)}";
-            }
+            rows[i].Children.OfType<TextBlock>().First().Text = StoryBranchService.GetOptionKey(i);
         }
+
+        UpdateSummary();
+    }
+
+    private IEnumerable<Grid> GetOptionRows()
+    {
+        return _notesPanel.Children
+            .OfType<Border>()
+            .Select(container => container.Child)
+            .OfType<Grid>();
+    }
+
+    private void UpdateSummary()
+    {
+        var rows = GetOptionRows().ToList();
+        var targetCount = rows.Count(row =>
+            row.Children.OfType<ComboBox>().FirstOrDefault()?.SelectedItem is ComboBoxItem item &&
+            !string.IsNullOrWhiteSpace(item.Tag as string));
+        _summaryText.Text = $"{rows.Count} 个选项 · {targetCount} 个目标";
+    }
+
+    private static Grid CreateColumnHeader()
+    {
+        var grid = new Grid
+        {
+            Padding = new Thickness(10, 0, 10, 0),
+            ColumnSpacing = 10
+        };
+        AddOptionColumns(grid);
+        grid.Children.Add(CreateColumnHeader("选项", 0));
+        grid.Children.Add(CreateColumnHeader("选项内容", 1));
+        grid.Children.Add(CreateColumnHeader("前往", 2));
+        grid.Children.Add(CreateColumnHeader("操作", 3));
+        return grid;
+    }
+
+    private static TextBlock CreateColumnHeader(string text, int column)
+    {
+        var label = new TextBlock
+        {
+            Text = text,
+            FontSize = 12,
+            Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush,
+            HorizontalAlignment = column is 0 or 3 ? HorizontalAlignment.Center : HorizontalAlignment.Left
+        };
+        Grid.SetColumn(label, column);
+        return label;
+    }
+
+    private static void AddOptionColumns(Grid grid)
+    {
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
     }
 }
 

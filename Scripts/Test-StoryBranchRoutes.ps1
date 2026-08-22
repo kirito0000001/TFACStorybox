@@ -32,8 +32,13 @@ Require-Pattern `
 
 Require-Pattern `
     (Join-Path $root 'Views\StoryDialogContentFactory.cs') `
-    'ChoiceFunctionNoteDialogContent[\s\S]*?目标小节[\s\S]*?StoryChoiceEditorResult' `
+    'ChoiceFunctionNoteDialogContent[\s\S]*?StoryChoiceTargetOption[\s\S]*?无目标' `
     'Choice editing must capture optional target sections alongside option text.'
+
+Require-Pattern `
+    (Join-Path $root 'Views\StoryDialogContentFactory.cs') `
+    'StoryChoiceEditorResult\s+ReadResult[\s\S]*?StoryChoiceEditorOption' `
+    'Choice editing must return option text and selected targets together.'
 
 Require-Pattern `
     (Join-Path $root 'MainWindow.xaml') `
