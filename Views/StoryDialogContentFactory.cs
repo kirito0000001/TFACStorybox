@@ -678,14 +678,24 @@ internal sealed class ChoiceFunctionNoteDialogContent
         targetBox.SelectionChanged += (_, _) => UpdateSummary();
         var removeButton = new Button
         {
-            Width = 36,
-            Height = 36,
+            Width = 28,
+            Height = 32,
             Padding = new Thickness(0),
             Content = new SymbolIcon(Symbol.Delete),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         };
         ToolTipService.SetToolTip(removeButton, "删除这个选项");
+        var optionCell = new Grid
+        {
+            ColumnSpacing = 4,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        optionCell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        optionCell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+        Grid.SetColumn(removeButton, 1);
+        optionCell.Children.Add(optionLabel);
+        optionCell.Children.Add(removeButton);
         removeButton.Click += (_, _) =>
         {
             _playNegativeSound();
@@ -707,11 +717,9 @@ internal sealed class ChoiceFunctionNoteDialogContent
 
         Grid.SetColumn(noteBox, 1);
         Grid.SetColumn(targetBox, 2);
-        Grid.SetColumn(removeButton, 3);
-        row.Children.Add(optionLabel);
+        row.Children.Add(optionCell);
         row.Children.Add(noteBox);
         row.Children.Add(targetBox);
-        row.Children.Add(removeButton);
         return row;
     }
 
@@ -720,7 +728,13 @@ internal sealed class ChoiceFunctionNoteDialogContent
         var rows = GetOptionRows().ToList();
         for (var i = 0; i < rows.Count; i++)
         {
-            rows[i].Children.OfType<TextBlock>().First().Text = StoryBranchService.GetOptionKey(i);
+            rows[i].Children
+                .OfType<Grid>()
+                .First()
+                .Children
+                .OfType<TextBlock>()
+                .First()
+                .Text = StoryBranchService.GetOptionKey(i);
         }
 
         UpdateSummary();
@@ -755,7 +769,6 @@ internal sealed class ChoiceFunctionNoteDialogContent
         grid.Children.Add(CreateColumnHeader("选项", 0));
         grid.Children.Add(CreateColumnHeader("选项内容", 1));
         grid.Children.Add(CreateColumnHeader("前往小节", 2));
-        grid.Children.Add(CreateColumnHeader("操作", 3));
         return grid;
     }
 
@@ -766,7 +779,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
             Text = text,
             FontSize = 12,
             Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush,
-            HorizontalAlignment = column is 0 or 3 ? HorizontalAlignment.Center : HorizontalAlignment.Left
+            HorizontalAlignment = column == 0 ? HorizontalAlignment.Center : HorizontalAlignment.Left
         };
         Grid.SetColumn(label, column);
         return label;
@@ -774,10 +787,9 @@ internal sealed class ChoiceFunctionNoteDialogContent
 
     private static void AddOptionColumns(Grid grid)
     {
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(76) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
     }
 }
 

@@ -12,13 +12,14 @@ function Require([string]$pattern, [string]$message) {
 }
 
 Require 'ChoiceFunctionNoteDialogContent[\s\S]*?_notesPanel\s*=\s*new StackPanel[\s\S]*?Width\s*=\s*560[\s\S]*?var content = new Grid[\s\S]*?Width\s*=\s*560' 'Choice editor and its scroll content must share a constrained width.'
-Require 'CreateColumnHeader[\s\S]*?选项内容[\s\S]*?前往小节[\s\S]*?操作' 'Choice editor needs one clear shared column header.'
+Require 'CreateColumnHeader[\s\S]*?选项内容[\s\S]*?前往小节' 'Choice editor needs one clear shared column header.'
 Require 'ComboBoxItem\s*\{\s*Content\s*=\s*"不跳转"' 'The empty branch target must clearly say that it does not jump.'
 Require 'ScrollViewer[\s\S]*?MaxHeight\s*=\s*420[\s\S]*?_notesPanel' 'Only the option list should scroll when it grows.'
 Require 'optionsScroll[\s\S]*?HorizontalContentAlignment\s*=\s*HorizontalAlignment\.Stretch' 'The option list must stretch rows inside the viewport instead of measuring them infinitely wide.'
 Require 'var container = new Border[\s\S]*?Width\s*=\s*560[\s\S]*?CreateOptionRow[\s\S]*?Width\s*=\s*540' 'Each repeated option surface and inner grid must have finite matching widths.'
 Require 'CreateColumnHeader\(\)[\s\S]*?Width\s*=\s*560' 'The shared header must use the same finite width as option rows.'
 Require 'SymbolIcon\(Symbol\.Delete\)[\s\S]*?ToolTipService\.SetToolTip' 'Delete must use a compact icon button with a tooltip.'
+Require 'var optionCell = new Grid[\s\S]*?Grid\.SetColumn\(removeButton, 1\)[\s\S]*?optionCell\.Children\.Add\(optionLabel\)[\s\S]*?optionCell\.Children\.Add\(removeButton\)' 'Delete must live beside the option letter in the always-visible first column.'
 Require 'SymbolIcon\(Symbol\.Add\)[\s\S]*?添加选项' 'Adding an option should use an icon-and-text command.'
 Require 'UpdateSummary[\s\S]*?个选项[\s\S]*?个目标' 'The footer should summarize option and target counts.'
 Require 'CreateOptionRow[\s\S]*?CornerRadius\s*=\s*new CornerRadius\(6\)' 'Each option should use one restrained repeated-item surface.'
