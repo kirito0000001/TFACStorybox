@@ -63,29 +63,6 @@ internal sealed class FunctionDialogService
             : null;
     }
 
-    public async Task<StoryChoiceEditorResult?> EditChoiceNotesAsync(
-        string choiceIndicator,
-        IReadOnlyList<StoryChoiceTargetOption> targetOptions,
-        IReadOnlyList<StoryChoiceEditorOption>? initialOptions = null,
-        string title = "添加触发选项")
-    {
-        var dialogContent = StoryDialogContentFactory.CreateChoiceFunctionNoteContent(
-            choiceIndicator,
-            targetOptions,
-            initialOptions,
-            PlayPositiveSound,
-            PlayNegativeSound);
-
-        var result = await _dialogService.ShowContentAsync(new ContentDialogRequest(
-            title,
-            dialogContent.Content,
-            "确定",
-            "取消"));
-        return result == DialogResultKind.Primary
-            ? dialogContent.ReadResult()
-            : null;
-    }
-
     private void PlayPositiveSound()
     {
         _uiSoundService.Play(UiSoundKind.Positive);

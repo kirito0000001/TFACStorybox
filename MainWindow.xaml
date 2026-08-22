@@ -2465,6 +2465,183 @@ public:
             </Grid>
         </NavigationView>
 
+        <Grid
+            x:Name="StoryChoiceEditorHost"
+            Grid.RowSpan="2"
+            Background="#99000000"
+            Canvas.ZIndex="500"
+            IsTabStop="True"
+            KeyDown="StoryChoiceEditorHost_KeyDown"
+            RightTapped="StoryChoiceEditorHost_RightTapped"
+            Tapped="StoryChoiceEditorHost_Tapped"
+            Visibility="Collapsed">
+            <Border
+                x:Name="StoryChoiceEditorCard"
+                Width="920"
+                Height="620"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Tapped="StoryChoiceEditorCard_Tapped">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="72" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="72" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Padding="24,14" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="编辑触发选项" FontSize="22" FontWeight="SemiBold" />
+                            <TextBlock x:Name="StoryChoiceEditorCodeText" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
+                        <Button
+                            Grid.Column="1"
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Click="StoryChoiceEditorCancelButton_Click"
+                            ToolTipService.ToolTip="关闭">
+                            <SymbolIcon Symbol="Cancel" />
+                        </Button>
+                    </Grid>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="300" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid Padding="20,18" RowSpacing="12" Background="{ThemeResource LayerFillColorDefaultBrush}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="选项" FontSize="15" FontWeight="SemiBold" />
+                            <ListView
+                                x:Name="StoryChoiceEditorListView"
+                                Grid.Row="1"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                SelectionChanged="StoryChoiceEditorListView_SelectionChanged"
+                                SelectionMode="Single"
+                                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="MinHeight" Value="68" />
+                                        <Setter Property="Padding" Value="10,7" />
+                                        <Setter Property="Margin" Value="0,0,0,4" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="34" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                Text="{Binding OptionKey}"
+                                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                FontSize="16"
+                                                FontWeight="SemiBold"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding DisplayText}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding TargetDisplayName}" Style="{StaticResource SubtleTextStyle}" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            <Button
+                                x:Name="StoryChoiceEditorAddButton"
+                                Grid.Row="2"
+                                Height="38"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                Click="StoryChoiceEditorAddButton_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <SymbolIcon Symbol="Add" />
+                                    <TextBlock Text="新增选项" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <Grid Grid.Column="1" Padding="28,22" RowSpacing="18">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock x:Name="StoryChoiceEditorDetailTitle" Text="选项 A" FontSize="20" FontWeight="SemiBold" />
+                            <TextBox
+                                x:Name="StoryChoiceEditorTextBox"
+                                Grid.Row="1"
+                                Header="选项内容"
+                                PlaceholderText="填写玩家看到的选项文本"
+                                TextChanged="StoryChoiceEditorTextBox_TextChanged" />
+                            <ComboBox
+                                x:Name="StoryChoiceEditorTargetComboBox"
+                                Grid.Row="2"
+                                Header="前往小节"
+                                HorizontalAlignment="Stretch"
+                                SelectionChanged="StoryChoiceEditorTargetComboBox_SelectionChanged" />
+                            <Button
+                                x:Name="StoryChoiceEditorDeleteButton"
+                                Grid.Row="4"
+                                Height="38"
+                                HorizontalAlignment="Left"
+                                Click="StoryChoiceEditorDeleteButton_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <SymbolIcon Symbol="Delete" />
+                                    <TextBlock Text="删除当前选项" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </Grid>
+
+                    <Grid Grid.Row="2" Padding="24,14" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="150" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="StoryChoiceEditorSummaryText"
+                            VerticalAlignment="Center"
+                            Style="{StaticResource SubtleTextStyle}" />
+                        <Button
+                            x:Name="StoryChoiceEditorConfirmButton"
+                            Grid.Column="1"
+                            Height="40"
+                            Content="确定"
+                            Click="StoryChoiceEditorConfirmButton_Click"
+                            Style="{StaticResource AccentButtonStyle}" />
+                        <Button
+                            x:Name="StoryChoiceEditorCancelButton"
+                            Grid.Column="2"
+                            Height="40"
+                            Content="取消"
+                            Click="StoryChoiceEditorCancelButton_Click" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
         <StackPanel
             x:Name="FloatingTipsPanel"
             Grid.Row="1"

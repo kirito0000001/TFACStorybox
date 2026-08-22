@@ -31,13 +31,13 @@ Require-Pattern `
     'Branch resolution must live in a focused reusable service.'
 
 Require-Pattern `
-    (Join-Path $root 'Views\StoryDialogContentFactory.cs') `
-    'ChoiceFunctionNoteDialogContent[\s\S]*?StoryChoiceTargetOption[\s\S]*?不跳转' `
+    (Join-Path $root 'MainWindow.Story.ChoiceEditor.cs') `
+    'ShowStoryChoiceEditorAsync[\s\S]*?StoryChoiceTargetOption[\s\S]*?不跳转' `
     'Choice editing must capture optional target sections alongside option text.'
 
 Require-Pattern `
-    (Join-Path $root 'Views\StoryDialogContentFactory.cs') `
-    'StoryChoiceEditorResult\s+ReadResult[\s\S]*?StoryChoiceEditorOption' `
+    (Join-Path $root 'MainWindow.Story.ChoiceEditor.cs') `
+    'StoryChoiceEditorResult[\s\S]*?StoryChoiceEditorOption' `
     'Choice editing must return option text and selected targets together.'
 
 Require-Pattern `

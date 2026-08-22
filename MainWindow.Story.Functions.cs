@@ -334,7 +334,7 @@ namespace GalExcleTools
             if (StoryFunctionService.IsChoiceFunctionTemplate(function))
             {
                 var choiceIndicator = BuildNextStoryChoiceFunctionIndicator();
-                var choiceResult = await _functionDialogService.EditChoiceNotesAsync(
+                var choiceResult = await ShowStoryChoiceEditorAsync(
                     choiceIndicator,
                     StoryBranchService.GetTargetOptions(_storyEditorViewModel.Document));
                 if (choiceResult is null)
@@ -554,11 +554,10 @@ namespace GalExcleTools
                     text,
                     routes.TryGetValue(index, out var targetId) ? targetId : string.Empty))
                 .ToList();
-            var result = await _functionDialogService.EditChoiceNotesAsync(
+            var result = await ShowStoryChoiceEditorAsync(
                 choice,
                 StoryBranchService.GetTargetOptions(document),
-                initialOptions,
-                "编辑触发选项");
+                initialOptions);
             if (result is null)
             {
                 return;

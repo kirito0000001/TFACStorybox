@@ -1,0 +1,33 @@
+$ErrorActionPreference = 'Stop'
+
+$root = Split-Path -Parent $PSScriptRoot
+$xaml = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $root 'MainWindow.xaml')
+$code = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $root 'MainWindow.Story.ChoiceEditor.cs') -ErrorAction SilentlyContinue
+$factory = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $root 'Views\StoryDialogContentFactory.cs')
+$issues = [System.Collections.Generic.List[string]]::new()
+
+if ($factory -match 'ChoiceFunctionNoteDialogContent') {
+    $issues.Add('The discarded ContentDialog choice editor must be removed completely.')
+}
+if ($xaml -notmatch 'x:Name="StoryChoiceEditorHost"[\s\S]*?Width="920"[\s\S]*?<ColumnDefinition Width="300"[\s\S]*?<ColumnDefinition Width="\*"') {
+    $issues.Add('The replacement must use an independent 920-pixel two-pane overlay.')
+}
+if ($xaml -notmatch 'StoryChoiceEditorListView[\s\S]*?StoryChoiceEditorDetailTitle[\s\S]*?StoryChoiceEditorTextBox[\s\S]*?StoryChoiceEditorTargetComboBox') {
+    $issues.Add('The overlay must separate option selection from detail editing.')
+}
+if ($xaml -notmatch 'StoryChoiceEditorAddButton[\s\S]*?StoryChoiceEditorDeleteButton[\s\S]*?StoryChoiceEditorConfirmButton[\s\S]*?StoryChoiceEditorCancelButton') {
+    $issues.Add('The overlay must expose complete add, delete, confirm, and cancel commands.')
+}
+if ($code -notmatch 'ShowStoryChoiceEditorAsync[\s\S]*?TaskCompletionSource<StoryChoiceEditorResult\?>') {
+    $issues.Add('The overlay must return the existing editor result asynchronously.')
+}
+if ($code -notmatch 'StoryChoiceEditorHost_KeyDown[\s\S]*?VirtualKey\.Escape[\s\S]*?VirtualKey\.Enter[\s\S]*?StoryChoiceEditorHost_RightTapped') {
+    $issues.Add('The overlay must retain Escape, Enter, and right-click behavior.')
+}
+
+if ($issues.Count -gt 0) {
+    $issues | ForEach-Object { Write-Error $_ }
+    exit 1
+}
+
+Write-Host 'Choice editor overlay checks passed.'
