@@ -564,7 +564,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
 
         var content = new Grid
         {
-            Width = 720,
+            Width = 600,
             RowSpacing = 12
         };
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -648,7 +648,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
             MinHeight = 40,
             VerticalAlignment = VerticalAlignment.Center
         };
-        targetBox.Items.Add(new ComboBoxItem { Content = "无目标", Tag = string.Empty });
+        targetBox.Items.Add(new ComboBoxItem { Content = "不跳转", Tag = string.Empty });
         foreach (var target in _targetOptions)
         {
             targetBox.Items.Add(new ComboBoxItem
@@ -748,7 +748,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
         AddOptionColumns(grid);
         grid.Children.Add(CreateColumnHeader("选项", 0));
         grid.Children.Add(CreateColumnHeader("选项内容", 1));
-        grid.Children.Add(CreateColumnHeader("前往", 2));
+        grid.Children.Add(CreateColumnHeader("前往小节", 2));
         grid.Children.Add(CreateColumnHeader("操作", 3));
         return grid;
     }
@@ -770,7 +770,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
     {
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(142) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
     }
 }

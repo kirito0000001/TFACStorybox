@@ -11,8 +11,9 @@ function Require([string]$pattern, [string]$message) {
     }
 }
 
-Require 'ChoiceFunctionNoteDialogContent[\s\S]*?Width\s*=\s*720' 'Choice editor should use a stable 720-pixel work surface.'
-Require 'CreateColumnHeader[\s\S]*?选项内容[\s\S]*?前往[\s\S]*?操作' 'Choice editor needs one shared column header.'
+Require 'ChoiceFunctionNoteDialogContent[\s\S]*?Width\s*=\s*600' 'Choice editor must fit the actual ContentDialog viewport without clipping.'
+Require 'CreateColumnHeader[\s\S]*?选项内容[\s\S]*?前往小节[\s\S]*?操作' 'Choice editor needs one clear shared column header.'
+Require 'ComboBoxItem\s*\{\s*Content\s*=\s*"不跳转"' 'The empty branch target must clearly say that it does not jump.'
 Require 'ScrollViewer[\s\S]*?MaxHeight\s*=\s*420[\s\S]*?_notesPanel' 'Only the option list should scroll when it grows.'
 Require 'SymbolIcon\(Symbol\.Delete\)[\s\S]*?ToolTipService\.SetToolTip' 'Delete must use a compact icon button with a tooltip.'
 Require 'SymbolIcon\(Symbol\.Add\)[\s\S]*?添加选项' 'Adding an option should use an icon-and-text command.'

@@ -32,7 +32,7 @@ Require-Pattern `
 
 Require-Pattern `
     (Join-Path $root 'Views\StoryDialogContentFactory.cs') `
-    'ChoiceFunctionNoteDialogContent[\s\S]*?StoryChoiceTargetOption[\s\S]*?无目标' `
+    'ChoiceFunctionNoteDialogContent[\s\S]*?StoryChoiceTargetOption[\s\S]*?不跳转' `
     'Choice editing must capture optional target sections alongside option text.'
 
 Require-Pattern `
