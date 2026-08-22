@@ -526,7 +526,53 @@ namespace GalExcleTools
                 return;
             }
 
-            await _storyDialogService.ShowCurrentChoicesAsync(choices, GetChoiceFunctionNoteMap());
+            if (_isStoryDebugModeEnabled)
+            {
+                await _storyDialogService.ShowCurrentChoicesAsync(choices, GetChoiceFunctionNoteMap());
+                return;
+            }
+
+            var choice = choices.Count == 1
+                ? choices[0]
+                : await _storyDialogService.SelectSimpleChoiceAsync(
+                    "选择要编辑的 Choice",
+                    choices.Select((value, index) => new StoryObjectChoice(index.ToString(), value, value)).ToList()) as string;
+            if (string.IsNullOrWhiteSpace(choice))
+            {
+                return;
+            }
+
+            var document = _storyEditorViewModel.Document;
+            var notes = document.ChoiceNotes.Choices.TryGetValue(choice, out var storedNotes)
+                ? storedNotes
+                : [];
+            var routes = document.BranchRoutes
+                .Where(route => string.Equals(route.ChoiceFunction, choice, StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(route => route.OptionIndex, route => route.TargetSectionFirstRowId);
+            var initialOptions = notes
+                .Select((text, index) => new StoryChoiceEditorOption(
+                    text,
+                    routes.TryGetValue(index, out var targetId) ? targetId : string.Empty))
+                .ToList();
+            var result = await _functionDialogService.EditChoiceNotesAsync(
+                choice,
+                StoryBranchService.GetTargetOptions(document),
+                initialOptions,
+                "编辑触发选项");
+            if (result is null)
+            {
+                return;
+            }
+
+            CaptureStoryUndoState("编辑触发选项");
+            var state = document.ChoiceNotes.Clone();
+            state.Choices[choice] = result.Options
+                .Select(option => NormalizeFunctionChoiceNote(option.Text))
+                .ToList();
+            StoryBranchService.ReplaceRoutesForChoice(document, choice, result.Options);
+            QueueCurrentStoryDocumentSave(choiceNotes: state);
+            UpdateStoryToolbarCurrentInfo();
+            ShowStoryStatus(InfoBarSeverity.Success, "选项已更新", choice);
         }
 
         private Dictionary<string, List<string>> GetChoiceFunctionNoteMap()

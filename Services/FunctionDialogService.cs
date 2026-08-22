@@ -65,16 +65,19 @@ internal sealed class FunctionDialogService
 
     public async Task<StoryChoiceEditorResult?> EditChoiceNotesAsync(
         string choiceIndicator,
-        IReadOnlyList<StoryChoiceTargetOption> targetOptions)
+        IReadOnlyList<StoryChoiceTargetOption> targetOptions,
+        IReadOnlyList<StoryChoiceEditorOption>? initialOptions = null,
+        string title = "添加触发选项")
     {
         var dialogContent = StoryDialogContentFactory.CreateChoiceFunctionNoteContent(
             choiceIndicator,
             targetOptions,
+            initialOptions,
             PlayPositiveSound,
             PlayNegativeSound);
 
         var result = await _dialogService.ShowContentAsync(new ContentDialogRequest(
-            "添加触发选项",
+            title,
             dialogContent.Content,
             "确定",
             "取消"));

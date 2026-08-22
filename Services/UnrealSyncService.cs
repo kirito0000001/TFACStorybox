@@ -18,8 +18,9 @@ namespace GalExcleTools.Services;
 
 internal sealed class UnrealSyncService
 {
-    private const int CurrentUnrealSyncStateVersion = 3;
+    private const int CurrentUnrealSyncStateVersion = 4;
     public const string MusicPlayerBlueprintAssetPath = "/Game/BaseC/EXActor/MusicPlayer.MusicPlayer";
+    public const string StoryBranchDataTableAssetPath = "/Game/AssetMaterial/AllRoad.AllRoad";
     private const string InvalidUnrealObjectNameCharacters = "\\:*?\"<>|' ,/.&!~@#(){}[]=;^%$`";
 
     public static readonly string[] ExpectedNarrativeFolders =
@@ -281,6 +282,12 @@ internal sealed class UnrealSyncService
             },
             StoryTables = changePlan.StoryTables,
             AssetIndexTables = changePlan.AssetIndexTables,
+            StoryBranches = new
+            {
+                DataTable = StoryBranchDataTableAssetPath,
+                ShouldUpdate = changePlan.StoryBranchesChanged,
+                Sources = changePlan.StoryBranchesChanged ? changePlan.StoryBranches : []
+            },
             VoiceMap = new
             {
                 BlueprintAsset = MusicPlayerBlueprintAssetPath,
@@ -324,6 +331,7 @@ internal sealed class UnrealSyncService
             deleted_count = 0
             story_table_count = 0
             asset_index_table_count = 0
+            story_branches_updated = False
             voice_maps_updated = False
             lustration_updated = False
             portraits_updated = False
@@ -397,6 +405,7 @@ internal sealed class UnrealSyncService
                     "DeletedCount": deleted_count,
                     "StoryTableCount": story_table_count,
                     "AssetIndexTableCount": asset_index_table_count,
+                    "StoryBranchesUpdated": story_branches_updated,
                     "VoiceMapsUpdated": voice_maps_updated,
                     "LustrationUpdated": lustration_updated,
                     "PortraitsUpdated": portraits_updated,
@@ -637,6 +646,97 @@ internal sealed class UnrealSyncService
                     add_error("GalExcleTools could not create or load asset index data table: {}".format(table_asset_path))
                 completed_tables += 1
                 write_progress("UpdateTables", "正在更新剧情表和素材索引表", 82 + (8.0 * completed_tables / max(total_tables, 1)), completed_tables, total_tables)
+
+            def normalize_data_table_path(value):
+                text = str(value or "")
+                if "'" in text:
+                    parts = text.split("'")
+                    if len(parts) >= 2:
+                        text = parts[1]
+                return text.strip('"').split(".")[0]
+
+            def data_table_reference(asset_path):
+                return "/Script/Engine.DataTable'{}'".format(asset_path)
+
+            def escape_unreal_string(value):
+                return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
+
+            def build_story_branch_value(routes):
+                entries = []
+                for route in routes:
+                    target_table = escape_unreal_string(route.get("TargetTable"))
+                    option_key = escape_unreal_string(route.get("OptionKey"))
+                    entries.append(
+                        '(TargetStory="{}",Judjes=((PropName="StoryJudge",JudjeType=Equal,TargetValue="{}")),ConditionType=All,CompleteCount=0)'.format(
+                            data_table_reference(target_table),
+                            option_key))
+                return "(StoryOnSetMaps=({}))".format(",".join(entries)) if entries else "(StoryOnSetMaps=)"
+
+            def find_manager_row(rows, manager_row):
+                for row in rows:
+                    if str(row.get("Name", "")).lower() == str(manager_row).lower():
+                        return row
+                row = dict(Name=manager_row, StoryOnSetTables=dict())
+                rows.append(row)
+                return row
+
+            def verify_story_branches(data_table, sources):
+                try:
+                    rows = json.loads(unreal.DataTableFunctionLibrary.export_data_table_to_json_string(data_table))
+                except Exception as exc:
+                    add_error("GalExcleTools could not export AllRoad for verification: {}".format(exc))
+                    return False
+                for source in sources:
+                    manager_row = find_manager_row(rows, source.get("ManagerRow"))
+                    story_map = manager_row.get("StoryOnSetTables") or {}
+                    source_path = normalize_data_table_path(source.get("SourceTable"))
+                    matched_value = None
+                    for existing_key, existing_value in story_map.items():
+                        if normalize_data_table_path(existing_key) == source_path:
+                            matched_value = str(existing_value)
+                            break
+                    if matched_value is None:
+                        add_error("GalExcleTools AllRoad verification missed source table: {}".format(source_path))
+                        return False
+                    for route in source.get("Routes", []):
+                        target_path = normalize_data_table_path(route.get("TargetTable"))
+                        option_key = str(route.get("OptionKey") or "")
+                        if target_path not in matched_value or 'TargetValue="{}"'.format(option_key) not in matched_value:
+                            add_error("GalExcleTools AllRoad verification missed route {} -> {}".format(option_key, target_path))
+                            return False
+                return True
+
+            story_branch_info = manifest.get("StoryBranches", {})
+            if story_branch_info.get("ShouldUpdate"):
+                write_progress("UpdateStoryBranches", "正在更新剧情选项分支", 90)
+                all_road_path = story_branch_info.get("DataTable")
+                sources = story_branch_info.get("Sources", [])
+                all_road = unreal.EditorAssetLibrary.load_asset(all_road_path) if all_road_path else None
+                if not all_road:
+                    add_error("GalExcleTools could not load AllRoad data table: {}".format(all_road_path))
+                else:
+                    try:
+                        rows = json.loads(unreal.DataTableFunctionLibrary.export_data_table_to_json_string(all_road))
+                        for source in sources:
+                            manager_row = find_manager_row(rows, source.get("ManagerRow"))
+                            story_map = manager_row.get("StoryOnSetTables") or {}
+                            source_path = normalize_data_table_path(source.get("SourceTable"))
+                            for existing_key in list(story_map.keys()):
+                                if normalize_data_table_path(existing_key) == source_path:
+                                    del story_map[existing_key]
+                            story_map[data_table_reference(source.get("SourceTable"))] = build_story_branch_value(source.get("Routes", []))
+                            manager_row["StoryOnSetTables"] = story_map
+                        updated_json = json.dumps(rows, ensure_ascii=False)
+                        ok = unreal.DataTableFunctionLibrary.fill_data_table_from_json_string(all_road, updated_json)
+                        if not ok:
+                            add_error("GalExcleTools failed to update AllRoad from merged branch JSON")
+                        elif verify_story_branches(all_road, sources) and save_loaded_asset_with_retry(all_road, all_road_path):
+                            reloaded_all_road = unreal.EditorAssetLibrary.load_asset(all_road_path)
+                            story_branches_updated = bool(reloaded_all_road and verify_story_branches(reloaded_all_road, sources))
+                            if story_branches_updated:
+                                unreal.log("GalExcleTools updated and verified AllRoad story branches")
+                    except Exception as exc:
+                        add_error("GalExcleTools failed to update AllRoad story branches: {}".format(exc))
 
             def get_object_path(asset):
                 if not asset:
@@ -999,6 +1099,20 @@ internal sealed class UnrealSyncService
             allAssetIndexTables.Any(entry => !File.Exists(AssetObjectPathToFilePath(context, entry.TableAsset)));
         var assetIndexTables = assetIndexTablesChanged ? allAssetIndexTables : [];
 
+        var storyBranches = BuildStoryBranchSyncEntries(context, allStoryTables);
+        var storyBranchesHash = ComputeSha256Hex(
+            "story-branches-v1|" + JsonSerializer.Serialize(storyBranches, _jsonOptions));
+        var storyBranchAssetFilePath = UnrealObjectPathToContentFilePath(context, StoryBranchDataTableAssetPath);
+        var currentStoryBranchAssetHash = File.Exists(storyBranchAssetFilePath)
+            ? ComputeFileHash(storyBranchAssetFilePath)
+            : string.Empty;
+        var storyBranchesChanged = storyBranches.Count > 0 &&
+            (forceFullSync ||
+             requiresVerifiedTableSync ||
+             !string.Equals(syncState.StoryBranchesHash, storyBranchesHash, StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(syncState.StoryBranchesAssetHash, currentStoryBranchAssetHash, StringComparison.OrdinalIgnoreCase) ||
+             !File.Exists(storyBranchAssetFilePath));
+
         var voiceMaps = BuildVoiceMapSyncEntries(context, allStoryTables, voiceMapState);
         var voiceMapsHash = ComputeSha256Hex("music-player-voice-maps-v1|" + JsonSerializer.Serialize(voiceMaps, _jsonOptions));
         var voiceMapsChanged =
@@ -1035,7 +1149,11 @@ internal sealed class UnrealSyncService
         var deleteCount = deleteGroups.Sum(group => group.Assets.Count);
         var storyTableCount = storyTables.Count;
         var assetIndexTableCount = assetIndexTables.Count;
-        var totalChanged = importCount + deleteCount + storyTableCount + assetIndexTableCount + (voiceMapsChanged ? 1 : 0) + (lustrationChanged ? 1 : 0) + (portraitsChanged ? 1 : 0);
+        var totalChanged = importCount + deleteCount + storyTableCount + assetIndexTableCount +
+            (storyBranchesChanged ? 1 : 0) +
+            (voiceMapsChanged ? 1 : 0) +
+            (lustrationChanged ? 1 : 0) +
+            (portraitsChanged ? 1 : 0);
         var changeItems = new List<string>();
         if (importCount > 0)
         {
@@ -1052,6 +1170,10 @@ internal sealed class UnrealSyncService
         if (assetIndexTableCount > 0)
         {
             changeItems.Add($"更新素材索引表：{assetIndexTableCount} 张");
+        }
+        if (storyBranchesChanged)
+        {
+            changeItems.Add($"更新剧情选项分支：{storyBranches.Sum(source => source.Routes.Count)} 条");
         }
         if (voiceMapsChanged)
         {
@@ -1083,6 +1205,12 @@ internal sealed class UnrealSyncService
         {
             unchangedItems.Add("素材索引表：没有变化");
         }
+        if (!storyBranchesChanged)
+        {
+            unchangedItems.Add(storyBranches.Count > 0
+                ? "剧情选项分支：没有变化"
+                : "剧情选项分支：尚未配置");
+        }
         if (!voiceMapsChanged)
         {
             unchangedItems.Add("剧情语音映射：没有变化");
@@ -1109,6 +1237,9 @@ internal sealed class UnrealSyncService
             deleteGroups,
             storyTables,
             assetIndexTables,
+            storyBranchesChanged,
+            storyBranches,
+            storyBranchesHash,
             voiceMapsChanged,
             voiceMaps,
             voiceMapsHash,
@@ -1125,6 +1256,83 @@ internal sealed class UnrealSyncService
             summary,
             changeItems,
             unchangedItems);
+    }
+
+    public List<UnrealStoryBranchSourceSyncEntry> BuildStoryBranchSyncEntries(
+        UnrealSyncContext context,
+        IReadOnlyList<UnrealStoryTableSyncEntry> storyTables)
+    {
+        var result = new List<UnrealStoryBranchSourceSyncEntry>();
+        var workspaceService = new ProjectWorkspaceService();
+        foreach (var chapter in workspaceService.GetChapters(context.Project))
+        {
+            if (!_storyDocumentRepository.Exists(chapter))
+            {
+                continue;
+            }
+
+            var document = _storyDocumentRepository.Load(chapter);
+            var managedRoutes = document.BranchRoutes.Where(route => route.ManagedByToolbox).ToList();
+            if (managedRoutes.Count == 0)
+            {
+                continue;
+            }
+
+            var chapterBaseCode = StoryCsvService.RemoveChapterSectionSuffix(chapter.Code);
+            var projectPrefix = context.Project.Code.Trim() + "-";
+            var managerRow = chapterBaseCode.StartsWith(projectPrefix, StringComparison.OrdinalIgnoreCase)
+                ? chapterBaseCode[projectPrefix.Length..]
+                : chapterBaseCode;
+            var grouped = new Dictionary<string, List<UnrealStoryBranchRouteSyncEntry>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var route in managedRoutes)
+            {
+                var sourceSection = StoryBranchService.FindChoiceSourceSection(document, route.ChoiceFunction);
+                var targetSection = StoryBranchService.FindTargetSection(document, route.TargetSectionFirstRowId);
+                if (sourceSection is null || targetSection is null)
+                {
+                    continue;
+                }
+
+                var sourceTable = storyTables.FirstOrDefault(table =>
+                    string.Equals(table.ChapterCode, chapter.Code, StringComparison.OrdinalIgnoreCase) &&
+                    table.Section == sourceSection.Value);
+                var targetTable = storyTables.FirstOrDefault(table =>
+                    string.Equals(table.ChapterCode, chapter.Code, StringComparison.OrdinalIgnoreCase) &&
+                    table.Section == targetSection.Value);
+                if (sourceTable is null || targetTable is null)
+                {
+                    continue;
+                }
+
+                var optionText = document.ChoiceNotes.Choices.TryGetValue(route.ChoiceFunction, out var notes) &&
+                                 route.OptionIndex >= 0 && route.OptionIndex < notes.Count
+                    ? notes[route.OptionIndex]
+                    : string.Empty;
+                if (!grouped.TryGetValue(sourceTable.TableAsset, out var routes))
+                {
+                    routes = [];
+                    grouped[sourceTable.TableAsset] = routes;
+                }
+                routes.Add(new UnrealStoryBranchRouteSyncEntry(
+                    route.ChoiceFunction,
+                    route.OptionKey,
+                    optionText,
+                    targetTable.TableAsset));
+            }
+
+            result.AddRange(grouped.Select(pair => new UnrealStoryBranchSourceSyncEntry(
+                managerRow,
+                pair.Key,
+                pair.Value
+                    .OrderBy(route => route.ChoiceFunction, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(route => route.OptionKey, StringComparer.OrdinalIgnoreCase)
+                    .ToList())));
+        }
+
+        return result
+            .OrderBy(source => source.ManagerRow, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(source => source.SourceTable, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public List<UnrealVoiceMapSyncEntry> BuildVoiceMapSyncEntries(
@@ -1512,6 +1720,11 @@ internal sealed class UnrealSyncService
         state.PortraitsHash = changePlan.PortraitsHash;
         state.AssetIndexTablesHash = changePlan.AssetIndexTablesHash;
         state.VoiceMapsHash = changePlan.VoiceMapsHash;
+        state.StoryBranchesHash = changePlan.StoryBranchesHash;
+        var storyBranchAssetPath = UnrealObjectPathToContentFilePath(context, StoryBranchDataTableAssetPath);
+        state.StoryBranchesAssetHash = File.Exists(storyBranchAssetPath)
+            ? ComputeFileHash(storyBranchAssetPath)
+            : string.Empty;
         state.SourceHashes = new Dictionary<string, string>(changePlan.SourceHashes, StringComparer.OrdinalIgnoreCase);
         File.WriteAllText(statePath, JsonSerializer.Serialize(state, _jsonOptions), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }

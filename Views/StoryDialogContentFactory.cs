@@ -17,10 +17,11 @@ internal static class StoryDialogContentFactory
     public static ChoiceFunctionNoteDialogContent CreateChoiceFunctionNoteContent(
         string choiceIndicator,
         IReadOnlyList<StoryChoiceTargetOption> targetOptions,
+        IReadOnlyList<StoryChoiceEditorOption>? initialOptions,
         Action playPositiveSound,
         Action playNegativeSound)
     {
-        return new ChoiceFunctionNoteDialogContent(choiceIndicator, targetOptions, playPositiveSound, playNegativeSound);
+        return new ChoiceFunctionNoteDialogContent(choiceIndicator, targetOptions, initialOptions, playPositiveSound, playNegativeSound);
     }
 
     public static FunctionSelectionDialogContent CreateFunctionSelectionContent(
@@ -471,6 +472,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
     public ChoiceFunctionNoteDialogContent(
         string choiceIndicator,
         IReadOnlyList<StoryChoiceTargetOption> targetOptions,
+        IReadOnlyList<StoryChoiceEditorOption>? initialOptions,
         Action playPositiveSound,
         Action playNegativeSound)
     {
@@ -482,7 +484,17 @@ internal sealed class ChoiceFunctionNoteDialogContent
             Spacing = 8
         };
 
-        AddChoiceRow();
+        if (initialOptions is { Count: > 0 })
+        {
+            foreach (var option in initialOptions)
+            {
+                AddChoiceRow(option);
+            }
+        }
+        else
+        {
+            AddChoiceRow();
+        }
         var addButton = new Button
         {
             Width = 36,
@@ -529,7 +541,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
         return new StoryChoiceEditorResult(options);
     }
 
-    private void AddChoiceRow()
+    private void AddChoiceRow(StoryChoiceEditorOption? initialOption = null)
     {
         var row = new Grid
         {
@@ -549,6 +561,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
         var noteBox = new TextBox
         {
             PlaceholderText = "例如：接受邀请",
+            Text = initialOption?.Text ?? string.Empty,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 42
         };
@@ -568,6 +581,18 @@ internal sealed class ChoiceFunctionNoteDialogContent
             });
         }
         targetBox.SelectedIndex = 0;
+        if (!string.IsNullOrWhiteSpace(initialOption?.TargetSectionFirstRowId))
+        {
+            for (var index = 0; index < targetBox.Items.Count; index++)
+            {
+                if (targetBox.Items[index] is ComboBoxItem item &&
+                    string.Equals(item.Tag as string, initialOption.TargetSectionFirstRowId, StringComparison.OrdinalIgnoreCase))
+                {
+                    targetBox.SelectedIndex = index;
+                    break;
+                }
+            }
+        }
         var removeButton = new Button
         {
             Content = "删除",

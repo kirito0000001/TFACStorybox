@@ -165,6 +165,13 @@ namespace GalExcleTools
             {
                 filesToBackup.Add(musicPlayerBlueprintPath);
             }
+            var storyBranchDataTablePath = UnrealSyncService.UnrealObjectPathToContentFilePath(
+                context,
+                UnrealSyncService.StoryBranchDataTableAssetPath);
+            if (File.Exists(storyBranchDataTablePath))
+            {
+                filesToBackup.Add(storyBranchDataTablePath);
+            }
 
             foreach (var filePath in filesToBackup.Distinct(StringComparer.OrdinalIgnoreCase))
             {

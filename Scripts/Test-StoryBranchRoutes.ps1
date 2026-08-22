@@ -70,12 +70,17 @@ if (Test-Path -LiteralPath $assemblyPath) {
     $notes = [System.Collections.Generic.List[string]]::new()
     $notes.Add('选项内容 A')
     $choices.Add('M2-00-Choice1', $notes)
+    $beforeSnapshot = $documentType.GetMethod('CaptureSnapshot').Invoke($document, @(1))
     $targetId = $rowType.GetProperty('StableId').GetValue($createdRows[1])
     $route = [System.Activator]::CreateInstance(
         $routeType,
         @('M2-00-Choice1', 0, 'A', $targetId, $true))
     $routes = $documentType.GetProperty('BranchRoutes').GetValue($document)
     [void]$routes.Add($route)
+    $afterSnapshot = $documentType.GetMethod('CaptureSnapshot').Invoke($document, @(1))
+    $changeSet = $documentType.GetMethod('CreateChangeSet').Invoke(
+        $null,
+        @('设置选项目标', $beforeSnapshot, $afterSnapshot))
 
     $optionKey = $serviceType.GetMethod('GetOptionKey').Invoke($null, @(26))
     $resolved = @($serviceType.GetMethod('GetRoutesForSection').Invoke($null, @($document, 2)))
@@ -83,6 +88,15 @@ if (Test-Path -LiteralPath $assemblyPath) {
         $resolved[0].OptionLabel -ne '选项 A' -or
         $resolved[0].Content -ne '选项内容 A') {
         throw 'Stable branch resolution returned the wrong option label or content.'
+    }
+
+    [void]$documentType.GetMethod('ApplyChange').Invoke($document, @($changeSet, $true, 1))
+    if ($routes.Count -ne 0) {
+        throw 'Undo must remove the branch route created by the edit transaction.'
+    }
+    [void]$documentType.GetMethod('ApplyChange').Invoke($document, @($changeSet, $false, 1))
+    if ($routes.Count -ne 1) {
+        throw 'Redo must restore the branch route created by the edit transaction.'
     }
 }
 

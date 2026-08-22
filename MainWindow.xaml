@@ -687,7 +687,7 @@
                                         <Expander Header="函数" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
                                             <StackPanel Spacing="10">
                                                 <Button Content="添加函数" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChooseFunctionCommand}" />
-                                                <Button x:Name="StoryViewChoicesButton" Content="查看选项" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasCurrentChoices, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding ViewChoicesCommand}" />
+                                                <Button x:Name="StoryViewChoicesButton" Content="编辑选项" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasCurrentChoices, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding ViewChoicesCommand}" />
                                                 <Button x:Name="StoryRemoveFunctionButton" Content="移除函数" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasMultipleCurrentFunctions, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding RemoveFunctionCommand}" />
                                                 <Button x:Name="StoryClearFunctionButton" Content="清空函数" Height="36" HorizontalAlignment="Stretch" Visibility="{Binding HasCurrentFunction, Converter={StaticResource BooleanToVisibilityConverter}}" Command="{Binding ClearFunctionCommand}" />
                                             </StackPanel>

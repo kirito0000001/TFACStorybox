@@ -74,18 +74,14 @@ internal static class StoryBranchService
         StoryDocument document,
         int section)
     {
-        var targetId = GetSectionFirstRowId(document, section);
-        if (string.IsNullOrWhiteSpace(targetId))
+        if (GetSectionFirstRowId(document, section) is null)
         {
             return [];
         }
 
         var result = new List<StoryBranchInspectorItem>();
         foreach (var route in document.BranchRoutes
-                     .Where(route => string.Equals(
-                         route.TargetSectionFirstRowId,
-                         targetId,
-                         StringComparison.OrdinalIgnoreCase))
+                     .Where(route => FindTargetSection(document, route.TargetSectionFirstRowId) == section)
                      .OrderBy(route => route.ChoiceFunction, StringComparer.OrdinalIgnoreCase)
                      .ThenBy(route => route.OptionIndex))
         {
@@ -124,7 +120,7 @@ internal static class StoryBranchService
         }
     }
 
-    private static int? FindChoiceSourceSection(StoryDocument document, string choiceFunction)
+    public static int? FindChoiceSourceSection(StoryDocument document, string choiceFunction)
     {
         for (var index = 0; index < document.Rows.Count; index++)
         {
@@ -136,6 +132,15 @@ internal static class StoryBranchService
         }
 
         return null;
+    }
+
+    public static int? FindTargetSection(StoryDocument document, string targetSectionFirstRowId)
+    {
+        var rowIndex = document.Rows.FindIndex(row => string.Equals(
+            row.StableId,
+            targetSectionFirstRowId,
+            StringComparison.OrdinalIgnoreCase));
+        return rowIndex < 0 ? null : GetSectionAtRowIndex(document, rowIndex);
     }
 
     private static int GetSectionAtRowIndex(StoryDocument document, int rowIndex)

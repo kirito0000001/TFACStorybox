@@ -26,6 +26,9 @@ internal sealed record UnrealSyncChangePlan(
     List<UnrealSyncDeleteGroup> DeleteGroups,
     List<UnrealStoryTableSyncEntry> StoryTables,
     List<UnrealAssetIndexTableSyncEntry> AssetIndexTables,
+    bool StoryBranchesChanged,
+    List<UnrealStoryBranchSourceSyncEntry> StoryBranches,
+    string StoryBranchesHash,
     bool VoiceMapsChanged,
     List<UnrealVoiceMapSyncEntry> VoiceMaps,
     string VoiceMapsHash,
@@ -65,6 +68,17 @@ internal sealed record UnrealAssetIndexTableSyncEntry(
     string TableAsset,
     string RowStruct,
     string SourceHash);
+
+internal sealed record UnrealStoryBranchRouteSyncEntry(
+    string ChoiceFunction,
+    string OptionKey,
+    string OptionText,
+    string TargetTable);
+
+internal sealed record UnrealStoryBranchSourceSyncEntry(
+    string ManagerRow,
+    string SourceTable,
+    List<UnrealStoryBranchRouteSyncEntry> Routes);
 
 internal sealed record UnrealVoiceMapSyncEntry(
     string TableAsset,
@@ -106,6 +120,8 @@ internal sealed class UnrealSyncExecutionReport
 
     public int AssetIndexTableCount { get; set; }
 
+    public bool StoryBranchesUpdated { get; set; }
+
     public bool VoiceMapsUpdated { get; set; }
 
     public bool LustrationUpdated { get; set; }
@@ -145,6 +161,10 @@ internal sealed class UnrealSyncState
     public string? AssetIndexTablesHash { get; set; }
 
     public string? VoiceMapsHash { get; set; }
+
+    public string? StoryBranchesHash { get; set; }
+
+    public string? StoryBranchesAssetHash { get; set; }
 
     public Dictionary<string, string> SourceHashes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

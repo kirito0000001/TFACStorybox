@@ -384,6 +384,7 @@ namespace GalExcleTools
                     report.ImportedCount == changePlan.ImportGroups.Sum(group => group.Files.Count) &&
                     report.StoryTableCount == changePlan.StoryTables.Count &&
                     report.AssetIndexTableCount == changePlan.AssetIndexTables.Count &&
+                    (!changePlan.StoryBranchesChanged || report.StoryBranchesUpdated) &&
                     (!changePlan.VoiceMapsChanged || report.VoiceMapsUpdated) &&
                     (!changePlan.LustrationChanged || report.LustrationUpdated) &&
                     (!changePlan.PortraitsChanged || report.PortraitsUpdated);
@@ -391,7 +392,7 @@ namespace GalExcleTools
                     reportSuccess ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
                     reportSuccess ? "同步完成" : "同步未完整完成",
                     reportSuccess
-                        ? $"Unreal 已确认导入 {report!.ImportedCount} 项、更新 {report.StoryTableCount + report.AssetIndexTableCount} 张表{(report.VoiceMapsUpdated ? "，并刷新剧情语音映射" : string.Empty)}。"
+                        ? $"Unreal 已确认导入 {report!.ImportedCount} 项、更新 {report.StoryTableCount + report.AssetIndexTableCount} 张表{(report.StoryBranchesUpdated ? "，并刷新剧情选项分支" : string.Empty)}{(report.VoiceMapsUpdated ? "，并刷新剧情语音映射" : string.Empty)}。"
                         : report is null
                             ? $"退出码 {result.ExitCode}，但没有收到结构化结果文件：{result.ResultPath}"
                             : string.Join(" ", report.Errors.DefaultIfEmpty($"退出码 {result.ExitCode}，部分计划项没有完成。")));
@@ -650,6 +651,20 @@ namespace GalExcleTools
                 foreach (var row in changePlan.PortraitRows)
                 {
                     AddUnrealSyncPlanText($"  - {row.Key} / {row.Name}");
+                }
+            }
+
+            if (changePlan.StoryBranchesChanged)
+            {
+                AddUnrealSyncPlanHeading($"更新剧情选项分支（{changePlan.StoryBranches.Sum(source => source.Routes.Count)} 条）", topMargin: 12);
+                AddUnrealSyncPlanText($"目标表：{UnrealSyncService.StoryBranchDataTableAssetPath}");
+                foreach (var source in changePlan.StoryBranches)
+                {
+                    AddUnrealSyncPlanText($"  - {source.SourceTable}");
+                    foreach (var route in source.Routes)
+                    {
+                        AddUnrealSyncPlanText($"      选项 {route.OptionKey}：{route.OptionText} -> {route.TargetTable}");
+                    }
                 }
             }
 
