@@ -36,6 +36,7 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private string _currentSceneValue = "无";
     private string _currentFunctionCountText = "0 项";
     private bool _hasCurrentTransitionFunction;
+    private bool _hasCurrentBranch;
     private string _assetStatusText = string.Empty;
     private string _saveStatusText = "已加载";
     private bool _hasCurrentFunction;
@@ -86,6 +87,8 @@ internal sealed class StoryEditorViewModel : ObservableObject
     public Dictionary<int, string> CharacterPreviewKeys { get; } = [];
 
     public ObservableCollection<string> CurrentFunctionItems { get; } = [];
+
+    public ObservableCollection<StoryBranchInspectorItem> CurrentBranchItems { get; } = [];
 
     public RelayCommand UndoCommand { get; private set; }
 
@@ -402,6 +405,12 @@ internal sealed class StoryEditorViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentRowNumber));
     }
 
+    public bool HasCurrentBranch
+    {
+        get => _hasCurrentBranch;
+        set => SetProperty(ref _hasCurrentBranch, value);
+    }
+
     public void SetCurrentFunctionItems(IReadOnlyList<string> values)
     {
         CurrentFunctionItems.Clear();
@@ -413,6 +422,18 @@ internal sealed class StoryEditorViewModel : ObservableObject
         CurrentFunctionCountText = $"{values.Count} 项";
 
         OnPropertyChanged(nameof(CurrentFunctionItems));
+    }
+
+    public void SetCurrentBranchItems(IReadOnlyList<StoryBranchInspectorItem> values)
+    {
+        CurrentBranchItems.Clear();
+        foreach (var value in values)
+        {
+            CurrentBranchItems.Add(value);
+        }
+
+        HasCurrentBranch = values.Count > 0;
+        OnPropertyChanged(nameof(CurrentBranchItems));
     }
 
     public void RefreshUndoState()

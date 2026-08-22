@@ -11,7 +11,7 @@ namespace GalExcleTools.Services;
 internal sealed class StoryDocumentRepository
 {
     public const string DocumentFileName = "story.document.json";
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
     private readonly JsonSerializerOptions _jsonOptions;
 
     public StoryDocumentRepository(JsonSerializerOptions jsonOptions)
@@ -61,9 +61,11 @@ internal sealed class StoryDocumentRepository
     {
         var state = new StoryDocumentFile
         {
+            SchemaVersion = CurrentSchemaVersion,
             ChapterCode = chapter.Code,
             SavedAt = DateTimeOffset.Now,
-            ChoiceNotes = document.ChoiceNotes.Clone()
+            ChoiceNotes = document.ChoiceNotes.Clone(),
+            BranchRoutes = document.BranchRoutes.Select(route => route with { }).ToList()
         };
         StoryDocumentSectionFile? currentSection = null;
         var previousSection = -1;
@@ -118,6 +120,7 @@ internal sealed class StoryDocumentRepository
     {
         var document = new StoryDocument();
         document.ChoiceNotes = state.ChoiceNotes?.Clone() ?? new StoryChoiceNoteState();
+        document.BranchRoutes.AddRange((state.BranchRoutes ?? []).Select(route => route with { }));
         var assignedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var section in state.Sections)
         {
@@ -199,7 +202,7 @@ internal sealed class StoryDocumentRepository
 
     private static void Validate(StoryDocumentFile state, ChapterInfo chapter, string path)
     {
-        if (state.SchemaVersion != CurrentSchemaVersion)
+        if (state.SchemaVersion is < 1 or > CurrentSchemaVersion)
         {
             throw new InvalidDataException($"StoryDocument 版本不受支持：{state.SchemaVersion}，文件：{path}");
         }

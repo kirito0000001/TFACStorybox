@@ -12,6 +12,8 @@ internal sealed class StoryDocument
 
     public StoryChoiceNoteState ChoiceNotes { get; set; } = new();
 
+    public List<StoryChoiceRoute> BranchRoutes { get; } = [];
+
     public static StoryDocument CreateEmpty()
     {
         var document = new StoryDocument();
@@ -44,6 +46,8 @@ internal sealed class StoryDocument
         }
 
         ChoiceNotes = source.ChoiceNotes.Clone();
+        BranchRoutes.Clear();
+        BranchRoutes.AddRange(source.BranchRoutes.Select(route => route with { }));
     }
 
     public StoryDocumentSnapshot CaptureSnapshot(int currentRowIndex)
@@ -65,7 +69,8 @@ internal sealed class StoryDocument
             rowsById,
             sectionsById,
             currentRowId,
-            ChoiceNotes.Clone());
+            ChoiceNotes.Clone(),
+            BranchRoutes.Select(route => route with { }).ToList());
     }
 
     public StoryChangeApplication ApplyChange(
@@ -151,6 +156,12 @@ internal sealed class StoryDocument
         }
 
         ChoiceNotes = migratedNotes;
+        var targetBranchRoutes = useBefore ? change.BeforeBranchRoutes : change.AfterBranchRoutes;
+        if (targetBranchRoutes is not null)
+        {
+            BranchRoutes.Clear();
+            BranchRoutes.AddRange(targetBranchRoutes.Select(route => route with { }));
+        }
 
         return new StoryChangeApplication(rowIndex, change.Description);
     }
@@ -196,6 +207,8 @@ internal sealed class StoryDocument
             }
         }
 
+        var branchRoutesChanged = !before.BranchRoutes.SequenceEqual(after.BranchRoutes);
+
         return new StoryChangeSet(
             description,
             rowChanges,
@@ -203,6 +216,8 @@ internal sealed class StoryDocument
             orderChanged ? after.Order.ToList() : null,
             sectionChanges,
             noteChanges,
+            branchRoutesChanged ? before.BranchRoutes.Select(route => route with { }).ToList() : null,
+            branchRoutesChanged ? after.BranchRoutes.Select(route => route with { }).ToList() : null,
             before.CurrentRowId,
             after.CurrentRowId);
     }
@@ -225,6 +240,8 @@ internal sealed class StoryDocument
             null,
             new Dictionary<string, StorySectionDelta>(StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, StoryChoiceNoteDelta>(StringComparer.OrdinalIgnoreCase),
+            null,
+            null,
             before.StableId,
             after.StableId);
     }
@@ -256,7 +273,8 @@ internal sealed record StoryDocumentSnapshot(
     Dictionary<string, StoryRow> RowsById,
     Dictionary<string, int> SectionsById,
     string? CurrentRowId,
-    StoryChoiceNoteState ChoiceNotes);
+    StoryChoiceNoteState ChoiceNotes,
+    List<StoryChoiceRoute> BranchRoutes);
 
 internal sealed record StoryRowDelta(StoryRow? Before, StoryRow? After);
 
@@ -271,6 +289,8 @@ internal sealed record StoryChangeSet(
     List<string>? AfterOrder,
     Dictionary<string, StorySectionDelta> SectionChanges,
     Dictionary<string, StoryChoiceNoteDelta> ChoiceNoteChanges,
+    List<StoryChoiceRoute>? BeforeBranchRoutes,
+    List<StoryChoiceRoute>? AfterBranchRoutes,
     string? BeforeCurrentRowId,
     string? AfterCurrentRowId)
 {
@@ -278,7 +298,8 @@ internal sealed record StoryChangeSet(
         RowChanges.Count == 0 &&
         BeforeOrder is null &&
         SectionChanges.Count == 0 &&
-        ChoiceNoteChanges.Count == 0;
+        ChoiceNoteChanges.Count == 0 &&
+        BeforeBranchRoutes is null;
 
     public int ChangedRowCount => RowChanges.Count;
 

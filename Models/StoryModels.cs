@@ -81,6 +81,30 @@ internal sealed class StoryChoiceNoteState
     }
 }
 
+internal sealed record StoryChoiceRoute(
+    string ChoiceFunction,
+    int OptionIndex,
+    string OptionKey,
+    string TargetSectionFirstRowId,
+    bool ManagedByToolbox = true);
+
+internal sealed record StoryChoiceTargetOption(
+    string TargetSectionFirstRowId,
+    int Section,
+    string DisplayName);
+
+internal sealed record StoryChoiceEditorOption(
+    string Text,
+    string TargetSectionFirstRowId);
+
+internal sealed record StoryChoiceEditorResult(
+    IReadOnlyList<StoryChoiceEditorOption> Options);
+
+internal sealed record StoryBranchInspectorItem(
+    string OptionLabel,
+    string Content,
+    string SourceText);
+
 internal sealed record StoryCsvCompatibility(
     bool IsCompatible,
     IReadOnlyList<string> MissingColumns,

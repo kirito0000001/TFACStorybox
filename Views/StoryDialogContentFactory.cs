@@ -16,10 +16,11 @@ internal static class StoryDialogContentFactory
 {
     public static ChoiceFunctionNoteDialogContent CreateChoiceFunctionNoteContent(
         string choiceIndicator,
+        IReadOnlyList<StoryChoiceTargetOption> targetOptions,
         Action playPositiveSound,
         Action playNegativeSound)
     {
-        return new ChoiceFunctionNoteDialogContent(choiceIndicator, playPositiveSound, playNegativeSound);
+        return new ChoiceFunctionNoteDialogContent(choiceIndicator, targetOptions, playPositiveSound, playNegativeSound);
     }
 
     public static FunctionSelectionDialogContent CreateFunctionSelectionContent(
@@ -463,14 +464,17 @@ internal sealed class FunctionSelectionDialogContent
 internal sealed class ChoiceFunctionNoteDialogContent
 {
     private readonly StackPanel _notesPanel;
+    private readonly IReadOnlyList<StoryChoiceTargetOption> _targetOptions;
     private readonly Action _playPositiveSound;
     private readonly Action _playNegativeSound;
 
     public ChoiceFunctionNoteDialogContent(
         string choiceIndicator,
+        IReadOnlyList<StoryChoiceTargetOption> targetOptions,
         Action playPositiveSound,
         Action playNegativeSound)
     {
+        _targetOptions = targetOptions;
         _playPositiveSound = playPositiveSound;
         _playNegativeSound = playNegativeSound;
         _notesPanel = new StackPanel
@@ -499,7 +503,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
             Children =
             {
                 DialogContentFactory.CreateResultHeading(choiceIndicator),
-                DialogContentFactory.CreateSubtleParagraph("这一个 Choice 会在虚幻里弹出选择界面；下面每行只是这个界面里的一个选项备注。"),
+                DialogContentFactory.CreateSubtleParagraph("填写选项内容，并按需指定目标小节；不跳转的选项保持“无目标”。"),
                 _notesPanel,
                 addButton,
                 DialogContentFactory.CreateResultHeading($"表格只会写入 {choiceIndicator}。"),
@@ -510,16 +514,19 @@ internal sealed class ChoiceFunctionNoteDialogContent
 
     public StackPanel Content { get; }
 
-    public List<string> ReadNotes()
+    public StoryChoiceEditorResult ReadResult()
     {
-        var notes = new List<string>();
+        var options = new List<StoryChoiceEditorOption>();
         foreach (var row in _notesPanel.Children.OfType<Grid>())
         {
             var note = TextUtility.NormalizeFunctionChoiceNote(row.Children.OfType<TextBox>().FirstOrDefault()?.Text);
-            notes.Add(note);
+            var targetId = row.Children.OfType<ComboBox>().FirstOrDefault()?.SelectedItem is ComboBoxItem item
+                ? item.Tag as string ?? string.Empty
+                : string.Empty;
+            options.Add(new StoryChoiceEditorOption(note, targetId));
         }
 
-        return notes;
+        return new StoryChoiceEditorResult(options);
     }
 
     private void AddChoiceRow()
@@ -528,13 +535,14 @@ internal sealed class ChoiceFunctionNoteDialogContent
         {
             ColumnSpacing = 8
         };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(132) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(76) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(152) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var optionLabel = new TextBlock
         {
-            Text = $"选项 {_notesPanel.Children.Count + 1}",
+            Text = $"选项 {StoryBranchService.GetOptionKey(_notesPanel.Children.Count)}",
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
@@ -544,6 +552,22 @@ internal sealed class ChoiceFunctionNoteDialogContent
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 42
         };
+        var targetBox = new ComboBox
+        {
+            Header = "目标小节",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            MinHeight = 42
+        };
+        targetBox.Items.Add(new ComboBoxItem { Content = "无目标", Tag = string.Empty });
+        foreach (var target in _targetOptions)
+        {
+            targetBox.Items.Add(new ComboBoxItem
+            {
+                Content = target.DisplayName,
+                Tag = target.TargetSectionFirstRowId
+            });
+        }
+        targetBox.SelectedIndex = 0;
         var removeButton = new Button
         {
             Content = "删除",
@@ -563,9 +587,11 @@ internal sealed class ChoiceFunctionNoteDialogContent
         };
 
         Grid.SetColumn(noteBox, 1);
-        Grid.SetColumn(removeButton, 2);
+        Grid.SetColumn(targetBox, 2);
+        Grid.SetColumn(removeButton, 3);
         row.Children.Add(optionLabel);
         row.Children.Add(noteBox);
+        row.Children.Add(targetBox);
         row.Children.Add(removeButton);
         _notesPanel.Children.Add(row);
         RenumberRows();
@@ -587,7 +613,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
 
             foreach (var textBlock in row.Children.OfType<TextBlock>())
             {
-                textBlock.Text = $"选项 {i + 1}";
+                textBlock.Text = $"选项 {StoryBranchService.GetOptionKey(i)}";
             }
         }
     }

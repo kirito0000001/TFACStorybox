@@ -537,6 +537,28 @@
                                         <StackPanel Spacing="14">
                                         <TextBlock Text="本句检查器" Style="{StaticResource StoryInspectorTitleStyle}" />
                                         <StackPanel
+                                            Spacing="7"
+                                            Visibility="{Binding HasCurrentBranch, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="当前分支" Style="{StaticResource StoryInspectorSectionTitleStyle}" Margin="0,4,0,0" />
+                                            <ItemsControl ItemsSource="{Binding CurrentBranchItems}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border
+                                                            Padding="10,7"
+                                                            Margin="0,0,0,6"
+                                                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                                            BorderThickness="3,0,0,0">
+                                                            <StackPanel Spacing="3">
+                                                                <TextBlock Text="{Binding OptionLabel}" FontSize="15" FontWeight="SemiBold" />
+                                                                <TextBlock Text="{Binding Content}" FontSize="14" TextWrapping="Wrap" />
+                                                                <TextBlock Text="{Binding SourceText}" Style="{StaticResource StoryInspectorLabelStyle}" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                        <StackPanel
                                             Spacing="6"
                                             Visibility="{Binding HasCurrentTransitionFunction, Converter={StaticResource BooleanToVisibilityConverter}}">
                                             <TextBlock Text="转场" Style="{StaticResource StoryInspectorSectionTitleStyle}" Margin="0,4,0,0" />

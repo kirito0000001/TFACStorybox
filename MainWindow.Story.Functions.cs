@@ -93,6 +93,10 @@ namespace GalExcleTools
 
                     targets.Add(normalized);
                     functions[functionIndex] = normalized;
+                    StoryBranchService.RemapChoiceFunction(
+                        _storyEditorViewModel.Document,
+                        oldChoice,
+                        normalized);
                     rowChanged = true;
                 }
 
@@ -170,6 +174,10 @@ namespace GalExcleTools
             _storyEditorViewModel.HasCurrentFunction = hasFunction;
             _storyEditorViewModel.HasMultipleCurrentFunctions = StoryFunctionService.SplitFunctionValues(custom).Skip(1).Any();
             _storyEditorViewModel.HasCurrentChoices = GetCurrentStoryChoiceValues().Count > 0;
+            _storyEditorViewModel.SetCurrentBranchItems(
+                StoryBranchService.GetRoutesForSection(
+                    _storyEditorViewModel.Document,
+                    GetCurrentStorySection()));
             UpdateStoryFunctionInspector(custom);
         }
 
@@ -326,13 +334,15 @@ namespace GalExcleTools
             if (StoryFunctionService.IsChoiceFunctionTemplate(function))
             {
                 var choiceIndicator = BuildNextStoryChoiceFunctionIndicator();
-                var optionNotes = await _functionDialogService.EditChoiceNotesAsync(choiceIndicator);
-                if (optionNotes is null)
+                var choiceResult = await _functionDialogService.EditChoiceNotesAsync(
+                    choiceIndicator,
+                    StoryBranchService.GetTargetOptions(_storyEditorViewModel.Document));
+                if (choiceResult is null)
                 {
                     return null;
                 }
 
-                SaveChoiceFunctionNotes(choiceIndicator, optionNotes);
+                SaveChoiceFunctionDefinition(choiceIndicator, choiceResult);
                 return choiceIndicator;
             }
 
@@ -469,7 +479,9 @@ namespace GalExcleTools
             return Math.Max(1, sectionCount);
         }
 
-        private void SaveChoiceFunctionNotes(string choiceIndicator, IReadOnlyList<string> optionNotes)
+        private void SaveChoiceFunctionDefinition(
+            string choiceIndicator,
+            StoryChoiceEditorResult choiceResult)
         {
             if (_currentStoryChapter is null)
             {
@@ -477,9 +489,13 @@ namespace GalExcleTools
             }
 
             var state = _storyEditorViewModel.Document.ChoiceNotes.Clone();
-            state.Choices[choiceIndicator] = optionNotes
-                .Select(NormalizeFunctionChoiceNote)
+            state.Choices[choiceIndicator] = choiceResult.Options
+                .Select(option => NormalizeFunctionChoiceNote(option.Text))
                 .ToList();
+            StoryBranchService.ReplaceRoutesForChoice(
+                _storyEditorViewModel.Document,
+                choiceIndicator,
+                choiceResult.Options);
             _pendingStoryChoiceNotes = state;
         }
 
@@ -556,6 +572,7 @@ namespace GalExcleTools
             foreach (var choice in removedChoices.Where(choice => !StoryChoiceExistsInRows(choice)))
             {
                 changed |= state.Choices.Remove(choice);
+                StoryBranchService.RemoveRoutesForChoices(_storyEditorViewModel.Document, [choice]);
             }
 
             return changed ? state : null;

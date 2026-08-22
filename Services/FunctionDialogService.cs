@@ -63,10 +63,13 @@ internal sealed class FunctionDialogService
             : null;
     }
 
-    public async Task<List<string>?> EditChoiceNotesAsync(string choiceIndicator)
+    public async Task<StoryChoiceEditorResult?> EditChoiceNotesAsync(
+        string choiceIndicator,
+        IReadOnlyList<StoryChoiceTargetOption> targetOptions)
     {
         var dialogContent = StoryDialogContentFactory.CreateChoiceFunctionNoteContent(
             choiceIndicator,
+            targetOptions,
             PlayPositiveSound,
             PlayNegativeSound);
 
@@ -76,7 +79,7 @@ internal sealed class FunctionDialogService
             "确定",
             "取消"));
         return result == DialogResultKind.Primary
-            ? dialogContent.ReadNotes()
+            ? dialogContent.ReadResult()
             : null;
     }
 
