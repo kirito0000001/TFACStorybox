@@ -18,6 +18,12 @@ if ($xaml -notmatch 'StoryChoiceEditorListView[\s\S]*?StoryChoiceEditorDetailTit
 if ($xaml -notmatch 'StoryChoiceEditorAddButton[\s\S]*?StoryChoiceEditorDeleteButton[\s\S]*?StoryChoiceEditorConfirmButton[\s\S]*?StoryChoiceEditorCancelButton') {
     $issues.Add('The overlay must expose complete add, delete, confirm, and cancel commands.')
 }
+if ($xaml -notmatch 'StoryChoiceEditorCard[\s\S]*?<RowDefinition Height="88"[\s\S]*?StoryChoiceEditorCodeText') {
+    $issues.Add('The overlay header must leave enough height for the Choice code.')
+}
+if ($xaml -notmatch '<ColumnDefinition Width="180"\s*/>[\s\S]*?<ColumnDefinition Width="180"\s*/>[\s\S]*?StoryChoiceEditorConfirmButton[\s\S]*?HorizontalAlignment="Stretch"[\s\S]*?StoryChoiceEditorCancelButton[\s\S]*?HorizontalAlignment="Stretch"') {
+    $issues.Add('Confirm and cancel must be large equal-width horizontal actions.')
+}
 if ($code -notmatch 'ShowStoryChoiceEditorAsync[\s\S]*?TaskCompletionSource<StoryChoiceEditorResult\?>') {
     $issues.Add('The overlay must return the existing editor result asynchronously.')
 }

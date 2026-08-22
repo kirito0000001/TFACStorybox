@@ -2488,7 +2488,7 @@ public:
                 Tapped="StoryChoiceEditorCard_Tapped">
                 <Grid>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="72" />
+                        <RowDefinition Height="88" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="72" />
                     </Grid.RowDefinitions>
@@ -2617,8 +2617,8 @@ public:
                     <Grid Grid.Row="2" Padding="24,14" ColumnSpacing="10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="150" />
-                            <ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="180" />
                         </Grid.ColumnDefinitions>
                         <TextBlock
                             x:Name="StoryChoiceEditorSummaryText"
@@ -2627,14 +2627,18 @@ public:
                         <Button
                             x:Name="StoryChoiceEditorConfirmButton"
                             Grid.Column="1"
-                            Height="40"
+                            Height="44"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
                             Content="确定"
                             Click="StoryChoiceEditorConfirmButton_Click"
                             Style="{StaticResource AccentButtonStyle}" />
                         <Button
                             x:Name="StoryChoiceEditorCancelButton"
                             Grid.Column="2"
-                            Height="40"
+                            Height="44"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
                             Content="取消"
                             Click="StoryChoiceEditorCancelButton_Click" />
                     </Grid>
