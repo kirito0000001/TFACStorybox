@@ -548,6 +548,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
         var columnHeader = CreateColumnHeader();
         var optionsScroll = new ScrollViewer
         {
+            Width = 560,
             MaxHeight = 420,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
@@ -606,6 +607,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
         var row = CreateOptionRow(initialOption);
         var container = new Border
         {
+            Width = 560,
             MinHeight = 60,
             Padding = new Thickness(10, 8, 10, 8),
             CornerRadius = new CornerRadius(6),
@@ -622,6 +624,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
     {
         var row = new Grid
         {
+            Width = 540,
             ColumnSpacing = 10
         };
         AddOptionColumns(row);
@@ -744,6 +747,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
     {
         var grid = new Grid
         {
+            Width = 560,
             Padding = new Thickness(10, 0, 10, 0),
             ColumnSpacing = 10
         };
