@@ -482,6 +482,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
         _playNegativeSound = playNegativeSound;
         _notesPanel = new StackPanel
         {
+            Width = 560,
             Spacing = 8
         };
         _summaryText = new TextBlock
@@ -548,6 +549,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
         var optionsScroll = new ScrollViewer
         {
             MaxHeight = 420,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Content = _notesPanel
@@ -564,7 +566,7 @@ internal sealed class ChoiceFunctionNoteDialogContent
 
         var content = new Grid
         {
-            Width = 600,
+            Width = 560,
             RowSpacing = 12
         };
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -768,9 +770,9 @@ internal sealed class ChoiceFunctionNoteDialogContent
 
     private static void AddOptionColumns(Grid grid)
     {
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(142) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
     }
 }

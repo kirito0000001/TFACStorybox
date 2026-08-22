@@ -11,10 +11,11 @@ function Require([string]$pattern, [string]$message) {
     }
 }
 
-Require 'ChoiceFunctionNoteDialogContent[\s\S]*?Width\s*=\s*600' 'Choice editor must fit the actual ContentDialog viewport without clipping.'
+Require 'ChoiceFunctionNoteDialogContent[\s\S]*?_notesPanel\s*=\s*new StackPanel[\s\S]*?Width\s*=\s*560[\s\S]*?var content = new Grid[\s\S]*?Width\s*=\s*560' 'Choice editor and its scroll content must share a constrained width.'
 Require 'CreateColumnHeader[\s\S]*?选项内容[\s\S]*?前往小节[\s\S]*?操作' 'Choice editor needs one clear shared column header.'
 Require 'ComboBoxItem\s*\{\s*Content\s*=\s*"不跳转"' 'The empty branch target must clearly say that it does not jump.'
 Require 'ScrollViewer[\s\S]*?MaxHeight\s*=\s*420[\s\S]*?_notesPanel' 'Only the option list should scroll when it grows.'
+Require 'optionsScroll[\s\S]*?HorizontalContentAlignment\s*=\s*HorizontalAlignment\.Stretch' 'The option list must stretch rows inside the viewport instead of measuring them infinitely wide.'
 Require 'SymbolIcon\(Symbol\.Delete\)[\s\S]*?ToolTipService\.SetToolTip' 'Delete must use a compact icon button with a tooltip.'
 Require 'SymbolIcon\(Symbol\.Add\)[\s\S]*?添加选项' 'Adding an option should use an icon-and-text command.'
 Require 'UpdateSummary[\s\S]*?个选项[\s\S]*?个目标' 'The footer should summarize option and target counts.'
