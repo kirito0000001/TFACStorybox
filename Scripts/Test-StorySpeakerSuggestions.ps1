@@ -54,6 +54,12 @@ if ($code -notmatch 'string\.IsNullOrWhiteSpace\(query\)\s*\?\s*"直接采用输
 if ($code -match 'StorySpeakerTextBox_TextChanged[\s\S]*?StoryCharacterSlotService|StorySpeakerTextBox_TextChanged[\s\S]*?TalkBody') {
     $issues.Add('Speaker-name suggestions must not modify portrait data.')
 }
+if ($code -notmatch 'GetStorySpeakerDisplayName[\s\S]*?ResolveStoryCharacter[\s\S]*?character\?\.Name') {
+    $issues.Add('Known speaker codes must display their Chinese character names in the editor.')
+}
+if ($code -notmatch 'StorySpeakerTextBox_SuggestionChosen[\s\S]*?IsClearAction[\s\S]*?suggestion\.DisplayName') {
+    $issues.Add('Choosing a known speaker must show its Chinese display name while clear remains empty.')
+}
 
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Error $_ }

@@ -315,7 +315,7 @@ namespace GalExcleTools
             try
             {
                 var row = _storyRows[_currentStoryRowIndex];
-                _storyEditorViewModel.SpeakerText = row.Get("TalkChar");
+                _storyEditorViewModel.SpeakerText = GetStorySpeakerDisplayName(row.Get("TalkChar"));
                 _storyEditorViewModel.StoryText = row.Get("Tesxt");
                 UpdateStoryRowIndexInput();
                 var section = GetCurrentStorySection();

@@ -138,6 +138,7 @@ public sealed partial class MainWindow
                 item.Item.DisplayName,
                 item.Item.SecondaryText,
                 item.UsageCount,
+                IsClearAction: false,
                 IsCreateAction: false))
             .ToList();
     }
@@ -171,6 +172,7 @@ public sealed partial class MainWindow
                     character.Name,
                     character.Code,
                     UsageCount: 0,
+                    IsClearAction: false,
                     IsCreateAction: false));
             }
         }
@@ -182,6 +184,7 @@ public sealed partial class MainWindow
                     "清空",
                     "移除当前说话人",
                     UsageCount: null,
+                    IsClearAction: true,
                     IsCreateAction: false)
             }
             .Concat(filteredSuggestions)
@@ -191,6 +194,7 @@ public sealed partial class MainWindow
             "创建说话人",
             string.IsNullOrWhiteSpace(query) ? "直接采用输入" : $"使用“{query}”",
             UsageCount: null,
+            IsClearAction: false,
             IsCreateAction: true));
         box.ItemsSource = suggestions;
         box.IsSuggestionListOpen = true;
@@ -202,8 +206,17 @@ public sealed partial class MainWindow
     {
         if (args.SelectedItem is StorySpeakerNameSuggestion suggestion)
         {
-            sender.Text = suggestion.Value;
+            sender.Text = suggestion.IsClearAction
+                ? string.Empty
+                : suggestion.IsCreateAction ? suggestion.Value : suggestion.DisplayName;
         }
+    }
+
+    private string GetStorySpeakerDisplayName(string characterValue)
+    {
+        var trimmed = characterValue.Trim();
+        var character = ResolveStoryCharacter(trimmed);
+        return string.IsNullOrWhiteSpace(character?.Name) ? trimmed : character.Name;
     }
 
     private sealed record StorySpeakerNameSuggestion(
@@ -211,6 +224,7 @@ public sealed partial class MainWindow
         string DisplayName,
         string SecondaryText,
         int? UsageCount,
+        bool IsClearAction,
         bool IsCreateAction);
 
     private void StoryTextTextBox_TextChanged(object sender, TextChangedEventArgs e)
