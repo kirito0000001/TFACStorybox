@@ -314,6 +314,12 @@ internal static class StoryFunctionService
             .Any(key => string.Equals(key, normalizedFunctionKey, StringComparison.Ordinal));
     }
 
+    public static bool ContainsExactFunction(string functionValue, string functionName)
+    {
+        return SplitFunctionValues(functionValue)
+            .Any(function => string.Equals(function, functionName, StringComparison.OrdinalIgnoreCase));
+    }
+
     public static IEnumerable<string> EnumerateFunctionDisplayNames(string functionValue)
     {
         var parts = SplitFunctionValues(functionValue).ToArray();

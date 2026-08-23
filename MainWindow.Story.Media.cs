@@ -83,7 +83,7 @@ namespace GalExcleTools
 
         private async Task PlayCurrentStoryBgmFromUiAsync()
         {
-            if (IsCurrentStoryFunction("BGMSTOP"))
+            if (IsCurrentStoryFunction("BGM_Stop"))
             {
                 _storyBgmPlaybackSuppressed = true;
                 PauseStoryBgm();
@@ -129,7 +129,7 @@ namespace GalExcleTools
             _storySoundEffectPlayback.Stop();
             await PlayStorySoundEffectFunctionsAsync(functionValue);
 
-            if (StoryFunctionService.ContainsFunction(functionValue, "BGMSTOP"))
+            if (StoryFunctionService.ContainsExactFunction(functionValue, "BGM_Stop"))
             {
                 _storyBgmPlaybackSuppressed = true;
                 PauseStoryBgm();
@@ -189,17 +189,17 @@ namespace GalExcleTools
         private async Task PreviewStoryFunctionAsync(string functionValue)
         {
             ShowStoryFunctionTriggeredStatus(functionValue);
-            if (StoryFunctionService.ContainsFunction(functionValue, "BGMSTART"))
+            if (StoryFunctionService.ContainsExactFunction(functionValue, "BGM_Start"))
             {
                 _storyBgmPlaybackSuppressed = false;
                 await PlayCurrentStoryBgmFromUiAsync();
             }
         }
 
-        private bool IsCurrentStoryFunction(string normalizedFunctionKey)
+        private bool IsCurrentStoryFunction(string functionName)
         {
             return _storyRows.Count > 0 &&
-                StoryFunctionService.ContainsFunction(_storyRows[_currentStoryRowIndex].Get("Custom"), normalizedFunctionKey);
+                StoryFunctionService.ContainsExactFunction(_storyRows[_currentStoryRowIndex].Get("Custom"), functionName);
         }
 
         private void ShowStoryFunctionTriggeredStatus(string functionValue)
@@ -288,11 +288,11 @@ namespace GalExcleTools
             for (var i = 0; i <= rowIndex && i < _storyRows.Count; i++)
             {
                 var functionValue = _storyRows[i].Get("Custom");
-                if (StoryFunctionService.ContainsFunction(functionValue, "BGMSTOP"))
+                if (StoryFunctionService.ContainsExactFunction(functionValue, "BGM_Stop"))
                 {
                     suppressed = true;
                 }
-                else if (StoryFunctionService.ContainsFunction(functionValue, "BGMSTART"))
+                else if (StoryFunctionService.ContainsExactFunction(functionValue, "BGM_Start"))
                 {
                     suppressed = false;
                 }
@@ -320,7 +320,7 @@ namespace GalExcleTools
 
         private async Task PlayCurrentStoryBgmAsync()
         {
-            if (_storyBgmPlaybackSuppressed || IsCurrentStoryFunction("BGMSTOP"))
+            if (_storyBgmPlaybackSuppressed || IsCurrentStoryFunction("BGM_Stop"))
             {
                 PauseStoryBgm();
                 return;
@@ -344,7 +344,7 @@ namespace GalExcleTools
             }
 
             var bgmPath = bgmPaths[index.Value];
-            if (_storyBgmPlaybackSuppressed || IsCurrentStoryFunction("BGMSTOP"))
+            if (_storyBgmPlaybackSuppressed || IsCurrentStoryFunction("BGM_Stop"))
             {
                 PauseStoryBgm();
                 return;
