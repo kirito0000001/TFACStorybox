@@ -2604,20 +2604,28 @@ public:
                             </ListView>
                         </Grid>
                         <ScrollViewer Grid.Column="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                            <StackPanel x:Name="ChapterChoiceManagerDetailPanel" Padding="28,18" Spacing="16">
-                                <TextBlock x:Name="ChapterChoiceManagerDetailTitle" Text="未选择小节" FontSize="22" FontWeight="SemiBold" />
-                                <TextBlock x:Name="ChapterChoiceManagerFunctionCode" Style="{StaticResource SubtleTextStyle}" />
-                                <TextBlock x:Name="ChapterChoiceManagerSectionInfo" Style="{StaticResource SubtleTextStyle}" TextWrapping="Wrap" />
-                                <TextBox x:Name="ChapterChoiceManagerOptionTextBox" Header="选项内容" PlaceholderText="输入玩家看到的选项文本" TextChanged="ChapterChoiceManagerOptionTextBox_TextChanged" />
-                                <ComboBox x:Name="ChapterChoiceManagerTargetComboBox" Header="显式跳转目标" DisplayMemberPath="DisplayName" HorizontalAlignment="Stretch" SelectionChanged="ChapterChoiceManagerTargetComboBox_SelectionChanged" />
-                                <ToggleSwitch x:Name="ChapterChoiceManagerCustomToggle" Header="当前小节使用自定义跳转逻辑" OffContent="工具箱自动同步" OnContent="保留 Unreal 手工设置" Toggled="ChapterChoiceManagerCustomToggle_Toggled" />
-                                <Rectangle Height="1" Fill="{ThemeResource CardStrokeColorDefaultBrush}" />
-                                <TextBlock Text="AllRoad 预览" Style="{StaticResource SectionTitleStyle}" />
-                                <StackPanel Spacing="8">
-                                    <TextBlock x:Name="ChapterChoiceManagerExplicitRoute" TextWrapping="Wrap" />
-                                    <TextBlock x:Name="ChapterChoiceManagerEffectiveRoute" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                    <TextBlock x:Name="ChapterChoiceManagerTargetPreview" Style="{StaticResource SubtleTextStyle}" TextWrapping="Wrap" />
-                                </StackPanel>
+                             <StackPanel x:Name="ChapterChoiceManagerDetailPanel" Padding="28,18" Spacing="16">
+                                 <TextBlock x:Name="ChapterChoiceManagerDetailTitle" Text="未选择小节" FontSize="22" FontWeight="SemiBold" />
+                                 <TextBlock x:Name="ChapterChoiceManagerFunctionCode" Style="{StaticResource SubtleTextStyle}" />
+                                 <TextBlock Text="选项位置" Style="{StaticResource SectionTitleStyle}" />
+                                 <StackPanel Spacing="6">
+                                     <TextBlock x:Name="ChapterChoiceManagerSectionInfo" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                     <TextBlock x:Name="ChapterChoiceManagerSourcePreview" Style="{StaticResource SubtleTextStyle}" TextWrapping="Wrap" />
+                                 </StackPanel>
+                                 <TextBox x:Name="ChapterChoiceManagerOptionTextBox" Header="玩家看到的选项" PlaceholderText="输入选项文本" TextChanged="ChapterChoiceManagerOptionTextBox_TextChanged" />
+                                 <StackPanel Spacing="8">
+                                     <TextBlock Text="选择后进入" Style="{StaticResource SectionTitleStyle}" />
+                                     <ComboBox x:Name="ChapterChoiceManagerTargetComboBox" DisplayMemberPath="DisplayName" HorizontalAlignment="Stretch" SelectionChanged="ChapterChoiceManagerTargetComboBox_SelectionChanged" />
+                                 </StackPanel>
+                                 <ToggleSwitch x:Name="ChapterChoiceManagerCustomToggle" Header="同步方式" OffContent="工具箱管理" OnContent="Unreal 手工管理" Toggled="ChapterChoiceManagerCustomToggle_Toggled" />
+                                 <Rectangle Height="1" Fill="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                 <TextBlock Text="同步结果" Style="{StaticResource SectionTitleStyle}" />
+                                 <StackPanel Spacing="8">
+                                     <TextBlock x:Name="ChapterChoiceManagerExplicitRoute" TextWrapping="Wrap" />
+                                     <TextBlock x:Name="ChapterChoiceManagerEffectiveRoute" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                     <TextBlock x:Name="ChapterChoiceManagerContinuationText" TextWrapping="Wrap" />
+                                     <TextBlock x:Name="ChapterChoiceManagerTargetPreview" Style="{StaticResource SubtleTextStyle}" TextWrapping="Wrap" />
+                                 </StackPanel>
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>
