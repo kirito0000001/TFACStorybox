@@ -22,6 +22,15 @@ internal sealed class AiStoryFillManifest
     public List<string> Capabilities { get; set; } = ["story.text", "story.speaker"];
     public string AiInstructionsFile { get; set; } = "AI-INSTRUCTIONS.md";
     public List<string> AllowedFields { get; set; } = ["TalkChar", "Tesxt"];
+    public List<string> PatchFields { get; set; } = [];
+}
+
+internal sealed class AiStoryFillTaskOptions
+{
+    public int ProtocolVersion { get; set; } = 1;
+    public string Mode { get; set; } = "append";
+    public int SourceStartParagraph { get; set; }
+    public List<string> PatchFields { get; } = [];
 }
 
 internal sealed record AiStoryFillProtocolDefinition(
@@ -45,7 +54,21 @@ internal sealed record AiStoryFillTaskExportResult(
     string PackageDirectory,
     string ManifestPath,
     string SpeakerCatalogPath,
-    AiStoryFillManifest Manifest);
+    AiStoryFillManifest Manifest,
+    string? SourcePath = null);
+
+internal sealed class AiStoryFillPatchSourceItem
+{
+    public string Id { get; set; } = string.Empty;
+    public string StableId { get; set; } = string.Empty;
+    public int RowIndex { get; set; }
+    public int Section { get; set; }
+    public string RowBaselineSha256 { get; set; } = string.Empty;
+    public string TalkChar { get; set; } = string.Empty;
+    public string Tesxt { get; set; } = string.Empty;
+    public string PreviousText { get; set; } = string.Empty;
+    public string NextText { get; set; } = string.Empty;
+}
 
 internal enum AiStoryFillItemStatus
 {
@@ -74,7 +97,12 @@ internal sealed record AiStoryFillPreviewItem(
     string? Tesxt,
     string Confidence,
     AiStoryFillItemStatus Status,
-    string StatusText);
+    string StatusText,
+    string? StableId = null,
+    int? RowIndex = null,
+    string? CurrentTalkChar = null,
+    string? CurrentTesxt = null,
+    int? SourceParagraph = null);
 
 internal sealed class AiStoryFillImportPreview
 {

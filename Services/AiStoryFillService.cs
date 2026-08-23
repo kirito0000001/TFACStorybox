@@ -9,7 +9,7 @@ using System.Text.Json;
 
 namespace GalExcleTools.Services;
 
-internal sealed class AiStoryFillService
+internal sealed partial class AiStoryFillService
 {
     public const string ManifestFileName = "manifest.json";
     public const string SpeakerCatalogFileName = "speaker-catalog.json";
@@ -61,10 +61,50 @@ internal sealed class AiStoryFillService
         IReadOnlyList<string> customSpeakers,
         int protocolVersion)
     {
-        var protocol = AiStoryFillProtocol.GetDefinition(protocolVersion);
+        return CreateConfiguredTaskPackage(
+            chapter,
+            document,
+            characters,
+            packageDirectory,
+            customSpeakers,
+            new AiStoryFillTaskOptions
+            {
+                ProtocolVersion = protocolVersion,
+                SourceStartParagraph = sourceStartParagraph
+            });
+    }
+
+    public AiStoryFillTaskExportResult CreateConfiguredTaskPackage(
+        ChapterInfo chapter,
+        StoryDocument document,
+        IReadOnlyList<CharacterInfo> characters,
+        string packageDirectory,
+        IReadOnlyList<string> customSpeakers,
+        AiStoryFillTaskOptions options)
+    {
+        var protocol = AiStoryFillProtocol.GetDefinition(options.ProtocolVersion);
         if (!protocol.IsImplemented)
         {
             throw new InvalidOperationException($"AI 剧情填表协议 {protocol.Profile} 尚未开放导出。");
+        }
+        var mode = options.Mode.Trim().ToLowerInvariant();
+        var patchFields = options.PatchFields
+            .Select(field => field.Trim())
+            .Where(field => !string.IsNullOrWhiteSpace(field))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (mode is not ("append" or "patch-empty"))
+        {
+            throw new InvalidDataException($"不支持的 AI 剧情任务模式：{options.Mode}");
+        }
+        if (mode == "append" && patchFields.Count > 0)
+        {
+            throw new InvalidDataException("append 模式不能选择修补字段。");
+        }
+        if (mode == "patch-empty" &&
+            (patchFields.Count == 0 || patchFields.Any(field => !protocol.AllowedFields.Contains(field, StringComparer.Ordinal))))
+        {
+            throw new InvalidDataException("patch-empty 模式必须选择协议允许的修补字段。");
         }
         if (document.Rows.Count == 0)
         {
@@ -87,13 +127,15 @@ internal sealed class AiStoryFillService
             GeneratedAt = DateTimeOffset.Now,
             ChapterCode = chapter.Code,
             ChapterName = chapter.Name,
+            Mode = mode,
             AnchorRowId = anchor.StableId,
             AnchorRowIndex = document.Rows.Count - 1,
             StoryDocumentSha256 = ComputeFileSha256(documentPath),
-            SourceStartParagraph = Math.Max(0, sourceStartParagraph),
+            SourceStartParagraph = Math.Max(0, options.SourceStartParagraph),
             Capabilities = protocol.Capabilities.ToList(),
             AiInstructionsFile = AiInstructionsFileName,
-            AllowedFields = protocol.AllowedFields.ToList()
+            AllowedFields = protocol.AllowedFields.ToList(),
+            PatchFields = patchFields
         };
         var catalog = new AiStorySpeakerCatalog
         {
@@ -121,7 +163,10 @@ internal sealed class AiStoryFillService
             instructionsPath,
             BuildAiInstructions(manifest),
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        return new AiStoryFillTaskExportResult(packageDirectory, manifestPath, catalogPath, manifest);
+        var sourcePath = string.Equals(manifest.Mode, "patch-empty", StringComparison.OrdinalIgnoreCase)
+            ? WritePatchSource(packageDirectory, document, manifest.PatchFields)
+            : null;
+        return new AiStoryFillTaskExportResult(packageDirectory, manifestPath, catalogPath, manifest, sourcePath);
     }
 
     public AiStoryFillImportPreview LoadImportPreview(
@@ -151,10 +196,13 @@ internal sealed class AiStoryFillService
                            _protocolJsonOptions)
                        ?? throw new InvalidDataException("manifest.json 无法解析。");
         ValidateManifest(chapter, manifest, issues);
+        var importedIds = ReadImportedIds(chapter, manifest.PackageId);
+        if (string.Equals(manifest.Mode, "patch-empty", StringComparison.OrdinalIgnoreCase))
+        {
+            return LoadPatchPreview(chapter, packageDirectory, manifest, sourcePath, resultPath, importedIds, knownSpeakers, issues);
+        }
+
         var sourceIds = ReadSourceIds(sourcePath, issues);
-        var importedIds = ReadImportState(chapter).Packages
-            .SelectMany(package => package.SourceIds)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var items = ReadResultItems(resultPath, sourceIds, importedIds, knownSpeakers, issues);
         if (items.Any(item => item.Status == AiStoryFillItemStatus.Include))
         {
@@ -171,6 +219,18 @@ internal sealed class AiStoryFillService
     }
 
     public AiStoryFillImportResult ApplyImport(
+        ChapterInfo chapter,
+        AiStoryFillImportPreview preview)
+    {
+        if (string.Equals(preview.Manifest.Mode, "patch-empty", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApplyPatchImport(chapter, preview);
+        }
+
+        return ApplyAppendImport(chapter, preview);
+    }
+
+    private AiStoryFillImportResult ApplyAppendImport(
         ChapterInfo chapter,
         AiStoryFillImportPreview preview)
     {
@@ -206,9 +266,7 @@ internal sealed class AiStoryFillService
             .Where(item => item.Status == AiStoryFillItemStatus.Include)
             .ToList();
         var state = ReadImportState(chapter);
-        var importedIds = state.Packages
-            .SelectMany(package => package.SourceIds)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var importedIds = ReadImportedIds(state, preview.Manifest.PackageId);
         if (importItems.Any(item => importedIds.Contains(item.Id)))
         {
             throw new InvalidOperationException("AI 填表结果中存在已经导入的记录，请重新载入预览。");
@@ -295,14 +353,27 @@ internal sealed class AiStoryFillService
         {
             issues.Add(new AiStoryFillIssue(AiStoryFillIssueSeverity.Error, $"章节不匹配：{manifest.ChapterCode} != {chapter.Code}"));
         }
-        if (!string.Equals(manifest.Mode, "append", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(manifest.Mode, "append", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(manifest.Mode, "patch-empty", StringComparison.OrdinalIgnoreCase))
         {
-            issues.Add(new AiStoryFillIssue(AiStoryFillIssueSeverity.Error, "第一版只支持 append 合并模式。"));
+            issues.Add(new AiStoryFillIssue(AiStoryFillIssueSeverity.Error, $"不支持的任务模式：{manifest.Mode}"));
         }
         if (protocol is not null &&
             !manifest.AllowedFields.ToHashSet(StringComparer.Ordinal).SetEquals(protocol.AllowedFields))
         {
             issues.Add(new AiStoryFillIssue(AiStoryFillIssueSeverity.Error, "allowedFields 必须严格为 TalkChar/Tesxt。"));
+        }
+        if (string.Equals(manifest.Mode, "patch-empty", StringComparison.OrdinalIgnoreCase))
+        {
+            if (manifest.PatchFields.Count == 0 ||
+                manifest.PatchFields.Any(field => !manifest.AllowedFields.Contains(field, StringComparer.Ordinal)))
+            {
+                issues.Add(new AiStoryFillIssue(AiStoryFillIssueSeverity.Error, "patchFields 为空或包含协议外字段。"));
+            }
+        }
+        else if (manifest.PatchFields.Count > 0)
+        {
+            issues.Add(new AiStoryFillIssue(AiStoryFillIssueSeverity.Error, "append 模式不能声明 patchFields。"));
         }
     }
 
@@ -467,6 +538,19 @@ internal sealed class AiStoryFillService
                ?? new AiStoryFillImportState();
     }
 
+    private HashSet<string> ReadImportedIds(ChapterInfo chapter, string packageId)
+    {
+        return ReadImportedIds(ReadImportState(chapter), packageId);
+    }
+
+    private static HashSet<string> ReadImportedIds(AiStoryFillImportState state, string packageId)
+    {
+        return state.Packages
+            .Where(package => string.Equals(package.PackageId, packageId, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(package => package.SourceIds)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
     private static string? GetStringProperty(JsonElement element, string name)
     {
         return TryGetPropertyIgnoreCase(element, name, out var value) && value.ValueKind == JsonValueKind.String
@@ -520,6 +604,10 @@ internal sealed class AiStoryFillService
 
     private static string BuildAiInstructions(AiStoryFillManifest manifest)
     {
+        if (string.Equals(manifest.Mode, "patch-empty", StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildPatchAiInstructions(manifest);
+        }
         return $$"""
             # TFAC AI 剧情填表任务 {{manifest.Profile}}
 
