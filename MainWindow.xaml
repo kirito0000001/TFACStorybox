@@ -787,16 +787,30 @@
                                 <ColumnDefinition Width="224" />
                             </Grid.ColumnDefinitions>
                             <StackPanel Spacing="8">
-                                <TextBox
-                                    x:Name="StorySpeakerTextBox"
-                                    Header="当前说话人"
-                                    Background="#66FFFFFF"
-                                    BorderBrush="#50000000"
-                                    Text="{Binding SpeakerText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                    TextChanged="StorySpeakerTextBox_TextChanged"
-                                    BeforeTextChanging="StoryTextEditor_BeforeTextChanging"
-                                    GotFocus="StoryTextEditor_GotFocus"
-                                    LostFocus="StoryTextEditor_LostFocus" />
+                                <AutoSuggestBox
+                                     x:Name="StorySpeakerTextBox"
+                                     Header="当前说话人"
+                                     PlaceholderText="输入或选择本章出现过的名称"
+                                     TextMemberPath="Value"
+                                     Background="#66FFFFFF"
+                                     BorderBrush="#50000000"
+                                     Text="{Binding SpeakerText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     TextChanged="StorySpeakerTextBox_TextChanged"
+                                     SuggestionChosen="StorySpeakerTextBox_SuggestionChosen"
+                                     GotFocus="StorySpeakerTextBox_GotFocus"
+                                     LostFocus="StoryTextEditor_LostFocus">
+                                    <AutoSuggestBox.QueryIcon>
+                                        <SymbolIcon Symbol="Find" />
+                                    </AutoSuggestBox.QueryIcon>
+                                    <AutoSuggestBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Padding="8,5" Spacing="2">
+                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding SecondaryText}" Style="{StaticResource SubtleTextStyle}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </AutoSuggestBox.ItemTemplate>
+                                </AutoSuggestBox>
                                 <Border
                                     x:Name="StorySpeakerPreviewSlot"
                                     Width="190"

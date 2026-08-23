@@ -153,7 +153,7 @@ namespace GalExcleTools
         {
             if (StorySpeakerTextBox is not null)
             {
-                StorySpeakerTextBox.IsReadOnly = _isStoryDebugModeEnabled;
+                StorySpeakerTextBox.IsEnabled = !_isStoryDebugModeEnabled;
             }
 
             if (StoryTextTextBox is not null)
