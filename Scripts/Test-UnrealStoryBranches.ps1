@@ -26,13 +26,13 @@ Require-Pattern `
     'Unreal Python must merge, verify, save, and re-verify AllRoad.'
 
 Require-Pattern `
-    (Join-Path $root 'Services\UnrealSyncService.cs') `
-    'story-branches-v2[\s\S]*?BuildChapterStoryBranchSyncEntries[\s\S]*?RequiresChoiceCondition[\s\S]*?convergenceSection' `
+    (Join-Path $root 'Services\StoryBranchFlowService.cs') `
+    'StoryBranchFlowService[\s\S]*?convergenceSection[\s\S]*?explicitTarget\s*\?\?\s*convergenceSection' `
     'AllRoad generation must cover conditional, sequential, and terminal section routes.'
 
 Require-Pattern `
-    (Join-Path $root 'Services\UnrealSyncService.cs') `
-    'missingOptionIndex[\s\S]*?GetOptionKey\(missingOptionIndex\)[\s\S]*?convergenceSection\.TableAsset' `
+    (Join-Path $root 'Services\StoryBranchFlowService.cs') `
+    'explicitTarget\s*\?\?\s*convergenceSection[\s\S]*?explicitTarget is null && convergenceSection is not null' `
     'Unbound choices must conditionally enter the inferred common section.'
 
 Require-Pattern `
