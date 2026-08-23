@@ -48,17 +48,17 @@ internal sealed class StoryCsvService
             return [];
         }
 
-        var lines = File.ReadAllLines(csvPath, Encoding.UTF8).Where(line => !string.IsNullOrWhiteSpace(line)).ToList();
-        if (lines.Count == 0)
+        var records = ReadCsvRecords(csvPath);
+        if (records.Count == 0)
         {
             return [];
         }
 
-        var headers = NormalizeHeaders(ParseCsvLine(lines[0]));
+        var headers = NormalizeHeaders(ParseCsvLine(records[0]));
         var rows = new List<StoryRow>();
-        foreach (var line in lines.Skip(1))
+        foreach (var record in records.Skip(1))
         {
-            var cells = ParseCsvLine(line);
+            var cells = ParseCsvLine(record);
             var row = CreateDefaultRow();
             for (var i = 0; i < headers.Count && i < cells.Count; i++)
             {
@@ -74,6 +74,64 @@ internal sealed class StoryCsvService
         }
 
         return rows;
+    }
+
+    private static List<string> ReadCsvRecords(string csvPath)
+    {
+        var records = new List<string>();
+        var builder = new StringBuilder();
+        var inQuotes = false;
+        using var reader = new StreamReader(csvPath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        int value;
+        while ((value = reader.Read()) >= 0)
+        {
+            var ch = (char)value;
+            if (ch == '"')
+            {
+                builder.Append(ch);
+                if (inQuotes && reader.Peek() == '"')
+                {
+                    builder.Append((char)reader.Read());
+                }
+                else
+                {
+                    inQuotes = !inQuotes;
+                }
+
+                continue;
+            }
+
+            if (!inQuotes && (ch == '\r' || ch == '\n'))
+            {
+                if (ch == '\r' && reader.Peek() == '\n')
+                {
+                    reader.Read();
+                }
+
+                AddCsvRecord(records, builder);
+                continue;
+            }
+
+            builder.Append(ch);
+        }
+
+        if (inQuotes)
+        {
+            throw new InvalidDataException($"CSV 存在未闭合的引号字段：{csvPath}");
+        }
+
+        AddCsvRecord(records, builder);
+        return records;
+    }
+
+    private static void AddCsvRecord(List<string> records, StringBuilder builder)
+    {
+        if (builder.Length > 0 && !string.IsNullOrWhiteSpace(builder.ToString()))
+        {
+            records.Add(builder.ToString());
+        }
+
+        builder.Clear();
     }
 
     public void WriteRows(string csvPath, IReadOnlyList<StoryRow> rows)

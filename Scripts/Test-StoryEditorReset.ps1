@@ -96,6 +96,8 @@ try {
     $chapterArgs[4] = [DateTime]::Now
     $chapterArgs[5] = [int]0
     $chapter = $chapterCtor.Invoke($chapterArgs).PSObject.BaseObject
+    $multilineText = "First line, with comma`r`nSecond line says `"quoted`"."
+    [void]$set.Invoke($rows[0], @('Tesxt', $multilineText))
     [void]$repository.GetType().GetMethod('Save').Invoke($repository, @($chapter, $document))
     $documentPath = Join-Path $testRoot 'story.document.json'
     if (!(Test-Path -LiteralPath $documentPath)) { throw 'StoryDocument JSON was not created.' }
@@ -103,6 +105,13 @@ try {
     $exported = $exporter.GetType().GetMethod('ExportChapter').Invoke($exporter, @($chapter))
     $mainCsvPath = Join-Path $testRoot 'RESETCH.csv'
     if (!(Test-Path -LiteralPath $mainCsvPath)) { throw 'CSV export was not created.' }
+    $readCsvArgs = [object[]]::new(1)
+    $readCsvArgs[0] = [string]$mainCsvPath
+    $roundTripRows = $csv.GetType().GetMethod('ReadRows').Invoke($csv, $readCsvArgs)
+    $roundTripText = [string]$get.Invoke($roundTripRows[0], @('Tesxt'))
+    if ($roundTripText -ne $multilineText) {
+        throw "CSV round-trip did not preserve a multiline quoted story field. ExpectedText=$($multilineText | ConvertTo-Json -Compress) ActualText=$($roundTripText | ConvertTo-Json -Compress)"
+    }
     $csvHashBeforeJsonEdit = (Get-FileHash -LiteralPath $mainCsvPath -Algorithm SHA256).Hash
     [void]$set.Invoke($rows[0], @('Tesxt', 'JSON is canonical'))
     [void]$saveCoordinator.GetType().GetMethod('QueueSave').Invoke($saveCoordinator, @($chapter, $document))
