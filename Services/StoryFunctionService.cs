@@ -151,7 +151,7 @@ internal static class StoryFunctionService
                 var functionValue = BuildSegmentJumpFunctionValue(section);
                 return new StoryObjectChoice(
                     section.ToString(CultureInfo.InvariantCulture),
-                    $"第 {section} 小节 / {functionValue}",
+                    $"{StorySectionDisplay.FormatName(section)} / {functionValue}",
                     functionValue);
             })
             .ToList();

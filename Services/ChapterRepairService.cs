@@ -65,7 +65,7 @@ internal sealed class ChapterRepairService
                 ? Math.Max(1, mappedSection)
                 : 1;
             progress?.Report(new ChapterRepairProgress(
-                $"正在检查第 {section} 小节剧情",
+                $"正在检查{StorySectionDisplay.FormatName(section)}剧情",
                 document.Rows.Count == 0 ? 100 : rowIndex * 90d / document.Rows.Count,
                 rowIndex,
                 document.Rows.Count,

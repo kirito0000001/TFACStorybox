@@ -81,7 +81,7 @@ namespace GalExcleTools
                 {
                     StorySectionComboBox.Items.Add(new ComboBoxItem
                     {
-                        Content = $"第 {i} 小节",
+                        Content = StorySectionDisplay.FormatName(i),
                         Tag = i
                     });
                 }
@@ -117,7 +117,7 @@ namespace GalExcleTools
             UpdateStoryEditorHeader();
             UpdateStoryToolbarCurrentInfo();
             _storyEditorViewModel.RefreshCommandStates();
-            ShowStoryStatus(InfoBarSeverity.Success, "已拆分小节", $"当前句现在是第 {nextSection} 小节的第一句。");
+            ShowStoryStatus(InfoBarSeverity.Success, "已拆分小节", $"当前句现在是{StorySectionDisplay.FormatName(nextSection)}的第一句。");
         }
 
         private void SelectStorySection(int section)
@@ -188,8 +188,8 @@ namespace GalExcleTools
                 InfoBarSeverity.Success,
                 isCustom ? "已保留自定义跳转" : "已恢复自动同步",
                 isCustom
-                    ? $"第 {section} 小节将在同步 AllRoad 时保持现有手工设置。"
-                    : $"第 {section} 小节将重新由工具箱生成 AllRoad 跳转。");
+                    ? $"{StorySectionDisplay.FormatName(section)}将在同步 AllRoad 时保持现有手工设置。"
+                    : $"{StorySectionDisplay.FormatName(section)}将重新由工具箱生成 AllRoad 跳转。");
         }
 
         private int GetStorySectionAtRowIndex(int rowIndex)

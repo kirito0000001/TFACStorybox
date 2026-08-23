@@ -92,7 +92,7 @@ public sealed partial class MainWindow
         {
             _chapterChoiceManagerOptions.Add(new StoryChoiceManagerOptionItem(
                 string.Empty,
-                $"第 {section.Section} 小节-无选项",
+                $"{StorySectionDisplay.FormatName(section.Section)}-无选项",
                 string.Empty,
                 string.Empty,
                 FlowOption: null));
@@ -128,7 +128,7 @@ public sealed partial class MainWindow
 
             ChapterChoiceManagerCustomToggle.IsEnabled = true;
             ChapterChoiceManagerCustomToggle.IsOn = section.Flow.Kind == StoryBranchSectionKind.Custom;
-            ChapterChoiceManagerSectionInfo.Text = $"开始于第 {section.Section} 小节";
+            ChapterChoiceManagerSectionInfo.Text = $"开始于{StorySectionDisplay.FormatName(section.Section)}";
             ChapterChoiceManagerSourcePreview.Text = $"触发文本：{section.Flow.FirstSentencePreview}";
             if (ChapterChoiceManagerOptionList.SelectedItem is StoryChoiceManagerOptionItem { FlowOption: { } flowOption } option)
             {
@@ -142,7 +142,7 @@ public sealed partial class MainWindow
             }
             else
             {
-                ChapterChoiceManagerDetailTitle.Text = $"第 {section.Section} 小节";
+                ChapterChoiceManagerDetailTitle.Text = StorySectionDisplay.FormatName(section.Section);
                 ChapterChoiceManagerFunctionCode.Text = $"结构类型：{section.Status}";
                 ChapterChoiceManagerOptionTextBox.Text = string.Empty;
                 ChapterChoiceManagerOptionTextBox.IsEnabled = false;
@@ -176,7 +176,7 @@ public sealed partial class MainWindow
             ChapterChoiceManagerTargetComboBox.Items.Add(new StoryChoiceManagerTargetItem(
                 section.FirstRowId,
                 section.Section,
-                $"第 {section.Section} 小节 · {section.FirstSentencePreview}"));
+                $"{StorySectionDisplay.FormatName(section.Section)} · {section.FirstSentencePreview}"));
         }
     }
 
@@ -324,8 +324,8 @@ public sealed partial class MainWindow
     {
         var target = _chapterChoiceManagerSession?.Flow.Sections.FirstOrDefault(item => item.Section == section);
         return target is null
-            ? $"第 {section} 小节"
-            : $"{StoryChoiceManagerService.GetSectionDisplayName(_chapterChoiceManagerSession!.Flow, target)}（第 {section} 小节）";
+            ? StorySectionDisplay.FormatName(section)
+            : $"{StoryChoiceManagerService.GetSectionDisplayName(_chapterChoiceManagerSession!.Flow, target)}（{StorySectionDisplay.FormatName(section)}）";
     }
 
     private static string GetChapterChoiceManagerStructureSummary(StoryBranchSectionFlow flow) => flow.Kind switch

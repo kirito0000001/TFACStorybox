@@ -66,7 +66,7 @@ internal sealed class StoryCsvImporter
                 document.RowSections[row.Get("Name")] = nextSection;
             }
 
-            logs.Add(new StorySessionLogEntry(LogKind.User, $"已导入为第 {nextSection} 小节：{Path.GetFileName(csvPath)}"));
+            logs.Add(new StorySessionLogEntry(LogKind.User, $"已导入为{StorySectionDisplay.FormatName(nextSection)}：{Path.GetFileName(csvPath)}"));
             nextSection++;
             importedCount++;
             if (deleteSourceFiles && !IsGeneratedCsv(chapter, csvPath))

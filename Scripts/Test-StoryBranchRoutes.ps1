@@ -123,7 +123,7 @@ if (Test-Path -LiteralPath $assemblyPath) {
     }
     $targets = @($serviceType.GetMethod('GetTargetOptions').Invoke($null, @($largeDocument)))
     if ($targets.Count -ne 30 -or
-        $targets[29].DisplayName -ne '第 30 小节' -or
+        $targets[29].DisplayName -ne '第 29 小节' -or
         $targets[29].FirstSentencePreview -ne '第 30 小节第一句话') {
         throw 'Target sections must grow dynamically without a fixed count limit.'
     }

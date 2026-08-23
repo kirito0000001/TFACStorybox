@@ -47,7 +47,7 @@ internal static class StoryBranchService
                 return new StoryChoiceTargetOption(
                     GetSectionFirstRowId(document, section) ?? string.Empty,
                     section,
-                    $"第 {section} 小节",
+                    StorySectionDisplay.FormatName(section),
                     FirstSentencePreview: TextUtility.NormalizeSingleLineText(firstRow.Get("Tesxt")));
             })
             .Where(option => !string.IsNullOrWhiteSpace(option.TargetSectionFirstRowId))
@@ -102,8 +102,8 @@ internal static class StoryBranchService
                 $"选项 {route.OptionKey}",
                 content,
                 sourceSection is null
-                    ? $"进入第 {section} 小节"
-                    : $"第 {sourceSection.Value} 小节 → 第 {section} 小节"));
+                    ? $"进入{StorySectionDisplay.FormatName(section)}"
+                    : $"{StorySectionDisplay.FormatName(sourceSection.Value)} → {StorySectionDisplay.FormatName(section)}"));
         }
 
         return result;
