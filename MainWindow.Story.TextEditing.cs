@@ -182,23 +182,23 @@ public sealed partial class MainWindow
         var suggestions = new List<StorySpeakerNameSuggestion>
         {
             new(
-                query,
-                "创建说话人",
-                string.IsNullOrWhiteSpace(query) ? "直接采用输入" : $"使用“{query}”",
+                string.Empty,
+                "清空",
+                "移除当前说话人",
                 UsageCount: null,
-                IsClearAction: false,
-                IsCreateAction: true)
+                IsClearAction: true,
+                IsCreateAction: false)
         };
         suggestions.AddRange(filteredSuggestions
-            .OrderBy(item => item.UsageCount ?? 0)
-            .ThenByDescending(item => item.DisplayName, StringComparer.OrdinalIgnoreCase));
+            .OrderByDescending(item => item.UsageCount ?? 0)
+            .ThenBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase));
         suggestions.Add(new StorySpeakerNameSuggestion(
-            string.Empty,
-            "清空",
-            "移除当前说话人",
+            query,
+            "创建说话人",
+            string.IsNullOrWhiteSpace(query) ? "直接采用输入" : $"使用“{query}”",
             UsageCount: null,
-            IsClearAction: true,
-            IsCreateAction: false));
+            IsClearAction: false,
+            IsCreateAction: true));
         box.ItemsSource = suggestions;
         box.IsSuggestionListOpen = true;
     }
