@@ -11,6 +11,7 @@ namespace GalExcleTools;
 public sealed partial class MainWindow
 {
     private List<StorySpeakerNameSuggestion> _storySpeakerNameSuggestions = [];
+    private int _storySpeakerSuggestionOpenGeneration;
 
     private bool SaveCurrentStoryRow()
     {
@@ -181,23 +182,23 @@ public sealed partial class MainWindow
         var suggestions = new List<StorySpeakerNameSuggestion>
         {
             new(
-                string.Empty,
-                "清空",
-                "移除当前说话人",
+                query,
+                "创建说话人",
+                string.IsNullOrWhiteSpace(query) ? "直接采用输入" : $"使用“{query}”",
                 UsageCount: null,
-                IsClearAction: true,
-                IsCreateAction: false)
+                IsClearAction: false,
+                IsCreateAction: true)
         };
         suggestions.AddRange(filteredSuggestions
-            .OrderByDescending(item => item.UsageCount ?? 0)
-            .ThenBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase));
+            .OrderBy(item => item.UsageCount ?? 0)
+            .ThenByDescending(item => item.DisplayName, StringComparer.OrdinalIgnoreCase));
         suggestions.Add(new StorySpeakerNameSuggestion(
-            query,
-            "创建说话人",
-            string.IsNullOrWhiteSpace(query) ? "直接采用输入" : $"使用“{query}”",
+            string.Empty,
+            "清空",
+            "移除当前说话人",
             UsageCount: null,
-            IsClearAction: false,
-            IsCreateAction: true));
+            IsClearAction: true,
+            IsCreateAction: false));
         box.ItemsSource = suggestions;
         box.IsSuggestionListOpen = true;
     }
@@ -206,37 +207,87 @@ public sealed partial class MainWindow
         DependencyObject sender,
         DependencyProperty property)
     {
+        var generation = ++_storySpeakerSuggestionOpenGeneration;
         if (sender is not AutoSuggestBox { IsSuggestionListOpen: true } box)
         {
             return;
         }
 
+        QueueStorySpeakerSuggestionListReset(box, generation, attempt: 0);
+    }
+
+    private void QueueStorySpeakerSuggestionListReset(
+        AutoSuggestBox box,
+        int generation,
+        int attempt)
+    {
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
-            box.UpdateLayout();
-            var roots = new List<DependencyObject> { box };
-            roots.AddRange(VisualTreeHelper.GetOpenPopupsForXamlRoot(box.XamlRoot)
+            if (generation != _storySpeakerSuggestionOpenGeneration || !box.IsSuggestionListOpen)
+            {
+                return;
+            }
+
+            var suggestionsList = VisualTreeHelper.GetOpenPopupsForXamlRoot(box.XamlRoot)
                 .Select(popup => popup.Child)
-                .Where(child => child is not null)!);
-            var scrollViewer = roots
-                .SelectMany(FindStorySpeakerSuggestionScrollViewers)
-                .OrderByDescending(viewer => viewer.ScrollableHeight)
-                .FirstOrDefault(viewer => viewer.ScrollableHeight > 0);
-            scrollViewer?.ChangeView(null, 0, null, disableAnimation: true);
+                .Where(child => child is not null)
+                .SelectMany(child => FindStorySpeakerSuggestionLists(child!))
+                .FirstOrDefault(list => string.Equals(list.Name, "SuggestionsList", StringComparison.Ordinal));
+            if (suggestionsList is null)
+            {
+                if (attempt < 4)
+                {
+                    QueueStorySpeakerSuggestionListReset(box, generation, attempt + 1);
+                }
+                return;
+            }
+
+            AlignStorySpeakerSuggestionListAfterLayout(box, suggestionsList, generation);
         });
     }
 
-    private static IEnumerable<ScrollViewer> FindStorySpeakerSuggestionScrollViewers(DependencyObject root)
+    private void AlignStorySpeakerSuggestionListAfterLayout(
+        AutoSuggestBox box,
+        ListView suggestionsList,
+        int generation)
+    {
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(32);
+        timer.IsRepeating = false;
+        EventHandler<object>? layoutUpdated = null;
+        layoutUpdated = (_, _) =>
+        {
+            timer.Stop();
+            timer.Start();
+        };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            suggestionsList.LayoutUpdated -= layoutUpdated;
+            if (generation == _storySpeakerSuggestionOpenGeneration &&
+                box.IsSuggestionListOpen &&
+                suggestionsList.Items.Count > 0)
+            {
+                suggestionsList.ScrollIntoView(
+                    suggestionsList.Items[0],
+                    ScrollIntoViewAlignment.Leading);
+            }
+        };
+        suggestionsList.LayoutUpdated += layoutUpdated;
+        timer.Start();
+    }
+
+    private static IEnumerable<ListView> FindStorySpeakerSuggestionLists(DependencyObject root)
     {
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
         {
             var child = VisualTreeHelper.GetChild(root, index);
-            if (child is ScrollViewer scrollViewer)
+            if (child is ListView listView)
             {
-                yield return scrollViewer;
+                yield return listView;
             }
 
-            foreach (var descendant in FindStorySpeakerSuggestionScrollViewers(child))
+            foreach (var descendant in FindStorySpeakerSuggestionLists(child))
             {
                 yield return descendant;
             }
