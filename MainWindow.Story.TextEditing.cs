@@ -109,23 +109,35 @@ public sealed partial class MainWindow
         return _storyRows
             .Select((row, index) => new
             {
-                Name = row.Get("TalkChar").Trim(),
+                RawValue = row.Get("TalkChar").Trim(),
                 Index = index
             })
-            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
-            .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Where(item => !string.IsNullOrWhiteSpace(item.RawValue))
+            .Select(item =>
+            {
+                var character = ResolveStoryCharacter(item.RawValue);
+                return new
+                {
+                    Value = character?.Code ?? item.RawValue,
+                    DisplayName = character?.Name ?? item.RawValue,
+                    SecondaryText = character?.Code ?? "nullptr",
+                    item.Index
+                };
+            })
+            .GroupBy(item => item.Value, StringComparer.OrdinalIgnoreCase)
             .Select(group => new
             {
-                Name = group.First().Name,
+                Item = group.First(),
                 UsageCount = group.Count(),
                 FirstIndex = group.Min(item => item.Index)
             })
             .OrderByDescending(item => item.UsageCount)
             .ThenBy(item => item.FirstIndex)
             .Select(item => new StorySpeakerNameSuggestion(
-                item.Name,
-                item.Name,
-                $"本章使用 {item.UsageCount} 次",
+                item.Item.Value,
+                item.Item.DisplayName,
+                item.Item.SecondaryText,
+                item.UsageCount,
                 IsCreateAction: false))
             .ToList();
     }
@@ -133,14 +145,27 @@ public sealed partial class MainWindow
     private void RefreshStorySpeakerNameSuggestions(AutoSuggestBox box)
     {
         var query = box.Text.Trim();
-        var suggestions = _storySpeakerNameSuggestions
+        var filteredSuggestions = _storySpeakerNameSuggestions
             .Where(item => string.IsNullOrWhiteSpace(query) ||
-                           item.Value.Contains(query, StringComparison.OrdinalIgnoreCase))
+                           item.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                           item.Value.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                           item.SecondaryText.Contains(query, StringComparison.OrdinalIgnoreCase));
+        var suggestions = new[]
+            {
+                new StorySpeakerNameSuggestion(
+                    string.Empty,
+                    "清空",
+                    "移除当前说话人",
+                    UsageCount: null,
+                    IsCreateAction: false)
+            }
+            .Concat(filteredSuggestions)
             .ToList();
         suggestions.Add(new StorySpeakerNameSuggestion(
             query,
             "创建说话人",
             string.IsNullOrWhiteSpace(query) ? "输入名称后直接采用" : $"使用“{query}”",
+            UsageCount: null,
             IsCreateAction: true));
         box.ItemsSource = suggestions;
         box.IsSuggestionListOpen = true;
@@ -160,6 +185,7 @@ public sealed partial class MainWindow
         string Value,
         string DisplayName,
         string SecondaryText,
+        int? UsageCount,
         bool IsCreateAction);
 
     private void StoryTextTextBox_TextChanged(object sender, TextChangedEventArgs e)

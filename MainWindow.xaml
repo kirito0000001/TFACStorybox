@@ -803,14 +803,26 @@
                                     <AutoSuggestBox.QueryIcon>
                                         <SymbolIcon Symbol="Find" />
                                     </AutoSuggestBox.QueryIcon>
-                                    <AutoSuggestBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <StackPanel Padding="8,5" Spacing="2">
-                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
-                                                <TextBlock Text="{Binding SecondaryText}" Style="{StaticResource SubtleTextStyle}" />
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </AutoSuggestBox.ItemTemplate>
+                                     <AutoSuggestBox.ItemTemplate>
+                                         <DataTemplate>
+                                             <Grid Padding="8,5" ColumnSpacing="16">
+                                                 <Grid.ColumnDefinitions>
+                                                     <ColumnDefinition Width="*" />
+                                                     <ColumnDefinition Width="Auto" />
+                                                 </Grid.ColumnDefinitions>
+                                                 <StackPanel Spacing="2">
+                                                     <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                     <TextBlock Text="{Binding SecondaryText}" Style="{StaticResource SubtleTextStyle}" TextTrimming="CharacterEllipsis" />
+                                                 </StackPanel>
+                                                 <TextBlock
+                                                     Grid.Column="1"
+                                                     Text="{Binding UsageCount}"
+                                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                     HorizontalAlignment="Right"
+                                                     VerticalAlignment="Center" />
+                                             </Grid>
+                                         </DataTemplate>
+                                     </AutoSuggestBox.ItemTemplate>
                                 </AutoSuggestBox>
                                 <Border
                                     x:Name="StorySpeakerPreviewSlot"
