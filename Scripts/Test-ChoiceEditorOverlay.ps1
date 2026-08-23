@@ -33,6 +33,13 @@ if ($code -notmatch 'StoryChoiceEditorHost_KeyDown[\s\S]*?VirtualKey\.Escape[\s\
 if ($code -notmatch '前往小节（[\s\S]*?个已创建[\s\S]*?CreateStoryChoiceTargetContent[\s\S]*?FirstSentencePreview') {
     $issues.Add('Target selection must show the dynamic existing-section count and first-sentence previews.')
 }
+if ($code -notmatch 'CreateStoryChoiceTargetContent[\s\S]*?Ellipse[\s\S]*?AccentFillColorDefaultBrush[\s\S]*?已绑定' -or
+    $code -notmatch 'RefreshStoryChoiceTargetBindingIndicators[\s\S]*?HashSet<string>[\s\S]*?个已绑定') {
+    $issues.Add('Existing target bindings must use an accessible system-accent marker.')
+}
+if ($code -notmatch 'StoryChoiceEditorTargetComboBox_SelectionChanged[\s\S]*?RefreshStoryChoiceTargetBindingIndicators[\s\S]*?StoryChoiceEditorDeleteButton_Click[\s\S]*?RefreshStoryChoiceTargetBindingIndicators') {
+    $issues.Add('Binding markers must refresh after target changes and option deletion.')
+}
 
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Error $_ }

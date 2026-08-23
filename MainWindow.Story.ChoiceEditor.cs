@@ -8,6 +8,8 @@ using GalExcleTools.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
 using Windows.System;
 
 namespace GalExcleTools;
@@ -79,6 +81,7 @@ public sealed partial class MainWindow
         {
             _isUpdatingStoryChoiceEditor = false;
         }
+        RefreshStoryChoiceTargetBindingIndicators();
     }
 
     private void StoryChoiceEditorListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -155,6 +158,7 @@ public sealed partial class MainWindow
 
         option.TargetSectionFirstRowId = item.Tag as string ?? string.Empty;
         option.TargetDisplayName = ResolveStoryChoiceTargetDisplay(option.TargetSectionFirstRowId);
+        RefreshStoryChoiceTargetBindingIndicators();
         RefreshStoryChoiceEditorSummary();
     }
 
@@ -168,6 +172,7 @@ public sealed partial class MainWindow
             "不跳转");
         _storyChoiceEditorOptions.Add(option);
         StoryChoiceEditorListView.SelectedItem = option;
+        RefreshStoryChoiceTargetBindingIndicators();
         RefreshStoryChoiceEditorSummary();
         StoryChoiceEditorTextBox.Focus(FocusState.Programmatic);
     }
@@ -188,6 +193,7 @@ public sealed partial class MainWindow
         }
         RenumberStoryChoiceEditorOptions();
         StoryChoiceEditorListView.SelectedIndex = Math.Clamp(removedIndex, 0, _storyChoiceEditorOptions.Count - 1);
+        RefreshStoryChoiceTargetBindingIndicators();
         RefreshStoryChoiceEditorSummary();
     }
 
@@ -284,12 +290,21 @@ public sealed partial class MainWindow
                ?? "目标小节已不存在";
     }
 
-    private static FrameworkElement CreateStoryChoiceTargetContent(StoryChoiceTargetOption target)
+    private FrameworkElement CreateStoryChoiceTargetContent(StoryChoiceTargetOption target)
     {
         var preview = string.IsNullOrWhiteSpace(target.FirstSentencePreview)
             ? "小节暂无文本"
             : target.FirstSentencePreview;
-        var content = new StackPanel
+        var marker = new Ellipse
+        {
+            Width = 7,
+            Height = 7,
+            Tag = target.TargetSectionFirstRowId,
+            Fill = Application.Current.Resources["AccentFillColorDefaultBrush"] as Brush,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed
+        };
+        var text = new StackPanel
         {
             Spacing = 2,
             Children =
@@ -310,7 +325,61 @@ public sealed partial class MainWindow
                 }
             }
         };
+        var status = new TextBlock
+        {
+            Text = "已绑定",
+            Tag = "BoundStatus",
+            FontSize = 12,
+            Foreground = Application.Current.Resources["AccentTextFillColorPrimaryBrush"] as Brush,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed
+        };
+        var content = new Grid
+        {
+            MinWidth = 500,
+            ColumnSpacing = 10
+        };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(text, 1);
+        Grid.SetColumn(status, 2);
+        content.Children.Add(marker);
+        content.Children.Add(text);
+        content.Children.Add(status);
         ToolTipService.SetToolTip(content, preview);
         return content;
+    }
+
+    private void RefreshStoryChoiceTargetBindingIndicators()
+    {
+        var boundTargetIds = new HashSet<string>(
+            _storyChoiceEditorOptions
+                .Select(option => option.TargetSectionFirstRowId)
+                .Where(targetId => !string.IsNullOrWhiteSpace(targetId)),
+            StringComparer.OrdinalIgnoreCase);
+        StoryChoiceEditorTargetComboBox.Header =
+            $"前往小节（{_storyChoiceEditorTargets.Count} 个已创建，{boundTargetIds.Count} 个已绑定）";
+        foreach (var item in StoryChoiceEditorTargetComboBox.Items.OfType<ComboBoxItem>())
+        {
+            if (item.Content is not Grid content || item.Tag is not string targetId)
+            {
+                continue;
+            }
+
+            var isBound = boundTargetIds.Contains(targetId);
+            var marker = content.Children.OfType<Ellipse>().FirstOrDefault();
+            var status = content.Children
+                .OfType<TextBlock>()
+                .FirstOrDefault(text => string.Equals(text.Tag as string, "BoundStatus", StringComparison.Ordinal));
+            if (marker is not null)
+            {
+                marker.Visibility = isBound ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (status is not null)
+            {
+                status.Visibility = isBound ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
     }
 }
