@@ -432,6 +432,9 @@ namespace GalExcleTools
         public MainWindow()
         {
             InitializeComponent();
+            StorySpeakerTextBox.RegisterPropertyChangedCallback(
+                AutoSuggestBox.IsSuggestionListOpenProperty,
+                StorySpeakerTextBox_SuggestionListOpenChanged);
             var displayVersion = AppVersionService.GetDisplayVersion();
             AppTitleVersionText.Text = displayVersion;
             SettingsAppVersionText.Text = $"版本 {displayVersion}";

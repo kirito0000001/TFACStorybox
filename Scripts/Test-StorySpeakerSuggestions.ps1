@@ -35,8 +35,12 @@ if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?!string\.IsNullOr
 if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?knownValues[\s\S]*?StringComparer\.OrdinalIgnoreCase[\s\S]*?knownValues\.Add') {
     $issues.Add('Asset-library search results must not duplicate speakers already used in the chapter.')
 }
-if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?new StorySpeakerNameSuggestion\([\s\S]*?创建说话人[\s\S]*?OrderBy\([\s\S]*?suggestions\.Add[\s\S]*?清空') {
-    $issues.Add('The upward-opening popup source must be reversed so clear renders first, frequent speakers descend, and create renders last.')
+if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?new StorySpeakerNameSuggestion\([\s\S]*?清空[\s\S]*?OrderByDescending[\s\S]*?suggestions\.Add[\s\S]*?创建说话人') {
+    $issues.Add('Speaker suggestions must keep semantic order: clear, usage descending, then create.')
+}
+if ((Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $root 'MainWindow.xaml.cs')) -notmatch 'RegisterPropertyChangedCallback\([\s\S]*?IsSuggestionListOpenProperty[\s\S]*?StorySpeakerTextBox_SuggestionListOpenChanged' -or
+    $code -notmatch 'StorySpeakerTextBox_SuggestionListOpenChanged[\s\S]*?GetOpenPopupsForXamlRoot[\s\S]*?ChangeView\(null,\s*0,\s*null') {
+    $issues.Add('Opening speaker suggestions must initialize the internal scroll viewer at the beginning.')
 }
 if ($xaml -notmatch 'StorySpeakerTextBox[\s\S]*?Text="\{Binding DisplayName\}"[\s\S]*?Text="\{Binding SecondaryText\}"[\s\S]*?Text="\{Binding UsageCount\}"') {
     $issues.Add('Speaker suggestions must show display name, character code, and a right-aligned numeric usage count.')

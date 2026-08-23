@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 
 namespace GalExcleTools;
 
@@ -180,25 +181,66 @@ public sealed partial class MainWindow
         var suggestions = new List<StorySpeakerNameSuggestion>
         {
             new(
-                query,
-                "创建说话人",
-                string.IsNullOrWhiteSpace(query) ? "直接采用输入" : $"使用“{query}”",
+                string.Empty,
+                "清空",
+                "移除当前说话人",
                 UsageCount: null,
-                IsClearAction: false,
-                IsCreateAction: true)
+                IsClearAction: true,
+                IsCreateAction: false)
         };
         suggestions.AddRange(filteredSuggestions
-            .OrderBy(item => item.UsageCount ?? 0)
-            .ThenByDescending(item => item.DisplayName, StringComparer.OrdinalIgnoreCase));
+            .OrderByDescending(item => item.UsageCount ?? 0)
+            .ThenBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase));
         suggestions.Add(new StorySpeakerNameSuggestion(
-            string.Empty,
-            "清空",
-            "移除当前说话人",
+            query,
+            "创建说话人",
+            string.IsNullOrWhiteSpace(query) ? "直接采用输入" : $"使用“{query}”",
             UsageCount: null,
-            IsClearAction: true,
-            IsCreateAction: false));
+            IsClearAction: false,
+            IsCreateAction: true));
         box.ItemsSource = suggestions;
         box.IsSuggestionListOpen = true;
+    }
+
+    private void StorySpeakerTextBox_SuggestionListOpenChanged(
+        DependencyObject sender,
+        DependencyProperty property)
+    {
+        if (sender is not AutoSuggestBox { IsSuggestionListOpen: true } box)
+        {
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            box.UpdateLayout();
+            var roots = new List<DependencyObject> { box };
+            roots.AddRange(VisualTreeHelper.GetOpenPopupsForXamlRoot(box.XamlRoot)
+                .Select(popup => popup.Child)
+                .Where(child => child is not null)!);
+            var scrollViewer = roots
+                .SelectMany(FindStorySpeakerSuggestionScrollViewers)
+                .OrderByDescending(viewer => viewer.ScrollableHeight)
+                .FirstOrDefault(viewer => viewer.ScrollableHeight > 0);
+            scrollViewer?.ChangeView(null, 0, null, disableAnimation: true);
+        });
+    }
+
+    private static IEnumerable<ScrollViewer> FindStorySpeakerSuggestionScrollViewers(DependencyObject root)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is ScrollViewer scrollViewer)
+            {
+                yield return scrollViewer;
+            }
+
+            foreach (var descendant in FindStorySpeakerSuggestionScrollViewers(child))
+            {
+                yield return descendant;
+            }
+        }
     }
 
     private void StorySpeakerTextBox_SuggestionChosen(
