@@ -18,6 +18,7 @@ public sealed partial class MainWindow
 {
     private readonly ObservableCollection<StoryChoiceEditorOptionViewModel> _storyChoiceEditorOptions = [];
     private IReadOnlyList<StoryChoiceTargetOption> _storyChoiceEditorTargets = [];
+    private string _storyChoiceEditorChoiceIndicator = string.Empty;
     private TaskCompletionSource<StoryChoiceEditorResult?>? _storyChoiceEditorCompletion;
     private bool _isUpdatingStoryChoiceEditor;
 
@@ -27,6 +28,7 @@ public sealed partial class MainWindow
         IReadOnlyList<StoryChoiceEditorOption>? initialOptions = null)
     {
         CompleteStoryChoiceEditor(null);
+        _storyChoiceEditorChoiceIndicator = choiceIndicator;
         _storyChoiceEditorTargets = targetOptions;
         _storyChoiceEditorOptions.Clear();
         var sourceOptions = initialOptions is { Count: > 0 }
@@ -354,10 +356,18 @@ public sealed partial class MainWindow
     private void RefreshStoryChoiceTargetBindingIndicators()
     {
         var boundTargetIds = new HashSet<string>(
-            _storyChoiceEditorOptions
-                .Select(option => option.TargetSectionFirstRowId)
+            _storyEditorViewModel.Document.BranchRoutes
+                .Where(route => !string.Equals(
+                    route.ChoiceFunction,
+                    _storyChoiceEditorChoiceIndicator,
+                    StringComparison.OrdinalIgnoreCase))
+                .Select(route => route.TargetSectionFirstRowId)
                 .Where(targetId => !string.IsNullOrWhiteSpace(targetId)),
             StringComparer.OrdinalIgnoreCase);
+        boundTargetIds.UnionWith(
+            _storyChoiceEditorOptions
+                .Select(option => option.TargetSectionFirstRowId)
+                .Where(targetId => !string.IsNullOrWhiteSpace(targetId)));
         StoryChoiceEditorTargetComboBox.Header =
             $"前往小节（{_storyChoiceEditorTargets.Count} 个已创建，{boundTargetIds.Count} 个已绑定）";
         foreach (var item in StoryChoiceEditorTargetComboBox.Items.OfType<ComboBoxItem>())

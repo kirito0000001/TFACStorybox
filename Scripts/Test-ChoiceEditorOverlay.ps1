@@ -37,6 +37,9 @@ if ($code -notmatch 'CreateStoryChoiceTargetContent[\s\S]*?Ellipse[\s\S]*?Accent
     $code -notmatch 'RefreshStoryChoiceTargetBindingIndicators[\s\S]*?HashSet<string>[\s\S]*?个已绑定') {
     $issues.Add('Existing target bindings must use an accessible system-accent marker.')
 }
+if ($code -notmatch 'RefreshStoryChoiceTargetBindingIndicators[\s\S]*?Document\.BranchRoutes[\s\S]*?ChoiceFunction[\s\S]*?_storyChoiceEditorChoiceIndicator[\s\S]*?UnionWith') {
+    $issues.Add('Binding markers must merge chapter-wide saved routes with the current unsaved Choice.')
+}
 if ($code -notmatch 'StoryChoiceEditorTargetComboBox_SelectionChanged[\s\S]*?RefreshStoryChoiceTargetBindingIndicators[\s\S]*?StoryChoiceEditorDeleteButton_Click[\s\S]*?RefreshStoryChoiceTargetBindingIndicators') {
     $issues.Add('Binding markers must refresh after target changes and option deletion.')
 }
