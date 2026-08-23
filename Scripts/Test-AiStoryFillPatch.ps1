@@ -135,6 +135,18 @@ try {
     $conflictExportArgs[5] = $conflictOptions.PSObject.BaseObject
     [void]$exportMethod.Invoke($service, $conflictExportArgs)
     $conflictId = $conflictDocument.Rows[2].StableId
+    ('{"id":"row:' + $conflictId + '","patch":{"Tesxt":"禁止改写"},"status":"include","confidence":"high"}') |
+        Set-Content -Encoding UTF8 -LiteralPath (Join-Path $conflictPackage 'result.jsonl')
+    $strictPreviewArgs = [object[]]::new(3)
+    $strictPreviewArgs[0] = $chapter.PSObject.BaseObject
+    $strictPreviewArgs[1] = [string]$conflictPackage
+    $strictPreviewArgs[2] = $knownSpeakers.PSObject.BaseObject
+    $strictPreview = $serviceType.GetMethod('LoadImportPreview').Invoke($service, $strictPreviewArgs)
+    if ($strictPreview.CanImport -or
+        @($strictPreview.Issues | Where-Object { $_.Message -match '补丁字段未被本任务允许.*Tesxt' }).Count -ne 1) {
+        throw 'Patch result was allowed to write a field not selected at export.'
+    }
+
     $conflictDocument.Rows[2].Set('Tesxt', '导出后被修改')
     $repositoryType.GetMethod('Save').Invoke($repository, @($chapter, $conflictDocument))
     ('{"id":"row:' + $conflictId + '","patch":{"TalkChar":"梦凪"},"status":"include","confidence":"high"}') |
