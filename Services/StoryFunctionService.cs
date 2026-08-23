@@ -30,38 +30,40 @@ internal static class StoryFunctionService
             CreateChoiceFunctionTemplate(),
             CreateChapterJumpFunctionTemplate(),
             CreateSegmentJumpFunctionTemplate(),
-            new FunctionEntry("default-scene-sfx", "播放一次性特殊音效", "Scene_", "音频", [], "播放一次特殊音效，不循环。"),
-            new FunctionEntry("default-bglerp-mode", "背景切换模式", "BGLerpMode_", "背景", [], "设置背景图切换时使用的过渡方式。"),
-            new FunctionEntry("default-vfx-on", "开启指定特效", "VFXON_", "特效", [], "开启指定名称的画面特效。"),
-            new FunctionEntry("default-vfx-off", "关闭指定特效", "VFXOFF_", "特效", [], "关闭指定名称的画面特效。"),
-            new FunctionEntry("default-transanim", "播放动画序列", "TransAnim_", "动画", [], "播放指定索引的动画序列。"),
-            new FunctionEntry("default-transanim-end", "停止目前动画", "TransAnim_END", "动画", [], "停止当前正在播放的动画。"),
-            new FunctionEntry("default-medplay", "播放视频", "MedPlay_", "视频", [], "播放指定索引的视频。"),
+            new FunctionEntry("default-scene-sfx", "播放一次性特殊音效", "Scene", "音频", [], "播放一次特殊音效，不循环。") { BranchMode = FunctionBranchMode.AssetIndex },
+            new FunctionEntry("default-bglerp-mode", "背景切换模式", "BGLerpMode", "背景", [], "设置背景图切换时使用的过渡方式。") { BranchMode = FunctionBranchMode.Fixed, Branches = [new("0", "游戏入场黑屏"), new("1", "正常黑屏转场"), new("2", "背景图渐变过渡")] },
+            new FunctionEntry("default-vfx-on", "开启指定特效", "VFXON", "特效", [], "开启指定名称的画面特效。") { BranchMode = FunctionBranchMode.Fixed },
+            new FunctionEntry("default-vfx-off", "关闭指定特效", "VFXOFF", "特效", [], "关闭指定名称的画面特效。") { BranchMode = FunctionBranchMode.Fixed },
+            new FunctionEntry("default-transanim", "播放动画序列", "TransAnim", "动画", [], "播放指定索引的动画序列。") { BranchMode = FunctionBranchMode.Fixed },
+            new FunctionEntry("default-medplay", "播放视频", "MedPlay", "视频", [], "播放指定索引的视频。") { BranchMode = FunctionBranchMode.Fixed },
             CreateBgmFunctionTemplate(),
             new FunctionEntry("default-title-show", "大标题显示", "TitleShowMode", "标题", [], "使用当前剧情文本显示大标题。"),
-            new FunctionEntry("default-close-all-fx", "关闭所有特效", "CloseAllFX", "特效", [], "关闭当前所有画面特效。"),
-            new FunctionEntry("default-custom", "纯自定义函数", "CustomFunction", "自定义", [], "写入任意自定义函数指示器。")
+            new FunctionEntry("default-close-all-fx", "关闭所有特效", "CloseAllFX", "特效", [], "关闭当前所有画面特效。")
         ];
     }
 
     public static FunctionEntry CreateChoiceFunctionTemplate()
     {
-        return new FunctionEntry(ChoiceFunctionTemplateId, "创建触发选项", ChoiceFunctionTemplateIndicator, ChoiceFunctionCategory, [], "创建一组剧情选项，具体行为由项目函数决定。");
+        return new FunctionEntry(ChoiceFunctionTemplateId, "创建触发选项", ChoiceFunctionTemplateIndicator, ChoiceFunctionCategory, [], "创建一组剧情选项，具体行为由项目函数决定。") { BranchMode = FunctionBranchMode.System };
     }
 
     public static FunctionEntry CreateChapterJumpFunctionTemplate()
     {
-        return new FunctionEntry(ChapterJumpFunctionTemplateId, "跳转章节", ChapterJumpFunctionTemplateIndicator, JumpFunctionCategory, [], "跳转到指定章节。");
+        return new FunctionEntry(ChapterJumpFunctionTemplateId, "跳转章节", ChapterJumpFunctionTemplateIndicator, JumpFunctionCategory, [], "跳转到指定章节。") { BranchMode = FunctionBranchMode.System };
     }
 
     public static FunctionEntry CreateSegmentJumpFunctionTemplate()
     {
-        return new FunctionEntry(SegmentJumpFunctionTemplateId, "跳转小节", SegmentJumpFunctionTemplateIndicator, JumpFunctionCategory, [], "跳转到当前章节的指定小节。");
+        return new FunctionEntry(SegmentJumpFunctionTemplateId, "跳转小节", SegmentJumpFunctionTemplateIndicator, JumpFunctionCategory, [], "跳转到当前章节的指定小节。") { BranchMode = FunctionBranchMode.System };
     }
 
     public static FunctionEntry CreateBgmFunctionTemplate()
     {
-        return new FunctionEntry(BgmFunctionTemplateId, "BGM", BgmFunctionTemplateIndicator, "音频", [], "开始或停止当前背景音乐。");
+        return new FunctionEntry(BgmFunctionTemplateId, "BGM", "BGM", "音频", [], "开始或停止当前背景音乐.")
+        {
+            BranchMode = FunctionBranchMode.Fixed,
+            Branches = [new FunctionBranch("Start", "开始"), new FunctionBranch("Stop", "停止")]
+        };
     }
 
     public static bool EnsureBuiltInFunctionTemplates(List<FunctionEntry> functions)
@@ -96,7 +98,114 @@ internal static class StoryFunctionService
     public static bool IsBgmFunctionTemplate(FunctionEntry function)
     {
         return string.Equals(function.Id, BgmFunctionTemplateId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(function.Indicator, "BGM", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(function.Indicator, BgmFunctionTemplateIndicator, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static List<FunctionEntry> BuildCollectedFunctionEntries(IEnumerable<string> functionValues)
+    {
+        var families = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in functionValues.Select(value => value.Trim()).Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            if (string.Equals(value, "BGMStart", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "BGMStop", StringComparison.OrdinalIgnoreCase) ||
+                Regex.IsMatch(value, @"-\d{2}-Choice\d+$", RegexOptions.IgnoreCase) ||
+                value.StartsWith("IntoChapter_", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith("IntoSegment_", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var parts = value.Split('_', 2, StringSplitOptions.TrimEntries);
+            var mainCode = parts[0];
+            if (!families.TryGetValue(mainCode, out var branches))
+            {
+                branches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                families[mainCode] = branches;
+            }
+            if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
+            {
+                branches.Add(parts[1]);
+            }
+        }
+
+        return families
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(pair => new FunctionEntry(
+                Guid.NewGuid().ToString("N"),
+                pair.Key,
+                pair.Key,
+                string.Empty,
+                [],
+                "从剧情项目扫描收录。")
+            {
+                BranchMode = pair.Value.Count == 0 ? FunctionBranchMode.None : FunctionBranchMode.Fixed,
+                Branches = pair.Value.OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+                    .Select(code => new FunctionBranch(code, string.Empty))
+                    .ToList()
+            })
+            .ToList();
+    }
+
+    public static List<FunctionEntry> MergeCollectedFunctionEntries(
+        IEnumerable<FunctionEntry> existingEntries,
+        IEnumerable<FunctionEntry> collectedEntries)
+    {
+        var result = NormalizeFunctionCatalogEntries(existingEntries).ToList();
+        foreach (var collected in collectedEntries)
+        {
+            var index = result.FindIndex(entry =>
+                string.Equals(entry.Indicator, collected.Indicator, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
+            {
+                result.Add(collected);
+                continue;
+            }
+
+            var existing = result[index];
+            var branches = existing.Branches.Concat(collected.Branches)
+                .GroupBy(branch => branch.Code, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.FirstOrDefault(branch => !string.IsNullOrWhiteSpace(branch.Remark)) ?? group.First())
+                .OrderBy(branch => branch.Code, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            result[index] = existing with
+            {
+                BranchMode = existing.BranchMode == FunctionBranchMode.AssetIndex
+                    ? FunctionBranchMode.AssetIndex
+                    : branches.Count > 0 ? FunctionBranchMode.Fixed : existing.BranchMode,
+                Branches = branches
+            };
+        }
+
+        return result;
+    }
+
+    public static int CollectFunctionsFromChapters(
+        AssetLibraryInfo assetLibrary,
+        IEnumerable<ChapterInfo> chapters,
+        StoryDocumentRepository repository,
+        JsonSerializerOptions jsonOptions)
+    {
+        var values = new List<string>();
+        foreach (var chapter in chapters)
+        {
+            if (!repository.Exists(chapter))
+            {
+                continue;
+            }
+            var document = repository.Load(chapter);
+            values.AddRange(document.Rows.SelectMany(row => SplitFunctionValues(row.Get("Custom"))));
+        }
+
+        var existing = ReadFunctions(assetLibrary, jsonOptions);
+        var merged = MergeCollectedFunctionEntries(existing, BuildCollectedFunctionEntries(values));
+        if (JsonSerializer.Serialize(existing, jsonOptions) == JsonSerializer.Serialize(merged, jsonOptions))
+        {
+            return 0;
+        }
+
+        WriteFunctions(assetLibrary, merged, jsonOptions);
+        return merged.Count - existing.Count;
     }
 
     public static string BuildChapterJumpFunctionValue(ChapterInfo chapter, string? projectCode)
@@ -396,10 +505,18 @@ internal static class StoryFunctionService
             return defaults;
         }
 
-        var changed = false;
+        var changed = index.SchemaVersion < 2;
+        if (index.SchemaVersion < 2)
+        {
+            var backupPath = indexPath + ".before-v2.bak";
+            if (!File.Exists(backupPath))
+            {
+                File.Copy(indexPath, backupPath);
+            }
+        }
         var defaultDescriptions = CreateDefaultFunctions()
             .ToDictionary(entry => entry.Id, entry => entry.Description, StringComparer.OrdinalIgnoreCase);
-        var normalized = index.Entries
+        var cleanedEntries = index.Entries
             .Where(entry => !string.IsNullOrWhiteSpace(entry.Indicator))
             .Select(entry =>
             {
@@ -430,17 +547,22 @@ internal static class StoryFunctionService
                     changed = true;
                 }
 
+                var indicator = entry.Indicator.Trim();
                 return entry with
                 {
                     Id = id,
                     Name = name,
-                    Indicator = entry.Indicator.Trim(),
+                    Indicator = indicator,
                     Category = category,
                     ChoiceNotes = choiceNotes,
                     Description = description
                 };
             })
             .ToList();
+
+        var normalized = NormalizeFunctionCatalogEntries(cleanedEntries);
+        changed |= normalized.Count != cleanedEntries.Count ||
+                   normalized.Where((entry, indexValue) => indexValue >= cleanedEntries.Count || entry != cleanedEntries[indexValue]).Any();
 
         changed |= EnsureBuiltInFunctionTemplates(normalized);
 
@@ -461,6 +583,7 @@ internal static class StoryFunctionService
         Directory.CreateDirectory(folderPath);
         var index = new FunctionIndex
         {
+            SchemaVersion = 2,
             Entries = functions.ToList()
         };
         File.WriteAllText(GetFunctionIndexPath(assetLibrary), JsonSerializer.Serialize(index, jsonOptions));
@@ -474,6 +597,86 @@ internal static class StoryFunctionService
             string.Equals(function.Indicator, "BGM_Start", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(function.Indicator, "BGM_Stop", StringComparison.OrdinalIgnoreCase));
         return removed > 0;
+    }
+
+    private static List<FunctionEntry> NormalizeFunctionCatalogEntries(IEnumerable<FunctionEntry> entries)
+    {
+        var result = new List<FunctionEntry>();
+        foreach (var entry in entries)
+        {
+            if (string.Equals(entry.Id, "default-custom", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(entry.Indicator, "CustomFunction", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (IsChoiceFunctionTemplate(entry) || IsChapterJumpFunctionTemplate(entry) || IsSegmentJumpFunctionTemplate(entry))
+            {
+                result.Add(entry with { BranchMode = FunctionBranchMode.System, Branches = [] });
+                continue;
+            }
+
+            var mainCode = entry.Indicator.Trim();
+            var branches = (entry.Branches ?? [])
+                .Where(branch => !string.IsNullOrWhiteSpace(branch.Code))
+                .Select(branch => new FunctionBranch(branch.Code.Trim(), branch.Remark?.Trim() ?? string.Empty))
+                .ToList();
+            if (IsBgmFunctionTemplate(entry))
+            {
+                mainCode = "BGM";
+                branches.AddRange([new FunctionBranch("Start", "开始"), new FunctionBranch("Stop", "停止")]);
+            }
+            else if (mainCode.EndsWith('_'))
+            {
+                mainCode = mainCode.TrimEnd('_');
+            }
+            else if (mainCode.Contains('_'))
+            {
+                var parts = mainCode.Split('_', 2, StringSplitOptions.TrimEntries);
+                mainCode = parts[0];
+                if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
+                {
+                    branches.Add(new FunctionBranch(parts[1], string.Empty));
+                }
+            }
+
+            var existingIndex = result.FindIndex(item =>
+                string.Equals(item.Indicator, mainCode, StringComparison.OrdinalIgnoreCase));
+            var normalizedBranches = branches
+                .GroupBy(branch => branch.Code, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.FirstOrDefault(branch => !string.IsNullOrWhiteSpace(branch.Remark)) ?? group.First())
+                .OrderBy(branch => branch.Code, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var normalized = entry with
+            {
+                Indicator = mainCode,
+                BranchMode = entry.BranchMode == FunctionBranchMode.AssetIndex
+                    ? FunctionBranchMode.AssetIndex
+                    : normalizedBranches.Count > 0 ? FunctionBranchMode.Fixed : FunctionBranchMode.None,
+                Branches = normalizedBranches
+            };
+            if (existingIndex < 0)
+            {
+                result.Add(normalized);
+                continue;
+            }
+
+            var existing = result[existingIndex];
+            var mergedBranches = existing.Branches.Concat(normalized.Branches)
+                .GroupBy(branch => branch.Code, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.FirstOrDefault(branch => !string.IsNullOrWhiteSpace(branch.Remark)) ?? group.First())
+                .OrderBy(branch => branch.Code, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            result[existingIndex] = existing with
+            {
+                BranchMode = existing.BranchMode == FunctionBranchMode.AssetIndex
+                    ? FunctionBranchMode.AssetIndex
+                    : mergedBranches.Count > 0 ? FunctionBranchMode.Fixed : FunctionBranchMode.None,
+                Branches = mergedBranches
+            };
+        }
+
+        return result;
     }
 
     private static bool EnsureBuiltInFunctionTemplate(
@@ -503,7 +706,9 @@ internal static class StoryFunctionService
             ChoiceNotes = [],
             Description = string.IsNullOrWhiteSpace(template.Description)
                 ? target.Description
-                : template.Description.Trim()
+                : template.Description.Trim(),
+            BranchMode = target.BranchMode,
+            Branches = template.Branches.Count > 0 ? template.Branches : target.Branches
         };
         var changed =
             !string.Equals(normalizedTemplate.Id, template.Id, StringComparison.Ordinal) ||
@@ -511,6 +716,8 @@ internal static class StoryFunctionService
             !string.Equals(normalizedTemplate.Indicator, template.Indicator, StringComparison.Ordinal) ||
             !string.Equals(normalizedTemplate.Category, template.Category, StringComparison.Ordinal) ||
             !string.Equals(normalizedTemplate.Description, template.Description, StringComparison.Ordinal) ||
+            normalizedTemplate.BranchMode != template.BranchMode ||
+            !normalizedTemplate.Branches.SequenceEqual(template.Branches) ||
             (template.ChoiceNotes?.Count ?? 0) != 0 ||
             templateIndex != desiredIndex;
 

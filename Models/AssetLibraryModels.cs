@@ -28,8 +28,20 @@ internal sealed record MusicRename(MusicEntry Entry, string TargetPath);
 
 internal sealed class FunctionIndex
 {
+    public int SchemaVersion { get; set; } = 2;
+
     public List<FunctionEntry> Entries { get; set; } = [];
 }
+
+internal enum FunctionBranchMode
+{
+    None,
+    Fixed,
+    AssetIndex,
+    System
+}
+
+internal sealed record FunctionBranch(string Code, string Remark);
 
 internal sealed record FunctionEntry(
     string Id,
@@ -37,7 +49,12 @@ internal sealed record FunctionEntry(
     string Indicator,
     string Category,
     List<string> ChoiceNotes,
-    string Description = "");
+    string Description = "")
+{
+    public FunctionBranchMode BranchMode { get; init; }
+
+    public List<FunctionBranch> Branches { get; init; } = [];
+}
 
 internal sealed record FunctionEditorInput(
     string Name,

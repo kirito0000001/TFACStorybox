@@ -339,6 +339,17 @@ namespace GalExcleTools
 
         private async Task LoadFunctionsAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
+            var linkedChapters = _projectWorkspaceService.GetProjects(_projectRootPath)
+                .Where(project =>
+                    string.Equals(project.AssetLibraryFolderName, assetLibrary.FolderName, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(project.AssetLibraryName, assetLibrary.Name, StringComparison.OrdinalIgnoreCase))
+                .SelectMany(_projectWorkspaceService.GetChapters)
+                .ToList();
+            var collectedCount = StoryFunctionService.CollectFunctionsFromChapters(
+                assetLibrary,
+                linkedChapters,
+                _storyDocumentRepository,
+                _jsonOptions);
             var functions = StoryFunctionService.ReadFunctions(assetLibrary, _jsonOptions);
             FunctionGridView.Items.Clear();
             FunctionExpander.Header = $"函数 [数量：{functions.Count}]";
@@ -353,6 +364,10 @@ namespace GalExcleTools
             }
 
             AppendLog(LogKind.Info, $"已加载函数卡：{functions.Count} 个。");
+            if (collectedCount > 0)
+            {
+                AppendLog(LogKind.Info, $"已从关联项目收录函数主项：新增 {collectedCount} 个。");
+            }
         }
 
         private void LoadFunctions(AssetLibraryInfo assetLibrary)
