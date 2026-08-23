@@ -88,6 +88,16 @@ public sealed partial class MainWindow
             return;
         }
 
+        if (section.Flow.Options.Count == 0)
+        {
+            _chapterChoiceManagerOptions.Add(new StoryChoiceManagerOptionItem(
+                string.Empty,
+                $"第 {section.Section} 小节-无选项",
+                string.Empty,
+                string.Empty,
+                FlowOption: null));
+        }
+
         foreach (var option in section.Flow.Options)
         {
             _chapterChoiceManagerOptions.Add(new StoryChoiceManagerOptionItem(
@@ -119,21 +129,21 @@ public sealed partial class MainWindow
             ChapterChoiceManagerCustomToggle.IsEnabled = true;
             ChapterChoiceManagerCustomToggle.IsOn = section.Flow.Kind == StoryBranchSectionKind.Custom;
             ChapterChoiceManagerSectionInfo.Text = $"第 {section.Section} 小节 · {section.Flow.FirstSentencePreview}";
-            if (ChapterChoiceManagerOptionList.SelectedItem is StoryChoiceManagerOptionItem option)
+            if (ChapterChoiceManagerOptionList.SelectedItem is StoryChoiceManagerOptionItem { FlowOption: { } flowOption } option)
             {
                 ChapterChoiceManagerDetailTitle.Text = $"选项 {option.OptionKey}";
                 ChapterChoiceManagerFunctionCode.Text = option.ChoiceFunction;
                 ChapterChoiceManagerOptionTextBox.IsEnabled = true;
                 ChapterChoiceManagerTargetComboBox.IsEnabled = true;
                 ChapterChoiceManagerOptionTextBox.Text = option.Text;
-                SelectChapterChoiceManagerTarget(option.FlowOption.ExplicitTargetSection);
-                ChapterChoiceManagerExplicitRoute.Text = option.FlowOption.ExplicitTargetSection is null
+                SelectChapterChoiceManagerTarget(flowOption.ExplicitTargetSection);
+                ChapterChoiceManagerExplicitRoute.Text = flowOption.ExplicitTargetSection is null
                     ? "显式目标：进入共通线"
-                    : $"显式目标：第 {option.FlowOption.ExplicitTargetSection} 小节";
-                ChapterChoiceManagerEffectiveRoute.Text = option.FlowOption.EffectiveTargetSection is null
+                    : $"显式目标：第 {flowOption.ExplicitTargetSection} 小节";
+                ChapterChoiceManagerEffectiveRoute.Text = flowOption.EffectiveTargetSection is null
                     ? "实际路线：章节结束"
-                    : $"实际路线：StoryJudge={option.OptionKey} -> 第 {option.FlowOption.EffectiveTargetSection} 小节";
-                ChapterChoiceManagerTargetPreview.Text = GetChapterChoiceManagerTargetPreview(option.FlowOption.EffectiveTargetSection);
+                    : $"实际路线：StoryJudge={option.OptionKey} -> 第 {flowOption.EffectiveTargetSection} 小节";
+                ChapterChoiceManagerTargetPreview.Text = GetChapterChoiceManagerTargetPreview(flowOption.EffectiveTargetSection);
             }
             else
             {
@@ -182,7 +192,7 @@ public sealed partial class MainWindow
     private void ApplyChapterChoiceManagerOptionEdit()
     {
         if (_isUpdatingChapterChoiceManager || _chapterChoiceManagerSession is null ||
-            ChapterChoiceManagerOptionList.SelectedItem is not StoryChoiceManagerOptionItem option)
+            ChapterChoiceManagerOptionList.SelectedItem is not StoryChoiceManagerOptionItem { FlowOption: { } flowOption } option)
         {
             return;
         }
@@ -191,11 +201,11 @@ public sealed partial class MainWindow
         _storyChoiceManagerService.UpdateOption(
             _chapterChoiceManagerSession,
             option.ChoiceFunction,
-            option.FlowOption.OptionIndex,
+            flowOption.OptionIndex,
             ChapterChoiceManagerOptionTextBox.Text,
             targetId);
         RefreshChapterChoiceManagerIssues();
-        RefreshChapterChoiceManagerRoutePreview(option.ChoiceFunction, option.FlowOption.OptionIndex);
+        RefreshChapterChoiceManagerRoutePreview(option.ChoiceFunction, flowOption.OptionIndex);
     }
 
     private void RefreshChapterChoiceManagerRoutePreview(string choiceFunction, int optionIndex)

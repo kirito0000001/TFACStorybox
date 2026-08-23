@@ -33,7 +33,7 @@ internal sealed record StoryChoiceManagerOptionItem(
     string Text,
     string ChoiceFunction,
     string TargetSummary,
-    StoryBranchFlowOption FlowOption);
+    StoryBranchFlowOption? FlowOption);
 
 internal sealed record StoryChoiceManagerTargetItem(
     string FirstRowId,
