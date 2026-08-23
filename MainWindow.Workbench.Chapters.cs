@@ -54,6 +54,7 @@ namespace GalExcleTools
                 (_, _) => OpenStoryEditorFromUi(chapter),
                 GridViewItemFactory.CreateMenu(
                 GridViewItemFactory.CreateMenuItem("修改", async (_, _) => await EditChapterFromUiAsync(chapter)),
+                GridViewItemFactory.CreateMenuItem("选项与分支", async (_, _) => await ShowChapterChoiceManagerAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("导入小节", async (_, _) => await ImportStorySectionsFromUiAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("备份", async (_, _) => await BackupChapterFromUiAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("还原", async (_, _) => await RestoreChapterFromUiAsync(chapter)),

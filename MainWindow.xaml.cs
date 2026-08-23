@@ -67,6 +67,7 @@ namespace GalExcleTools
         private readonly UnrealSyncService _unrealSyncService = new();
         private readonly StoryCsvService _storyCsvService = new();
         private readonly StoryDocumentRepository _storyDocumentRepository;
+        private readonly StoryChoiceManagerService _storyChoiceManagerService;
         private readonly StorySaveCoordinator _storySaveCoordinator;
         private readonly StoryCsvExporter _storyCsvExporter;
         private readonly StoryCsvImporter _storyCsvImporter;
@@ -494,6 +495,7 @@ namespace GalExcleTools
             };
             _storyEditorService = new StoryEditorService(_storyCsvService);
             _storyDocumentRepository = new StoryDocumentRepository(_jsonOptions);
+            _storyChoiceManagerService = new StoryChoiceManagerService(_storyDocumentRepository);
             _storySaveCoordinator = new StorySaveCoordinator(_storyDocumentRepository);
             _storyCsvExporter = new StoryCsvExporter(_storyCsvService, _storyDocumentRepository);
             _storyCsvImporter = new StoryCsvImporter(_storyCsvService, _storyDocumentRepository);

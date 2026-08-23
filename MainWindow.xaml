@@ -2511,6 +2511,129 @@ public:
         </NavigationView>
 
         <Grid
+            x:Name="ChapterChoiceManagerHost"
+            Grid.RowSpan="2"
+            Background="#99000000"
+            Canvas.ZIndex="540"
+            IsTabStop="True"
+            KeyDown="ChapterChoiceManagerHost_KeyDown"
+            RightTapped="ChapterChoiceManagerHost_RightTapped"
+            Tapped="ChapterChoiceManagerHost_Tapped"
+            Visibility="Collapsed">
+            <Border
+                x:Name="ChapterChoiceManagerCard"
+                Width="1240"
+                Height="740"
+                MaxWidth="{Binding ActualWidth, ElementName=RootGrid}"
+                MaxHeight="{Binding ActualHeight, ElementName=RootGrid}"
+                Margin="36"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Tapped="ChapterChoiceManagerCard_Tapped">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="88" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="72" />
+                    </Grid.RowDefinitions>
+                    <Grid Padding="28,20" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="4">
+                            <TextBlock x:Name="ChapterChoiceManagerTitle" FontSize="26" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Name="ChapterChoiceManagerCode" Style="{StaticResource SubtleTextStyle}" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Width="40" Height="40" Padding="0" Click="ChapterChoiceManagerCancelButton_Click" ToolTipService.ToolTip="关闭">
+                            <SymbolIcon Symbol="Cancel" />
+                        </Button>
+                    </Grid>
+                    <Grid Grid.Row="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1" ColumnSpacing="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="310" />
+                            <ColumnDefinition Width="350" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid Padding="22,18" RowSpacing="12" Background="{ThemeResource LayerFillColorAltBrush}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="小节" Style="{StaticResource SectionTitleStyle}" />
+                            <AutoSuggestBox x:Name="ChapterChoiceManagerSearchBox" Grid.Row="1" PlaceholderText="搜索小节、文本或 Choice" TextChanged="ChapterChoiceManagerSearchBox_TextChanged">
+                                <AutoSuggestBox.QueryIcon><SymbolIcon Symbol="Find" /></AutoSuggestBox.QueryIcon>
+                            </AutoSuggestBox>
+                            <ListView x:Name="ChapterChoiceManagerSectionList" Grid.Row="2" SelectionMode="Single" SelectionChanged="ChapterChoiceManagerSectionList_SelectionChanged">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid MinHeight="70" Padding="8,7" ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding FirstSentence}" FontSize="12" Opacity="0.65" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Text="{Binding Status}" FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                        <Grid Grid.Column="1" Padding="22,18" RowSpacing="12" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1,0">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                            <TextBlock Text="选项" Style="{StaticResource SectionTitleStyle}" />
+                            <ListView x:Name="ChapterChoiceManagerOptionList" Grid.Row="1" SelectionMode="Single" SelectionChanged="ChapterChoiceManagerOptionList_SelectionChanged">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid MinHeight="82" Padding="8,7" ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding OptionKey}" FontSize="18" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="1" Spacing="3">
+                                                <TextBlock Text="{Binding Text}" FontSize="15" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding ChoiceFunction}" FontSize="12" Opacity="0.55" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding TargetSummary}" FontSize="12" Opacity="0.72" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                        <ScrollViewer Grid.Column="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="ChapterChoiceManagerDetailPanel" Padding="28,18" Spacing="16">
+                                <TextBlock x:Name="ChapterChoiceManagerDetailTitle" Text="未选择小节" FontSize="22" FontWeight="SemiBold" />
+                                <TextBlock x:Name="ChapterChoiceManagerFunctionCode" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBox x:Name="ChapterChoiceManagerOptionTextBox" Header="选项内容" PlaceholderText="输入玩家看到的选项文本" TextChanged="ChapterChoiceManagerOptionTextBox_TextChanged" />
+                                <ComboBox x:Name="ChapterChoiceManagerTargetComboBox" Header="显式跳转目标" DisplayMemberPath="DisplayName" HorizontalAlignment="Stretch" SelectionChanged="ChapterChoiceManagerTargetComboBox_SelectionChanged" />
+                                <ToggleSwitch x:Name="ChapterChoiceManagerCustomToggle" Header="当前小节使用自定义跳转逻辑" OffContent="工具箱自动同步" OnContent="保留 Unreal 手工设置" Toggled="ChapterChoiceManagerCustomToggle_Toggled" />
+                                <Rectangle Height="1" Fill="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                <TextBlock Text="AllRoad 预览" Style="{StaticResource SectionTitleStyle}" />
+                                <StackPanel Spacing="8">
+                                    <TextBlock x:Name="ChapterChoiceManagerExplicitRoute" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="ChapterChoiceManagerEffectiveRoute" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="ChapterChoiceManagerTargetPreview" Style="{StaticResource SubtleTextStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                    <Grid Grid.Row="2" Padding="24,14" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock x:Name="ChapterChoiceManagerSummary" FontWeight="SemiBold" />
+                            <TextBlock x:Name="ChapterChoiceManagerIssueText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <Button x:Name="ChapterChoiceManagerSaveButton" Grid.Column="1" MinWidth="170" Height="44" Content="保存整章" Style="{StaticResource AccentButtonStyle}" Click="ChapterChoiceManagerSaveButton_Click" />
+                        <Button x:Name="ChapterChoiceManagerCancelButton" Grid.Column="2" MinWidth="140" Height="44" Content="取消" Click="ChapterChoiceManagerCancelButton_Click" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid
             x:Name="StoryChoiceEditorHost"
             Grid.RowSpan="2"
             Background="#99000000"

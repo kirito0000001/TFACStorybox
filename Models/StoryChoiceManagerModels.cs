@@ -20,3 +20,22 @@ internal sealed class StoryChoiceManagerSession
         Flow = Services.StoryBranchFlowService.Build(Draft);
     }
 }
+
+internal sealed record StoryChoiceManagerSectionItem(
+    int Section,
+    string Title,
+    string FirstSentence,
+    string Status,
+    StoryBranchSectionFlow Flow);
+
+internal sealed record StoryChoiceManagerOptionItem(
+    string OptionKey,
+    string Text,
+    string ChoiceFunction,
+    string TargetSummary,
+    StoryBranchFlowOption FlowOption);
+
+internal sealed record StoryChoiceManagerTargetItem(
+    string FirstRowId,
+    int? Section,
+    string DisplayName);
