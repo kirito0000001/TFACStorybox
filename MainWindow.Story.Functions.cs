@@ -358,54 +358,16 @@ namespace GalExcleTools
                 return await ChooseSegmentJumpFunctionValueAsync();
             }
 
-            if (StoryFunctionService.IsBgmFunctionTemplate(function))
+            if (function.Branches.Count > 0)
             {
-                return await ChooseBgmFunctionValueAsync();
+                return await _storyDialogService.SelectSimpleChoiceAsync(
+                    function.Name,
+                    StoryFunctionService.CreateFunctionBranchChoices(function)) as string;
             }
-
-            if (string.Equals(function.Id, "default-custom", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(indicator, "CustomFunction", StringComparison.OrdinalIgnoreCase))
+            if (function.BranchMode is FunctionBranchMode.Fixed or FunctionBranchMode.AssetIndex)
             {
-                return await ShowNameInputDialogAsync("自定义函数", "函数指示器", string.Empty);
-            }
-
-            if (indicator.StartsWith("Scene_", StringComparison.OrdinalIgnoreCase))
-            {
-                var soundEffectIndex = await ChooseStorySoundEffectIndexAsync();
-                return soundEffectIndex is null ? null : $"Scene_{soundEffectIndex.Value}";
-            }
-
-            if (string.Equals(indicator, "BGLerpMode_", StringComparison.OrdinalIgnoreCase))
-            {
-                var selected = await _storyDialogService.SelectSimpleChoiceAsync(
-                    "背景切换模式",
-                    StoryFunctionService.CreateBackgroundLerpModeChoices());
-                return selected is int mode ? $"BGLerpMode_{mode}" : null;
-            }
-
-            if (indicator.StartsWith("VFXON_", StringComparison.OrdinalIgnoreCase) ||
-                indicator.StartsWith("VFXOFF_", StringComparison.OrdinalIgnoreCase))
-            {
-                var suffix = await ShowNameInputDialogAsync("特效标识", "自定义字符串", string.Empty);
-                return string.IsNullOrWhiteSpace(suffix) ? null : indicator + suffix;
-            }
-
-            if (string.Equals(indicator, "TransAnim_", StringComparison.OrdinalIgnoreCase))
-            {
-                var suffix = await ShowNameInputDialogAsync("动画序列索引", "索引", string.Empty);
-                return string.IsNullOrWhiteSpace(suffix) ? null : indicator + suffix;
-            }
-
-            if (string.Equals(indicator, "MedPlay_", StringComparison.OrdinalIgnoreCase))
-            {
-                var suffix = await ShowNameInputDialogAsync("视频索引", "索引", string.Empty);
-                return string.IsNullOrWhiteSpace(suffix) ? null : indicator + suffix;
-            }
-
-            if (indicator.EndsWith('_'))
-            {
-                var suffix = await ShowNameInputDialogAsync("函数参数", "参数", string.Empty);
-                return string.IsNullOrWhiteSpace(suffix) ? null : indicator + suffix;
+                ShowStoryStatus(InfoBarSeverity.Warning, "函数没有可用分支", $"请先到素材库为 {function.Name} 添加分支。");
+                return null;
             }
 
             return indicator;

@@ -274,6 +274,53 @@ internal static class StoryFunctionService
         return $"{function.Name} / {indicator} / {function.Category}";
     }
 
+    public static List<StoryObjectChoice> CreateFunctionBranchChoices(FunctionEntry function)
+    {
+        return function.Branches
+            .Select(branch => new StoryObjectChoice(
+                branch.Code,
+                string.IsNullOrWhiteSpace(branch.Remark)
+                    ? branch.Code
+                    : $"{branch.Remark} / {branch.Code}",
+                $"{function.Indicator}_{branch.Code}"))
+            .ToList();
+    }
+
+    public static bool IsRegisteredFunctionValue(
+        string functionValue,
+        IReadOnlyList<FunctionEntry> functions)
+    {
+        var value = functionValue.Trim();
+        foreach (var function in functions)
+        {
+            if (IsChoiceFunctionTemplate(function) && Regex.IsMatch(value, @"-\d{2}-Choice\d+$", RegexOptions.IgnoreCase))
+            {
+                return true;
+            }
+            if (IsChapterJumpFunctionTemplate(function) && value.StartsWith("IntoChapter_", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            if (IsSegmentJumpFunctionTemplate(function) && value.StartsWith("IntoSegment_", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            if (function.Branches.Count == 0 && string.Equals(value, function.Indicator, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            if (function.Branches.Any(branch => string.Equals(
+                    value,
+                    $"{function.Indicator}_{branch.Code}",
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static string BuildFunctionCatalogSummary(FunctionEntry function)
     {
         return function.BranchMode == FunctionBranchMode.System

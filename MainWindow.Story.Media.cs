@@ -251,6 +251,7 @@ namespace GalExcleTools
         private void UpdateStoryFunctionInspector(string functionValue)
         {
             var functionNames = new List<string>();
+            var registeredFunctions = GetStoryFunctions();
             var hasCurrentTransition = false;
             foreach (var function in StoryFunctionService.SplitFunctionValues(functionValue))
             {
@@ -258,11 +259,16 @@ namespace GalExcleTools
                 {
                     _storyBackgroundTransitionMode = transitionMode;
                     hasCurrentTransition = true;
-                    functionNames.Add(function);
+                    functionNames.Add(StoryFunctionService.IsRegisteredFunctionValue(function, registeredFunctions)
+                        ? function
+                        : $"{function}（未登记函数）");
                     continue;
                 }
 
-                functionNames.AddRange(StoryFunctionService.EnumerateFunctionDisplayNames(function));
+                var displayNames = StoryFunctionService.EnumerateFunctionDisplayNames(function);
+                functionNames.AddRange(StoryFunctionService.IsRegisteredFunctionValue(function, registeredFunctions)
+                    ? displayNames
+                    : displayNames.Select(name => $"{name}（未登记函数）"));
             }
 
             _storyEditorViewModel.CurrentTransitionText = hasCurrentTransition
