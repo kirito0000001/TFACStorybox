@@ -2471,21 +2471,32 @@ public:
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <Grid ColumnSpacing="12">
+                        <Grid ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="输出日志" Style="{StaticResource SectionTitleStyle}" />
-                            <Button Grid.Column="1" Content="清空" Click="ClearLogButton_Click" />
+                            <StackPanel
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal"
+                                Spacing="6">
+                                <Button Click="ScrollLogToBottomButton_Click" Content="滚动到底部" />
+                                <Button Click="CopyAllLogButton_Click" Content="复制全部" />
+                                <Button Click="ClearLogButton_Click" Content="清空" />
+                            </StackPanel>
                         </Grid>
                         <ScrollViewer
                             x:Name="LogScrollViewer"
                             Grid.Row="1"
                             MaxHeight="150"
-                            VerticalScrollBarVisibility="Auto"
-                            HorizontalScrollBarVisibility="Disabled">
-                            <ItemsControl x:Name="LogItemsControl" />
+                            HorizontalScrollBarVisibility="Auto"
+                            PointerWheelChanged="LogScrollViewer_PointerWheelChanged"
+                            VerticalScrollBarVisibility="Auto">
+                            <ItemsControl
+                                x:Name="LogItemsControl"
+                                PointerWheelChanged="LogScrollViewer_PointerWheelChanged" />
                         </ScrollViewer>
                     </Grid>
                 </Border>

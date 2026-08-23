@@ -3,7 +3,6 @@ using System.Linq;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Windows.ApplicationModel.DataTransfer;
 
 namespace GalExcleTools
 {
@@ -38,7 +37,7 @@ namespace GalExcleTools
 
             if (normalizedSeverity == InfoBarSeverity.Error)
             {
-                CopyErrorLogToClipboard(title, message, effectiveLogMessage, exception);
+                CopyErrorLogToClipboard(effectiveLogMessage, exception);
             }
 
             var tip = CreateFloatingTipBar(normalizedSeverity, title, message);
@@ -161,26 +160,12 @@ namespace GalExcleTools
             }
         }
 
-        private void CopyErrorLogToClipboard(
-            string title,
-            string message,
-            string logMessage,
-            Exception? exception)
+        private void CopyErrorLogToClipboard(string logMessage, Exception? exception)
         {
-            var errorText = $"[{DateTime.Now:HH:mm:ss}] [Error] {logMessage}\r\n" +
-                $"Title: {title}\r\n" +
-                $"Message: {message}";
-            if (exception is not null)
-            {
-                errorText += $"\r\nException: {exception}";
-            }
-
             try
             {
-                var package = new DataPackage();
-                package.SetText(errorText);
-                Clipboard.SetContent(package);
-                Clipboard.Flush();
+                var (_, copyText) = CreateLogText(LogKind.Error, logMessage, exception, DateTime.Now);
+                CopyTextToClipboard(copyText, flush: true);
             }
             catch (Exception clipboardException)
             {
