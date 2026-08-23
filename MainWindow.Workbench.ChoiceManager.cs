@@ -64,8 +64,8 @@ public sealed partial class MainWindow
             {
                 _chapterChoiceManagerSections.Add(new StoryChoiceManagerSectionItem(
                     flow.Section,
-                    $"第 {flow.Section} 小节",
-                    string.IsNullOrWhiteSpace(flow.FirstSentencePreview) ? "暂无文本" : flow.FirstSentencePreview,
+                    StoryChoiceManagerService.GetSectionDisplayName(_chapterChoiceManagerSession.Flow, flow),
+                    GetChapterChoiceManagerStructureSummary(flow),
                     status,
                     flow));
             }
@@ -81,7 +81,8 @@ public sealed partial class MainWindow
     private void RefreshChapterChoiceManagerOptions()
     {
         _chapterChoiceManagerOptions.Clear();
-        if (ChapterChoiceManagerSectionList.SelectedItem is not StoryChoiceManagerSectionItem section)
+        if (_chapterChoiceManagerSession is not { } session ||
+            ChapterChoiceManagerSectionList.SelectedItem is not StoryChoiceManagerSectionItem section)
         {
             RefreshChapterChoiceManagerDetail();
             return;
@@ -93,7 +94,7 @@ public sealed partial class MainWindow
                 option.OptionKey,
                 option.Text,
                 option.ChoiceFunction,
-                FormatChapterChoiceManagerTarget(option),
+                StoryChoiceManagerService.GetOptionTargetDisplayName(session.Flow, option),
                 option));
         }
 
@@ -117,6 +118,7 @@ public sealed partial class MainWindow
 
             ChapterChoiceManagerCustomToggle.IsEnabled = true;
             ChapterChoiceManagerCustomToggle.IsOn = section.Flow.Kind == StoryBranchSectionKind.Custom;
+            ChapterChoiceManagerSectionInfo.Text = $"第 {section.Section} 小节 · {section.Flow.FirstSentencePreview}";
             if (ChapterChoiceManagerOptionList.SelectedItem is StoryChoiceManagerOptionItem option)
             {
                 ChapterChoiceManagerDetailTitle.Text = $"选项 {option.OptionKey}";
@@ -289,9 +291,15 @@ public sealed partial class MainWindow
         ? string.Empty
         : _chapterChoiceManagerSession.Flow.Sections.FirstOrDefault(item => item.Section == section)?.FirstSentencePreview ?? string.Empty;
 
-    private static string FormatChapterChoiceManagerTarget(StoryBranchFlowOption option) => option.ExplicitTargetSection is not null
-        ? $"第 {option.ExplicitTargetSection} 小节"
-        : option.EffectiveTargetSection is not null ? $"共通线 · 第 {option.EffectiveTargetSection} 小节" : "章节结束";
+    private static string GetChapterChoiceManagerStructureSummary(StoryBranchSectionFlow flow) => flow.Kind switch
+    {
+        StoryBranchSectionKind.Choice => $"{flow.Options.Count} 个选项",
+        StoryBranchSectionKind.Branch => "分支剧情",
+        StoryBranchSectionKind.Common => "分支汇合",
+        StoryBranchSectionKind.Custom => "保留手工逻辑",
+        StoryBranchSectionKind.Terminal => "没有后续路线",
+        _ => "顺序剧情"
+    };
 
     private static string GetChapterChoiceManagerStatus(StoryBranchSectionKind kind) => kind switch
     {

@@ -53,6 +53,13 @@ if (Test-Path -LiteralPath $assemblyPath) {
         $session = $managerType.GetMethod('CreateSession').Invoke($manager, @($chapter))
         $managerType.GetMethod('UpdateOption').Invoke($manager, @($session, 'M1-00-Choice1', 0, 'Updated option', $created[1].StableId))
         $managerType.GetMethod('SetCustomSection').Invoke($manager, @($session, 3, $true))
+        $displayMethod = $managerType.GetMethod('GetSectionDisplayName')
+        $choiceName = $displayMethod.Invoke($null, @($session.Flow, $session.Flow.Sections[0]))
+        $branchName = $displayMethod.Invoke($null, @($session.Flow, $session.Flow.Sections[1]))
+        $commonName = $displayMethod.Invoke($null, @($session.Flow, $session.Flow.Sections[2]))
+        if ($choiceName -ne '选项1' -or $branchName -ne '选项1-分支1' -or $commonName -ne '选项1-共通线') {
+            throw "Choice manager must use conceptual structure names. Choice=$choiceName Branch=$branchName Common=$commonName"
+        }
         if ((Get-FileHash -LiteralPath $documentPath -Algorithm SHA256).Hash -ne $beforeHash) {
             throw 'Editing the manager draft changed the source document before save.'
         }

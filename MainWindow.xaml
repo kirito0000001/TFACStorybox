@@ -2565,8 +2565,8 @@ public:
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <TextBlock Text="小节" Style="{StaticResource SectionTitleStyle}" />
-                            <AutoSuggestBox x:Name="ChapterChoiceManagerSearchBox" Grid.Row="1" PlaceholderText="搜索小节、文本或 Choice" TextChanged="ChapterChoiceManagerSearchBox_TextChanged">
+                            <TextBlock Text="剧情结构" Style="{StaticResource SectionTitleStyle}" />
+                            <AutoSuggestBox x:Name="ChapterChoiceManagerSearchBox" Grid.Row="1" PlaceholderText="搜索选项、分支或文本" TextChanged="ChapterChoiceManagerSearchBox_TextChanged">
                                 <AutoSuggestBox.QueryIcon><SymbolIcon Symbol="Find" /></AutoSuggestBox.QueryIcon>
                             </AutoSuggestBox>
                             <ListView x:Name="ChapterChoiceManagerSectionList" Grid.Row="2" SelectionMode="Single" SelectionChanged="ChapterChoiceManagerSectionList_SelectionChanged">
@@ -2607,6 +2607,7 @@ public:
                             <StackPanel x:Name="ChapterChoiceManagerDetailPanel" Padding="28,18" Spacing="16">
                                 <TextBlock x:Name="ChapterChoiceManagerDetailTitle" Text="未选择小节" FontSize="22" FontWeight="SemiBold" />
                                 <TextBlock x:Name="ChapterChoiceManagerFunctionCode" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock x:Name="ChapterChoiceManagerSectionInfo" Style="{StaticResource SubtleTextStyle}" TextWrapping="Wrap" />
                                 <TextBox x:Name="ChapterChoiceManagerOptionTextBox" Header="选项内容" PlaceholderText="输入玩家看到的选项文本" TextChanged="ChapterChoiceManagerOptionTextBox_TextChanged" />
                                 <ComboBox x:Name="ChapterChoiceManagerTargetComboBox" Header="显式跳转目标" DisplayMemberPath="DisplayName" HorizontalAlignment="Stretch" SelectionChanged="ChapterChoiceManagerTargetComboBox_SelectionChanged" />
                                 <ToggleSwitch x:Name="ChapterChoiceManagerCustomToggle" Header="当前小节使用自定义跳转逻辑" OffContent="工具箱自动同步" OnContent="保留 Unreal 手工设置" Toggled="ChapterChoiceManagerCustomToggle_Toggled" />

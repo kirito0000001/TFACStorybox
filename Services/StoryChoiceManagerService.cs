@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace GalExcleTools.Services;
 
@@ -80,5 +81,74 @@ internal sealed class StoryChoiceManagerService
         }
 
         _repository.Save(session.Chapter, session.Draft);
+    }
+
+    public static string GetSectionDisplayName(
+        StoryChapterBranchFlow flow,
+        StoryBranchSectionFlow section)
+    {
+        if (section.Options.Count > 0)
+        {
+            return $"选项{GetChoiceNumber(section.Options[0].ChoiceFunction)}";
+        }
+
+        var explicitBranch = flow.Sections
+            .SelectMany(item => item.Options)
+            .FirstOrDefault(option => option.ExplicitTargetSection == section.Section);
+        if (explicitBranch is not null)
+        {
+            return $"选项{GetChoiceNumber(explicitBranch.ChoiceFunction)}-分支{explicitBranch.OptionIndex + 1}";
+        }
+
+        var common = flow.Sections
+            .SelectMany(item => item.Options)
+            .FirstOrDefault(option => option.UsesInferredCommon && option.EffectiveTargetSection == section.Section);
+        if (common is not null)
+        {
+            return $"选项{GetChoiceNumber(common.ChoiceFunction)}-共通线";
+        }
+
+        var convergingBranch = flow.Sections.FirstOrDefault(item =>
+            item.Kind == StoryBranchSectionKind.Branch &&
+            item.DefaultTargetSection == section.Section);
+        if (convergingBranch is not null)
+        {
+            var parentChoice = flow.Sections
+                .SelectMany(item => item.Options)
+                .FirstOrDefault(option => option.ExplicitTargetSection == convergingBranch.Section);
+            if (parentChoice is not null)
+            {
+                return $"选项{GetChoiceNumber(parentChoice.ChoiceFunction)}-共通线";
+            }
+        }
+
+        return section.Kind switch
+        {
+            StoryBranchSectionKind.Terminal => "章节结尾",
+            StoryBranchSectionKind.Custom => "自定义逻辑",
+            StoryBranchSectionKind.Common => "共通线",
+            _ => $"剧情段落{section.Section}"
+        };
+    }
+
+    public static string GetOptionTargetDisplayName(
+        StoryChapterBranchFlow flow,
+        StoryBranchFlowOption option)
+    {
+        var targetSection = option.ExplicitTargetSection ?? option.EffectiveTargetSection;
+        var target = targetSection is null
+            ? null
+            : flow.Sections.FirstOrDefault(section => section.Section == targetSection.Value);
+        return target is null
+            ? "章节结束"
+            : GetSectionDisplayName(flow, target);
+    }
+
+    private static int GetChoiceNumber(string choiceFunction)
+    {
+        var match = Regex.Match(choiceFunction, @"-Choice(?<index>\d+)$", RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups["index"].Value, out var index)
+            ? index
+            : 1;
     }
 }
