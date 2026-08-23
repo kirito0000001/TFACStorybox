@@ -15,12 +15,11 @@ if (!(Test-Path -LiteralPath $workflowPath) -or !(Test-Path -LiteralPath $factor
 $workflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $workflowPath
 $factory = Get-Content -Raw -Encoding UTF8 -LiteralPath $factoryPath
 foreach ($required in @(
-    'CreateTaskPackage',
+    'CreateConfiguredTaskPackage',
     'LoadImportPreview',
     'ApplyImport',
     'FolderPicker',
-    'ProtocolVersion',
-    'SourceStartParagraph',
+    'CreateOptions',
     'ShowFloatingTip'
 )) {
     if ($workflow -notmatch [regex]::Escape($required)) {
@@ -30,7 +29,24 @@ foreach ($required in @(
 if ($workflow -match 'PromptTextAsync') {
     throw 'AI story-fill export must not open a second paragraph prompt.'
 }
-foreach ($required in @('协议版本', 'V1', 'V2', 'V3', '原稿起点（可选）', '导入填写结果', 'TalkChar', 'Tesxt', '待人工确认', '重复')) {
+foreach ($required in @(
+    '协议版本',
+    'V1',
+    'V2',
+    'V3',
+    '任务类型',
+    '续写章节',
+    '补齐已有内容',
+    'patch-empty',
+    '当前说话人',
+    '剧情文本',
+    'IsChecked = true',
+    '原稿起点（可选）',
+    '导入填写结果',
+    'CreatePatchPreviewRow',
+    '待人工确认',
+    '重复'
+)) {
     if ($factory -notmatch [regex]::Escape($required)) {
         throw "AI story-fill dialog content is missing $required."
     }

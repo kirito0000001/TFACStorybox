@@ -25,14 +25,19 @@ public sealed partial class MainWindow
                 "导出任务",
                 "取消",
                 "导入填写结果",
-                ContentDialogButton.Primary));
+                ContentDialogButton.Primary,
+                ConfigureDialog: dialog => dialog.PrimaryButtonClick += (_, args) =>
+                {
+                    if (!taskContent.CanExport)
+                    {
+                        args.Cancel = true;
+                        taskContent.ShowValidation();
+                    }
+                }));
 
             if (action == DialogResultKind.Primary)
             {
-                await ExportAiStoryFillTaskAsync(
-                    chapter,
-                    taskContent.ProtocolVersion,
-                    taskContent.SourceStartParagraph);
+                await ExportAiStoryFillTaskAsync(chapter, taskContent.CreateOptions());
             }
             else if (action == DialogResultKind.Secondary)
             {
@@ -47,8 +52,7 @@ public sealed partial class MainWindow
 
     private async Task ExportAiStoryFillTaskAsync(
         ChapterInfo chapter,
-        int protocolVersion,
-        int sourceStartParagraph)
+        AiStoryFillTaskOptions options)
     {
         var selectedFolder = await PickAiStoryFillFolderAsync();
         if (selectedFolder is null)
@@ -60,19 +64,19 @@ public sealed partial class MainWindow
         var (characters, customSpeakers, _) = BuildAiStoryFillSpeakerContext(chapter, document);
         var safeCode = TextUtility.SanitizeBackupFileName(chapter.Code);
         var packagePath = Path.Combine(selectedFolder.Path, $"TFAC-AI-Story-{safeCode}-{DateTime.Now:yyyyMMdd-HHmmss}");
-        var export = _aiStoryFillService.CreateTaskPackage(
+        var export = _aiStoryFillService.CreateConfiguredTaskPackage(
             chapter,
             document,
             characters,
             packagePath,
-            sourceStartParagraph,
             customSpeakers,
-            protocolVersion);
+            options);
+        var isPatch = options.Mode == "patch-empty";
         ShowFloatingTip(
             InfoBarSeverity.Success,
-            $"V{protocolVersion} 任务已导出",
+            $"V{options.ProtocolVersion} {(isPatch ? "修补" : "续写")}任务已导出",
             export.PackageDirectory,
-            logMessage: $"导出 AI 剧情填表任务：{chapter.Code} -> {export.PackageDirectory}");
+            logMessage: $"导出 AI 剧情{(isPatch ? "修补" : "续写")}任务：{chapter.Code} -> {export.PackageDirectory}");
     }
 
     private async Task ImportAiStoryFillResultAsync(ChapterInfo chapter)

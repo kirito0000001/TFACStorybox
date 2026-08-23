@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -10,7 +11,13 @@ namespace GalExcleTools.Views;
 internal sealed class AiStoryFillTaskDialogContent
 {
     private readonly ComboBox _protocolBox;
+    private readonly ComboBox _modeBox;
     private readonly NumberBox _sourceStartBox;
+    private readonly CheckBox _talkCharCheckBox;
+    private readonly CheckBox _textCheckBox;
+    private readonly StackPanel _patchFieldsPanel;
+    private readonly TextBlock _modeHint;
+    private readonly TextBlock _validationMessage;
 
     public AiStoryFillTaskDialogContent(ChapterInfo chapter)
     {
@@ -24,6 +31,15 @@ internal sealed class AiStoryFillTaskDialogContent
         _protocolBox.Items.Add(CreateProtocolItem("V2", "角色与立绘层（尚未开放）", 2, isEnabled: false));
         _protocolBox.Items.Add(CreateProtocolItem("V3", "函数与剧情控制（尚未开放）", 3, isEnabled: false));
 
+        _modeBox = new ComboBox
+        {
+            Header = "任务类型",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            SelectedIndex = 0
+        };
+        _modeBox.Items.Add(new ComboBoxItem { Content = "续写章节", Tag = "append" });
+        _modeBox.Items.Add(new ComboBoxItem { Content = "补齐已有内容", Tag = "patch-empty" });
+
         _sourceStartBox = new NumberBox
         {
             Header = "原稿起点（可选）",
@@ -32,12 +48,36 @@ internal sealed class AiStoryFillTaskDialogContent
             SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden,
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
+        _talkCharCheckBox = new CheckBox { Content = "当前说话人", IsChecked = true };
+        _textCheckBox = new CheckBox { Content = "剧情文本" };
+        _patchFieldsPanel = new StackPanel
+        {
+            Spacing = 4,
+            Visibility = Visibility.Collapsed
+        };
+        _patchFieldsPanel.Children.Add(AiStoryFillDialogContentFactory.CreateHeading("需要补齐", 14));
+        _patchFieldsPanel.Children.Add(_talkCharCheckBox);
+        _patchFieldsPanel.Children.Add(_textCheckBox);
+        _modeHint = AiStoryFillDialogContentFactory.CreateMutedText("起点只作为外接程序的原稿参考；留空时按 0 写入协议。");
+        _validationMessage = new TextBlock
+        {
+            Text = "至少选择一个需要补齐的字段。",
+            Foreground = (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"],
+            Visibility = Visibility.Collapsed,
+            TextWrapping = TextWrapping.Wrap
+        };
+        _modeBox.SelectionChanged += (_, _) => UpdateModeState();
+        _talkCharCheckBox.Checked += (_, _) => HideValidation();
+        _textCheckBox.Checked += (_, _) => HideValidation();
 
         var panel = AiStoryFillDialogContentFactory.CreatePanel(520);
         panel.Children.Add(AiStoryFillDialogContentFactory.CreateHeading($"{chapter.Name}  /  {chapter.Code}", 18));
         panel.Children.Add(_protocolBox);
+        panel.Children.Add(_modeBox);
         panel.Children.Add(_sourceStartBox);
-        panel.Children.Add(AiStoryFillDialogContentFactory.CreateMutedText("起点只作为外接程序的原稿参考；留空时按 0 写入协议。"));
+        panel.Children.Add(_modeHint);
+        panel.Children.Add(_patchFieldsPanel);
+        panel.Children.Add(_validationMessage);
         panel.Children.Add(AiStoryFillDialogContentFactory.CreateActionSummary(
             "导入填写结果",
             "读取 result.jsonl，预览后追加 TalkChar 与 Tesxt。"));
@@ -48,9 +88,56 @@ internal sealed class AiStoryFillTaskDialogContent
 
     public int ProtocolVersion => (_protocolBox.SelectedItem as ComboBoxItem)?.Tag is int version ? version : 1;
 
+    public string Mode => (_modeBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "append";
+
     public int SourceStartParagraph => double.IsNaN(_sourceStartBox.Value)
         ? 0
         : Math.Max(0, (int)Math.Truncate(_sourceStartBox.Value));
+
+    public bool CanExport => Mode != "patch-empty" || _talkCharCheckBox.IsChecked == true || _textCheckBox.IsChecked == true;
+
+    public AiStoryFillTaskOptions CreateOptions()
+    {
+        var options = new AiStoryFillTaskOptions
+        {
+            ProtocolVersion = ProtocolVersion,
+            Mode = Mode,
+            SourceStartParagraph = SourceStartParagraph
+        };
+        if (Mode == "patch-empty")
+        {
+            if (_talkCharCheckBox.IsChecked == true)
+            {
+                options.PatchFields.Add("TalkChar");
+            }
+            if (_textCheckBox.IsChecked == true)
+            {
+                options.PatchFields.Add("Tesxt");
+            }
+        }
+        return options;
+    }
+
+    public void ShowValidation()
+    {
+        _validationMessage.Visibility = Visibility.Visible;
+    }
+
+    private void HideValidation()
+    {
+        _validationMessage.Visibility = Visibility.Collapsed;
+    }
+
+    private void UpdateModeState()
+    {
+        var isPatch = Mode == "patch-empty";
+        _sourceStartBox.IsEnabled = !isPatch;
+        _patchFieldsPanel.Visibility = isPatch ? Visibility.Visible : Visibility.Collapsed;
+        _modeHint.Text = isPatch
+            ? "工具箱会按 StableId 导出已有空字段；无关素材变化不会让整包失效。"
+            : "起点只作为外接程序的原稿参考；留空时按 0 写入协议。";
+        HideValidation();
+    }
 
     private static ComboBoxItem CreateProtocolItem(
         string version,
@@ -77,8 +164,9 @@ internal static class AiStoryFillDialogContentFactory
     public static UIElement CreatePreviewContent(AiStoryFillImportPreview preview)
     {
         var root = CreatePanel(760);
+        var isPatch = string.Equals(preview.Manifest.Mode, "patch-empty", StringComparison.OrdinalIgnoreCase);
         root.Children.Add(CreateHeading(
-            $"待合并 {preview.PendingIncludeCount}  |  跳过 {preview.SkipCount}  |  待人工确认 {preview.ReviewCount}  |  重复 {preview.DuplicateCount}",
+            $"{(isPatch ? "待修补" : "待合并")} {preview.PendingIncludeCount}  |  跳过 {preview.SkipCount}  |  待人工确认 {preview.ReviewCount}  |  重复 {preview.DuplicateCount}",
             17));
 
         if (preview.Issues.Count > 0)
@@ -91,7 +179,7 @@ internal static class AiStoryFillDialogContentFactory
         var rows = new StackPanel { Spacing = 6 };
         foreach (var item in preview.Items.Take(300))
         {
-            rows.Children.Add(CreatePreviewRow(item));
+            rows.Children.Add(isPatch ? CreatePatchPreviewRow(item) : CreatePreviewRow(item));
         }
         if (preview.Items.Count > 300)
         {
@@ -107,6 +195,67 @@ internal static class AiStoryFillDialogContentFactory
             Content = rows
         });
         return root;
+    }
+
+    private static UIElement CreatePatchPreviewRow(AiStoryFillPreviewItem item)
+    {
+        var panel = new StackPanel { Spacing = 6, Padding = new Thickness(10, 8, 10, 8) };
+        var header = new Grid { ColumnSpacing = 12 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var rowNumber = new TextBlock
+        {
+            Text = item.RowIndex is null ? "未知行" : $"第 {item.RowIndex.Value + 1} 句",
+            FontWeight = FontWeights.SemiBold
+        };
+        var status = new TextBlock { Text = GetStatusText(item.Status) };
+        var source = new TextBlock
+        {
+            Text = item.SourceParagraph is null ? string.Empty : $"原稿 P{item.SourceParagraph}",
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        Grid.SetColumn(status, 1);
+        Grid.SetColumn(source, 2);
+        header.Children.Add(rowNumber);
+        header.Children.Add(status);
+        header.Children.Add(source);
+        panel.Children.Add(header);
+        panel.Children.Add(new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(item.CurrentTesxt) ? "（当前没有剧情文本）" : item.CurrentTesxt,
+            TextWrapping = TextWrapping.Wrap,
+            MaxLines = 3
+        });
+
+        var changes = new List<string>();
+        if (item.TalkChar is not null)
+        {
+            changes.Add($"当前说话人：{DisplayPatchValue(item.CurrentTalkChar)}  ->  {DisplayPatchValue(item.TalkChar)}");
+        }
+        if (item.Tesxt is not null)
+        {
+            changes.Add($"剧情文本：{DisplayPatchValue(item.CurrentTesxt)}  ->  {DisplayPatchValue(item.Tesxt)}");
+        }
+        if (changes.Count > 0)
+        {
+            panel.Children.Add(CreateMutedText(string.Join("\n", changes)));
+        }
+
+        return new Border
+        {
+            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
+            BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Child = panel
+        };
+    }
+
+    private static string DisplayPatchValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "（空）" : value;
     }
 
     internal static UIElement CreateActionSummary(string title, string description)
