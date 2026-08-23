@@ -91,7 +91,8 @@ internal sealed record StoryChoiceRoute(
 internal sealed record StoryChoiceTargetOption(
     string TargetSectionFirstRowId,
     int Section,
-    string DisplayName);
+    string DisplayName,
+    string FirstSentencePreview);
 
 internal sealed record StoryChoiceEditorOption(
     string Text,

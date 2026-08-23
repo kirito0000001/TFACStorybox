@@ -39,10 +39,17 @@ internal static class StoryBranchService
             .Select(index => GetSectionAtRowIndex(document, index))
             .Distinct()
             .OrderBy(section => section)
-            .Select(section => new StoryChoiceTargetOption(
-                GetSectionFirstRowId(document, section) ?? string.Empty,
-                section,
-                $"第 {section} 小节"))
+            .Select(section =>
+            {
+                var firstRowIndex = Enumerable.Range(0, document.Rows.Count)
+                    .First(index => GetSectionAtRowIndex(document, index) == section);
+                var firstRow = document.Rows[firstRowIndex];
+                return new StoryChoiceTargetOption(
+                    GetSectionFirstRowId(document, section) ?? string.Empty,
+                    section,
+                    $"第 {section} 小节",
+                    FirstSentencePreview: TextUtility.NormalizeSingleLineText(firstRow.Get("Tesxt")));
+            })
             .Where(option => !string.IsNullOrWhiteSpace(option.TargetSectionFirstRowId))
             .ToList();
     }

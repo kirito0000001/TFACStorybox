@@ -30,6 +30,9 @@ if ($code -notmatch 'ShowStoryChoiceEditorAsync[\s\S]*?TaskCompletionSource<Stor
 if ($code -notmatch 'StoryChoiceEditorHost_KeyDown[\s\S]*?VirtualKey\.Escape[\s\S]*?VirtualKey\.Enter[\s\S]*?StoryChoiceEditorHost_RightTapped') {
     $issues.Add('The overlay must retain Escape, Enter, and right-click behavior.')
 }
+if ($code -notmatch '前往小节（[\s\S]*?个已创建[\s\S]*?CreateStoryChoiceTargetContent[\s\S]*?FirstSentencePreview') {
+    $issues.Add('Target selection must show the dynamic existing-section count and first-sentence previews.')
+}
 
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Error $_ }

@@ -2598,6 +2598,8 @@ public:
                                 x:Name="StoryChoiceEditorTargetComboBox"
                                 Grid.Row="2"
                                 Header="前往小节"
+                                MinHeight="62"
+                                MaxDropDownHeight="480"
                                 HorizontalAlignment="Stretch"
                                 SelectionChanged="StoryChoiceEditorTargetComboBox_SelectionChanged" />
                             <Button

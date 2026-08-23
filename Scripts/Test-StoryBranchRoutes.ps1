@@ -31,6 +31,11 @@ Require-Pattern `
     'Branch resolution must live in a focused reusable service.'
 
 Require-Pattern `
+    (Join-Path $root 'Services\StoryBranchService.cs') `
+    'GetTargetOptions[\s\S]*?Distinct\(\)[\s\S]*?OrderBy[\s\S]*?FirstSentencePreview' `
+    'Branch targets must be generated from every existing section with its first sentence.'
+
+Require-Pattern `
     (Join-Path $root 'MainWindow.Story.ChoiceEditor.cs') `
     'ShowStoryChoiceEditorAsync[\s\S]*?StoryChoiceTargetOption[\s\S]*?不跳转' `
     'Choice editing must capture optional target sections alongside option text.'
@@ -102,6 +107,23 @@ if (Test-Path -LiteralPath $assemblyPath) {
     [void]$documentType.GetMethod('ApplyChange').Invoke($document, @($changeSet, $false, 1))
     if ($routes.Count -ne 1) {
         throw 'Redo must restore the branch route created by the edit transaction.'
+    }
+
+    $largeDocument = [System.Activator]::CreateInstance($documentType, $true)
+    $largeRows = $documentType.GetProperty('Rows').GetValue($largeDocument)
+    $largeSections = $documentType.GetProperty('RowSections').GetValue($largeDocument)
+    for ($section = 1; $section -le 30; $section++) {
+        $row = [System.Activator]::CreateInstance($rowType, $true)
+        [void]$setCell.Invoke($row, @('Name', $section.ToString()))
+        [void]$setCell.Invoke($row, @('Tesxt', "第 $section 小节第一句话"))
+        [void]$largeRows.Add($row)
+        $largeSections.Add($section.ToString(), $section)
+    }
+    $targets = @($serviceType.GetMethod('GetTargetOptions').Invoke($null, @($largeDocument)))
+    if ($targets.Count -ne 30 -or
+        $targets[29].DisplayName -ne '第 30 小节' -or
+        $targets[29].FirstSentencePreview -ne '第 30 小节第一句话') {
+        throw 'Target sections must grow dynamically without a fixed count limit.'
     }
 }
 

@@ -60,6 +60,7 @@ public sealed partial class MainWindow
         try
         {
             StoryChoiceEditorTargetComboBox.Items.Clear();
+            StoryChoiceEditorTargetComboBox.Header = $"前往小节（{_storyChoiceEditorTargets.Count} 个已创建）";
             StoryChoiceEditorTargetComboBox.Items.Add(new ComboBoxItem
             {
                 Content = "不跳转",
@@ -69,7 +70,7 @@ public sealed partial class MainWindow
             {
                 StoryChoiceEditorTargetComboBox.Items.Add(new ComboBoxItem
                 {
-                    Content = target.DisplayName,
+                    Content = CreateStoryChoiceTargetContent(target),
                     Tag = target.TargetSectionFirstRowId
                 });
             }
@@ -153,7 +154,7 @@ public sealed partial class MainWindow
         }
 
         option.TargetSectionFirstRowId = item.Tag as string ?? string.Empty;
-        option.TargetDisplayName = item.Content?.ToString() ?? "不跳转";
+        option.TargetDisplayName = ResolveStoryChoiceTargetDisplay(option.TargetSectionFirstRowId);
         RefreshStoryChoiceEditorSummary();
     }
 
@@ -281,5 +282,35 @@ public sealed partial class MainWindow
                    targetId,
                    StringComparison.OrdinalIgnoreCase))?.DisplayName
                ?? "目标小节已不存在";
+    }
+
+    private static FrameworkElement CreateStoryChoiceTargetContent(StoryChoiceTargetOption target)
+    {
+        var preview = string.IsNullOrWhiteSpace(target.FirstSentencePreview)
+            ? "小节暂无文本"
+            : target.FirstSentencePreview;
+        var content = new StackPanel
+        {
+            Spacing = 2,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = target.DisplayName,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                },
+                new TextBlock
+                {
+                    Text = preview,
+                    FontSize = 12,
+                    Opacity = 0.65,
+                    MaxWidth = 440,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    TextWrapping = TextWrapping.NoWrap
+                }
+            }
+        };
+        ToolTipService.SetToolTip(content, preview);
+        return content;
     }
 }
