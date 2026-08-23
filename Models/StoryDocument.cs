@@ -14,6 +14,8 @@ internal sealed class StoryDocument
 
     public List<StoryChoiceRoute> BranchRoutes { get; } = [];
 
+    public HashSet<string> CustomBranchSectionFirstRowIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     public static StoryDocument CreateEmpty()
     {
         var document = new StoryDocument();
@@ -48,6 +50,8 @@ internal sealed class StoryDocument
         ChoiceNotes = source.ChoiceNotes.Clone();
         BranchRoutes.Clear();
         BranchRoutes.AddRange(source.BranchRoutes.Select(route => route with { }));
+        CustomBranchSectionFirstRowIds.Clear();
+        CustomBranchSectionFirstRowIds.UnionWith(source.CustomBranchSectionFirstRowIds);
     }
 
     public StoryDocumentSnapshot CaptureSnapshot(int currentRowIndex)
@@ -70,7 +74,8 @@ internal sealed class StoryDocument
             sectionsById,
             currentRowId,
             ChoiceNotes.Clone(),
-            BranchRoutes.Select(route => route with { }).ToList());
+            BranchRoutes.Select(route => route with { }).ToList(),
+            CustomBranchSectionFirstRowIds.ToList());
     }
 
     public StoryChangeApplication ApplyChange(
@@ -163,6 +168,15 @@ internal sealed class StoryDocument
             BranchRoutes.AddRange(targetBranchRoutes.Select(route => route with { }));
         }
 
+        var targetCustomBranchSections = useBefore
+            ? change.BeforeCustomBranchSectionFirstRowIds
+            : change.AfterCustomBranchSectionFirstRowIds;
+        if (targetCustomBranchSections is not null)
+        {
+            CustomBranchSectionFirstRowIds.Clear();
+            CustomBranchSectionFirstRowIds.UnionWith(targetCustomBranchSections);
+        }
+
         return new StoryChangeApplication(rowIndex, change.Description);
     }
 
@@ -208,6 +222,9 @@ internal sealed class StoryDocument
         }
 
         var branchRoutesChanged = !before.BranchRoutes.SequenceEqual(after.BranchRoutes);
+        var customBranchSectionsChanged = !before.CustomBranchSectionFirstRowIds
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            .SetEquals(after.CustomBranchSectionFirstRowIds);
 
         return new StoryChangeSet(
             description,
@@ -218,6 +235,8 @@ internal sealed class StoryDocument
             noteChanges,
             branchRoutesChanged ? before.BranchRoutes.Select(route => route with { }).ToList() : null,
             branchRoutesChanged ? after.BranchRoutes.Select(route => route with { }).ToList() : null,
+            customBranchSectionsChanged ? before.CustomBranchSectionFirstRowIds.ToList() : null,
+            customBranchSectionsChanged ? after.CustomBranchSectionFirstRowIds.ToList() : null,
             before.CurrentRowId,
             after.CurrentRowId);
     }
@@ -240,6 +259,8 @@ internal sealed class StoryDocument
             null,
             new Dictionary<string, StorySectionDelta>(StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, StoryChoiceNoteDelta>(StringComparer.OrdinalIgnoreCase),
+            null,
+            null,
             null,
             null,
             before.StableId,
@@ -274,7 +295,8 @@ internal sealed record StoryDocumentSnapshot(
     Dictionary<string, int> SectionsById,
     string? CurrentRowId,
     StoryChoiceNoteState ChoiceNotes,
-    List<StoryChoiceRoute> BranchRoutes);
+    List<StoryChoiceRoute> BranchRoutes,
+    List<string> CustomBranchSectionFirstRowIds);
 
 internal sealed record StoryRowDelta(StoryRow? Before, StoryRow? After);
 
@@ -291,6 +313,8 @@ internal sealed record StoryChangeSet(
     Dictionary<string, StoryChoiceNoteDelta> ChoiceNoteChanges,
     List<StoryChoiceRoute>? BeforeBranchRoutes,
     List<StoryChoiceRoute>? AfterBranchRoutes,
+    List<string>? BeforeCustomBranchSectionFirstRowIds,
+    List<string>? AfterCustomBranchSectionFirstRowIds,
     string? BeforeCurrentRowId,
     string? AfterCurrentRowId)
 {
@@ -299,7 +323,8 @@ internal sealed record StoryChangeSet(
         BeforeOrder is null &&
         SectionChanges.Count == 0 &&
         ChoiceNoteChanges.Count == 0 &&
-        BeforeBranchRoutes is null;
+        BeforeBranchRoutes is null &&
+        BeforeCustomBranchSectionFirstRowIds is null;
 
     public int ChangedRowCount => RowChanges.Count;
 

@@ -98,9 +98,17 @@ try {
     $chapter = $chapterCtor.Invoke($chapterArgs).PSObject.BaseObject
     $multilineText = "First line, with comma`r`nSecond line says `"quoted`"."
     [void]$set.Invoke($rows[0], @('Tesxt', $multilineText))
+    $customBranchIds = $documentType.GetProperty('CustomBranchSectionFirstRowIds').GetValue($document)
+    $customBranchId = $stableIdProperty.GetValue($rows[0])
+    [void]$customBranchIds.Add($customBranchId)
     [void]$repository.GetType().GetMethod('Save').Invoke($repository, @($chapter, $document))
     $documentPath = Join-Path $testRoot 'story.document.json'
     if (!(Test-Path -LiteralPath $documentPath)) { throw 'StoryDocument JSON was not created.' }
+    $loadedDocument = $repository.GetType().GetMethod('Load').Invoke($repository, @($chapter))
+    $loadedCustomBranchIds = $documentType.GetProperty('CustomBranchSectionFirstRowIds').GetValue($loadedDocument)
+    if (!$loadedCustomBranchIds.Contains($customBranchId)) {
+        throw 'StoryDocument did not preserve the custom AllRoad section marker.'
+    }
 
     $exported = $exporter.GetType().GetMethod('ExportChapter').Invoke($exporter, @($chapter))
     $mainCsvPath = Join-Path $testRoot 'RESETCH.csv'

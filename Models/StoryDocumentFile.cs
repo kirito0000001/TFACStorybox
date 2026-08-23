@@ -5,7 +5,7 @@ namespace GalExcleTools;
 
 internal sealed class StoryDocumentFile
 {
-    public int SchemaVersion { get; set; } = 2;
+    public int SchemaVersion { get; set; } = 3;
 
     public string ChapterCode { get; set; } = string.Empty;
 
@@ -16,6 +16,8 @@ internal sealed class StoryDocumentFile
     public StoryChoiceNoteState ChoiceNotes { get; set; } = new();
 
     public List<StoryChoiceRoute> BranchRoutes { get; set; } = [];
+
+    public List<string> CustomBranchSectionFirstRowIds { get; set; } = [];
 }
 
 internal sealed class StoryDocumentSectionFile

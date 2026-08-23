@@ -321,6 +321,7 @@ namespace GalExcleTools
                 var section = GetCurrentStorySection();
                 EnsureStorySectionOptions(section);
                 SelectStorySection(section);
+                UpdateStoryCustomBranchLogicToggle(section);
                 UpdateStoryEditorHeader();
                 UpdateStoryToolbarCurrentInfo();
                 _isStoryRowDirty = false;

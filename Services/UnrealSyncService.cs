@@ -666,10 +666,15 @@ internal sealed class UnrealSyncService
                 for route in routes:
                     target_table = escape_unreal_string(route.get("TargetTable"))
                     option_key = escape_unreal_string(route.get("OptionKey"))
-                    entries.append(
-                        '(TargetStory="{}",Judjes=((PropName="StoryJudge",JudjeType=Equal,TargetValue="{}")),ConditionType=All,CompleteCount=0)'.format(
-                            data_table_reference(target_table),
-                            option_key))
+                    if route.get("RequiresChoiceCondition"):
+                        entries.append(
+                            '(TargetStory="{}",Judjes=((PropName="StoryJudge",JudjeType=Equal,TargetValue="{}")),ConditionType=All,CompleteCount=0)'.format(
+                                data_table_reference(target_table),
+                                option_key))
+                    else:
+                        entries.append(
+                            '(TargetStory="{}",Judjes=(),ConditionType=All,CompleteCount=0)'.format(
+                                data_table_reference(target_table)))
                 return "(StoryOnSetMaps=({}))".format(",".join(entries)) if entries else "(StoryOnSetMaps=)"
 
             def find_manager_row(rows, manager_row):
@@ -698,10 +703,19 @@ internal sealed class UnrealSyncService
                     if matched_value is None:
                         add_error("GalExcleTools AllRoad verification missed source table: {}".format(source_path))
                         return False
-                    for route in source.get("Routes", []):
+                    routes = source.get("Routes", [])
+                    expected_route_count = len(routes)
+                    actual_route_count = matched_value.count("TargetStory=")
+                    if actual_route_count != expected_route_count:
+                        add_error("GalExcleTools AllRoad route count mismatch for {}: expected={} actual={}".format(
+                            source_path, expected_route_count, actual_route_count))
+                        return False
+                    for route in routes:
                         target_path = normalize_data_table_path(route.get("TargetTable"))
                         option_key = str(route.get("OptionKey") or "")
-                        if target_path not in matched_value or 'TargetValue="{}"'.format(option_key) not in matched_value:
+                        has_expected_condition = (not route.get("RequiresChoiceCondition") or
+                                                  'TargetValue="{}"'.format(option_key) in matched_value)
+                        if target_path not in matched_value or not has_expected_condition:
                             add_error("GalExcleTools AllRoad verification missed route {} -> {}".format(option_key, target_path))
                             return False
                 return True
@@ -1101,7 +1115,7 @@ internal sealed class UnrealSyncService
 
         var storyBranches = BuildStoryBranchSyncEntries(context, allStoryTables);
         var storyBranchesHash = ComputeSha256Hex(
-            "story-branches-v1|" + JsonSerializer.Serialize(storyBranches, _jsonOptions));
+            "story-branches-v2|" + JsonSerializer.Serialize(storyBranches, _jsonOptions));
         var storyBranchAssetFilePath = UnrealObjectPathToContentFilePath(context, StoryBranchDataTableAssetPath);
         var currentStoryBranchAssetHash = File.Exists(storyBranchAssetFilePath)
             ? ComputeFileHash(storyBranchAssetFilePath)
@@ -1272,66 +1286,152 @@ internal sealed class UnrealSyncService
             }
 
             var document = _storyDocumentRepository.Load(chapter);
-            var managedRoutes = document.BranchRoutes.Where(route => route.ManagedByToolbox).ToList();
-            if (managedRoutes.Count == 0)
-            {
-                continue;
-            }
-
             var chapterBaseCode = StoryCsvService.RemoveChapterSectionSuffix(chapter.Code);
             var projectPrefix = context.Project.Code.Trim() + "-";
             var managerRow = chapterBaseCode.StartsWith(projectPrefix, StringComparison.OrdinalIgnoreCase)
                 ? chapterBaseCode[projectPrefix.Length..]
                 : chapterBaseCode;
-            var grouped = new Dictionary<string, List<UnrealStoryBranchRouteSyncEntry>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var route in managedRoutes)
-            {
-                var sourceSection = StoryBranchService.FindChoiceSourceSection(document, route.ChoiceFunction);
-                var targetSection = StoryBranchService.FindTargetSection(document, route.TargetSectionFirstRowId);
-                if (sourceSection is null || targetSection is null)
-                {
-                    continue;
-                }
-
-                var sourceTable = storyTables.FirstOrDefault(table =>
-                    string.Equals(table.ChapterCode, chapter.Code, StringComparison.OrdinalIgnoreCase) &&
-                    table.Section == sourceSection.Value);
-                var targetTable = storyTables.FirstOrDefault(table =>
-                    string.Equals(table.ChapterCode, chapter.Code, StringComparison.OrdinalIgnoreCase) &&
-                    table.Section == targetSection.Value);
-                if (sourceTable is null || targetTable is null)
-                {
-                    continue;
-                }
-
-                var optionText = document.ChoiceNotes.Choices.TryGetValue(route.ChoiceFunction, out var notes) &&
-                                 route.OptionIndex >= 0 && route.OptionIndex < notes.Count
-                    ? notes[route.OptionIndex]
-                    : string.Empty;
-                if (!grouped.TryGetValue(sourceTable.TableAsset, out var routes))
-                {
-                    routes = [];
-                    grouped[sourceTable.TableAsset] = routes;
-                }
-                routes.Add(new UnrealStoryBranchRouteSyncEntry(
-                    route.ChoiceFunction,
-                    route.OptionKey,
-                    optionText,
-                    targetTable.TableAsset));
-            }
-
-            result.AddRange(grouped.Select(pair => new UnrealStoryBranchSourceSyncEntry(
+            result.AddRange(BuildChapterStoryBranchSyncEntries(
                 managerRow,
-                pair.Key,
-                pair.Value
-                    .OrderBy(route => route.ChoiceFunction, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(route => route.OptionKey, StringComparer.OrdinalIgnoreCase)
-                    .ToList())));
+                chapter.Code,
+                document,
+                storyTables));
         }
 
         return result
             .OrderBy(source => source.ManagerRow, StringComparer.OrdinalIgnoreCase)
             .ThenBy(source => source.SourceTable, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public List<UnrealStoryBranchSourceSyncEntry> BuildChapterStoryBranchSyncEntries(
+        string managerRow,
+        string chapterCode,
+        StoryDocument document,
+        IReadOnlyList<UnrealStoryTableSyncEntry> storyTables)
+    {
+        var chapterTables = storyTables
+            .Where(table => string.Equals(table.ChapterCode, chapterCode, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(table => table.Section)
+            .ToList();
+        if (chapterTables.Count == 0)
+        {
+            return [];
+        }
+
+        var managedRoutesBySection = new Dictionary<int, List<UnrealStoryBranchRouteSyncEntry>>();
+        foreach (var route in document.BranchRoutes.Where(route => route.ManagedByToolbox))
+        {
+            var sourceSection = StoryBranchService.FindChoiceSourceSection(document, route.ChoiceFunction);
+            var targetSection = StoryBranchService.FindTargetSection(document, route.TargetSectionFirstRowId);
+            if (sourceSection is null || targetSection is null)
+            {
+                continue;
+            }
+
+            var targetTable = chapterTables.FirstOrDefault(table => table.Section == targetSection.Value);
+            if (targetTable is null)
+            {
+                continue;
+            }
+
+            var optionText = document.ChoiceNotes.Choices.TryGetValue(route.ChoiceFunction, out var notes) &&
+                             route.OptionIndex >= 0 && route.OptionIndex < notes.Count
+                ? notes[route.OptionIndex]
+                : string.Empty;
+            if (!managedRoutesBySection.TryGetValue(sourceSection.Value, out var routes))
+            {
+                routes = [];
+                managedRoutesBySection[sourceSection.Value] = routes;
+            }
+            routes.Add(new UnrealStoryBranchRouteSyncEntry(
+                route.ChoiceFunction,
+                route.OptionKey,
+                optionText,
+                targetTable.TableAsset,
+                RequiresChoiceCondition: true));
+        }
+
+        var customSections = document.CustomBranchSectionFirstRowIds
+            .Select(id => StoryBranchService.FindTargetSection(document, id))
+            .Where(section => section is not null)
+            .Select(section => section!.Value)
+            .ToHashSet();
+        var convergenceByBranchSection = new Dictionary<int, UnrealStoryTableSyncEntry?>();
+        foreach (var pair in managedRoutesBySection)
+        {
+            var occupiedSections = pair.Value
+                .Select(route => chapterTables.FirstOrDefault(table =>
+                    string.Equals(table.TableAsset, route.TargetTable, StringComparison.OrdinalIgnoreCase))?.Section)
+                .Where(section => section is not null)
+                .Select(section => section!.Value)
+                .Distinct()
+                .OrderBy(section => section)
+                .ToList();
+            if (occupiedSections.Count == 0)
+            {
+                continue;
+            }
+
+            var convergenceSection = chapterTables
+                .FirstOrDefault(table => table.Section > occupiedSections[^1]);
+            foreach (var occupiedSection in occupiedSections)
+            {
+                convergenceByBranchSection[occupiedSection] = convergenceSection;
+            }
+        }
+
+        return chapterTables
+            .Where(sourceTable => !customSections.Contains(sourceTable.Section))
+            .Select((sourceTable, index) =>
+            {
+                if (managedRoutesBySection.TryGetValue(sourceTable.Section, out var choiceRoutes))
+                {
+                    return new UnrealStoryBranchSourceSyncEntry(
+                        managerRow,
+                        sourceTable.TableAsset,
+                        choiceRoutes
+                            .OrderBy(route => route.ChoiceFunction, StringComparer.OrdinalIgnoreCase)
+                            .ThenBy(route => route.OptionKey, StringComparer.OrdinalIgnoreCase)
+                            .ToList());
+                }
+
+                if (convergenceByBranchSection.TryGetValue(sourceTable.Section, out var convergenceSection))
+                {
+                    var convergenceRoutes = convergenceSection is null
+                        ? []
+                        : new List<UnrealStoryBranchRouteSyncEntry>
+                        {
+                            new(
+                                ChoiceFunction: string.Empty,
+                                OptionKey: string.Empty,
+                                OptionText: string.Empty,
+                                TargetTable: convergenceSection.TableAsset,
+                                RequiresChoiceCondition: false)
+                        };
+                    return new UnrealStoryBranchSourceSyncEntry(
+                        managerRow,
+                        sourceTable.TableAsset,
+                        convergenceRoutes);
+                }
+
+                var sourceTableIndex = chapterTables.IndexOf(sourceTable);
+                var sequentialRoutes = sourceTableIndex + 1 < chapterTables.Count
+                    ? new List<UnrealStoryBranchRouteSyncEntry>
+                    {
+                        new(
+                            ChoiceFunction: string.Empty,
+                            OptionKey: string.Empty,
+                            OptionText: string.Empty,
+                            TargetTable: chapterTables[sourceTableIndex + 1].TableAsset,
+                            RequiresChoiceCondition: false)
+                    }
+                    : [];
+                return new UnrealStoryBranchSourceSyncEntry(
+                    managerRow,
+                    sourceTable.TableAsset,
+                    sequentialRoutes);
+            })
             .ToList();
     }
 

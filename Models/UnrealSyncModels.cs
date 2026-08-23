@@ -73,7 +73,8 @@ internal sealed record UnrealStoryBranchRouteSyncEntry(
     string ChoiceFunction,
     string OptionKey,
     string OptionText,
-    string TargetTable);
+    string TargetTable,
+    bool RequiresChoiceCondition);
 
 internal sealed record UnrealStoryBranchSourceSyncEntry(
     string ManagerRow,

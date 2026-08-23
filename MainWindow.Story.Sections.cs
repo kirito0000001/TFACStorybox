@@ -42,6 +42,8 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
+        private bool _isUpdatingStoryCustomBranchLogicToggle;
+
         private void StorySectionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_isLoadingStoryRow || _isUpdatingStorySectionOptions || _currentStoryDocumentPath is null || _storyRows.Count == 0)
@@ -142,6 +144,52 @@ namespace GalExcleTools
         private int GetCurrentStorySection()
         {
             return _storyEditorViewModel.GetCurrentSection();
+        }
+
+        private void UpdateStoryCustomBranchLogicToggle(int section)
+        {
+            _isUpdatingStoryCustomBranchLogicToggle = true;
+            try
+            {
+                StoryCustomBranchLogicToggle.IsOn = StoryBranchService.IsCustomBranchSection(
+                    _storyEditorViewModel.Document,
+                    section);
+            }
+            finally
+            {
+                _isUpdatingStoryCustomBranchLogicToggle = false;
+            }
+        }
+
+        private void StoryCustomBranchLogicToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (_isLoadingStoryRow || _isUpdatingStoryCustomBranchLogicToggle ||
+                _currentStoryDocumentPath is null || _storyRows.Count == 0)
+            {
+                return;
+            }
+
+            if (!CanEditStoryData())
+            {
+                UpdateStoryCustomBranchLogicToggle(GetCurrentStorySection());
+                return;
+            }
+
+            var section = GetCurrentStorySection();
+            var isCustom = StoryCustomBranchLogicToggle.IsOn;
+            CaptureStoryUndoState(isCustom ? "启用小节自定义跳转逻辑" : "恢复小节自动跳转同步");
+            StoryBranchService.SetCustomBranchSection(
+                _storyEditorViewModel.Document,
+                section,
+                isCustom);
+            QueueCurrentStoryDocumentSave();
+            _uiSoundService.Play(UiSoundKind.Selection);
+            ShowStoryStatus(
+                InfoBarSeverity.Success,
+                isCustom ? "已保留自定义跳转" : "已恢复自动同步",
+                isCustom
+                    ? $"第 {section} 小节将在同步 AllRoad 时保持现有手工设置。"
+                    : $"第 {section} 小节将重新由工具箱生成 AllRoad 跳转。");
         }
 
         private int GetStorySectionAtRowIndex(int rowIndex)

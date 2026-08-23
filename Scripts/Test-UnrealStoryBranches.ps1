@@ -17,13 +17,38 @@ Require-Pattern `
 
 Require-Pattern `
     (Join-Path $root 'Services\UnrealSyncService.cs') `
-    'StoryBranchDataTableAssetPath[\s\S]*?story-branches-v1[\s\S]*?BuildStoryBranchSyncEntries' `
+    'StoryBranchDataTableAssetPath[\s\S]*?story-branches-v2[\s\S]*?BuildStoryBranchSyncEntries' `
     'Change planning must derive and hash managed branch routes.'
 
 Require-Pattern `
     (Join-Path $root 'Services\UnrealSyncService.cs') `
     'export_data_table_to_json_string[\s\S]*?fill_data_table_from_json_string[\s\S]*?verify_story_branches[\s\S]*?save_loaded_asset_with_retry' `
     'Unreal Python must merge, verify, save, and re-verify AllRoad.'
+
+Require-Pattern `
+    (Join-Path $root 'Services\UnrealSyncService.cs') `
+    'story-branches-v2[\s\S]*?BuildChapterStoryBranchSyncEntries[\s\S]*?RequiresChoiceCondition[\s\S]*?convergenceSection' `
+    'AllRoad generation must cover conditional, sequential, and terminal section routes.'
+
+Require-Pattern `
+    (Join-Path $root 'Models\StoryDocument.cs') `
+    'CustomBranchSectionFirstRowIds' `
+    'StoryDocument must persist sections whose AllRoad logic stays manually managed.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.xaml') `
+    'x:Name="StoryCustomBranchLogicToggle"[\s\S]*?Toggled="StoryCustomBranchLogicToggle_Toggled"' `
+    'The right story workbench needs a current-section custom AllRoad logic toggle.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Story.Sections.cs') `
+    'StoryCustomBranchLogicToggle_Toggled[\s\S]*?SetCustomBranchSection[\s\S]*?QueueCurrentStoryDocumentSave' `
+    'Changing custom AllRoad logic must be undoable and persisted.'
+
+Require-Pattern `
+    (Join-Path $root 'Services\UnrealSyncService.cs') `
+    'expected_route_count[\s\S]*?actual_route_count[\s\S]*?TargetStory=' `
+    'AllRoad verification must reject missing or stale extra routes.'
 
 Require-Pattern `
     (Join-Path $root 'MainWindow.UnrealSync.Process.cs') `
@@ -62,6 +87,80 @@ if ((Test-Path -LiteralPath $assemblyPath) -and (Test-Path -LiteralPath $pythonP
             Get-ChildItem -LiteralPath $cache -Filter (([IO.Path]::GetFileNameWithoutExtension($scriptPath)) + '*.pyc') -ErrorAction SilentlyContinue |
                 Remove-Item -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+
+if (Test-Path -LiteralPath $assemblyPath) {
+    $assembly = [System.Reflection.Assembly]::LoadFrom((Resolve-Path $assemblyPath))
+    $serviceType = $assembly.GetType('GalExcleTools.Services.UnrealSyncService', $true)
+    $documentType = $assembly.GetType('GalExcleTools.StoryDocument', $true)
+    $rowType = $assembly.GetType('GalExcleTools.StoryRow', $true)
+    $routeType = $assembly.GetType('GalExcleTools.StoryChoiceRoute', $true)
+    $tableType = $assembly.GetType('GalExcleTools.UnrealStoryTableSyncEntry', $true)
+    $service = [System.Activator]::CreateInstance($serviceType, $true)
+    $document = [System.Activator]::CreateInstance($documentType, $true)
+    $rows = $documentType.GetProperty('Rows').GetValue($document)
+    $sections = $documentType.GetProperty('RowSections').GetValue($document)
+    $setCell = $rowType.GetMethod('Set')
+    $createdRows = @()
+    foreach ($section in 1..5) {
+        $row = [System.Activator]::CreateInstance($rowType, $true)
+        [void]$setCell.Invoke($row, @('Name', $section.ToString()))
+        $customValue = if ($section -eq 1) { 'M1-00-Choice1' } else { '' }
+        [void]$setCell.Invoke($row, @('Custom', $customValue))
+        [void]$rows.Add($row)
+        $sections.Add($section.ToString(), $section)
+        $createdRows += $row
+    }
+
+    $targetIdA = $rowType.GetProperty('StableId').GetValue($createdRows[1])
+    $targetIdB = $rowType.GetProperty('StableId').GetValue($createdRows[2])
+    $managedRouteA = [System.Activator]::CreateInstance(
+        $routeType,
+        @('M1-00-Choice1', 0, 'A', $targetIdA, $true))
+    $managedRouteB = [System.Activator]::CreateInstance(
+        $routeType,
+        @('M1-00-Choice1', 1, 'B', $targetIdB, $true))
+    $branchRoutes = $documentType.GetProperty('BranchRoutes').GetValue($document)
+    $branchRoutes.Add($managedRouteA)
+    $branchRoutes.Add($managedRouteB)
+    $customSectionIds = $documentType.GetProperty('CustomBranchSectionFirstRowIds').GetValue($document)
+    [void]$customSectionIds.Add($rowType.GetProperty('StableId').GetValue($createdRows[3]))
+
+    $tableListType = [System.Collections.Generic.List``1].MakeGenericType($tableType)
+    $tables = [System.Activator]::CreateInstance($tableListType)
+    foreach ($section in 1..5) {
+        $legacy = [System.Collections.Generic.List[string]]::new()
+        $table = [System.Activator]::CreateInstance(
+            $tableType,
+            @(
+                "C:\Temp\TEST-M1-$section.csv",
+                "/Game/Story/S$section.S$section",
+                '/Script/GALLibrary.StoryStruct',
+                $legacy,
+                'TEST-M1-00',
+                $section))
+        [void]$tables.Add($table)
+    }
+
+    $builder = $serviceType.GetMethod('BuildChapterStoryBranchSyncEntries')
+    if ($null -eq $builder) {
+        throw 'BuildChapterStoryBranchSyncEntries is missing.'
+    }
+    $sources = @($builder.Invoke($service, @('M1', 'TEST-M1-00', $document, $tables)))
+    $bySource = @{}
+    foreach ($source in $sources) { $bySource[$source.SourceTable] = $source }
+    if ($sources.Count -ne 4 -or
+        $bySource['/Game/Story/S1.S1'].Routes.Count -ne 2 -or
+        !$bySource['/Game/Story/S1.S1'].Routes[0].RequiresChoiceCondition -or
+        $bySource['/Game/Story/S1.S1'].Routes[0].TargetTable -ne '/Game/Story/S2.S2' -or
+        $bySource['/Game/Story/S1.S1'].Routes[1].TargetTable -ne '/Game/Story/S3.S3' -or
+        $bySource['/Game/Story/S2.S2'].Routes[0].RequiresChoiceCondition -or
+        $bySource['/Game/Story/S2.S2'].Routes[0].TargetTable -ne '/Game/Story/S4.S4' -or
+        $bySource['/Game/Story/S3.S3'].Routes[0].TargetTable -ne '/Game/Story/S4.S4' -or
+        $bySource.ContainsKey('/Game/Story/S4.S4') -or
+        $bySource['/Game/Story/S5.S5'].Routes.Count -ne 0) {
+        throw 'AllRoad generation did not converge occupied choice sections, skip custom logic, and preserve an empty terminal section.'
     }
 }
 

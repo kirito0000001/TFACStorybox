@@ -17,8 +17,8 @@ Require-Pattern `
 
 Require-Pattern `
     (Join-Path $root 'Services\StoryDocumentRepository.cs') `
-    'SchemaVersion\s*=\s*2[\s\S]*?BranchRoutes' `
-    'StoryDocument schema 2 must persist branch routes while accepting schema 1.'
+    'SchemaVersion\s*=\s*3[\s\S]*?BranchRoutes[\s\S]*?CustomBranchSectionFirstRowIds' `
+    'StoryDocument schema 3 must persist branch routes and custom AllRoad sections.'
 
 Require-Pattern `
     (Join-Path $root 'Models\StoryDocument.cs') `
@@ -87,6 +87,8 @@ if (Test-Path -LiteralPath $assemblyPath) {
         @('M2-00-Choice1', 0, 'A', $targetId, $true))
     $routes = $documentType.GetProperty('BranchRoutes').GetValue($document)
     [void]$routes.Add($route)
+    $customSections = $documentType.GetProperty('CustomBranchSectionFirstRowIds').GetValue($document)
+    [void]$customSections.Add($targetId)
     $afterSnapshot = $documentType.GetMethod('CaptureSnapshot').Invoke($document, @(1))
     $changeSet = $documentType.GetMethod('CreateChangeSet').Invoke(
         $null,
@@ -101,12 +103,12 @@ if (Test-Path -LiteralPath $assemblyPath) {
     }
 
     [void]$documentType.GetMethod('ApplyChange').Invoke($document, @($changeSet, $true, 1))
-    if ($routes.Count -ne 0) {
-        throw 'Undo must remove the branch route created by the edit transaction.'
+    if ($routes.Count -ne 0 -or $customSections.Count -ne 0) {
+        throw 'Undo must remove the branch route and custom AllRoad marker created by the edit transaction.'
     }
     [void]$documentType.GetMethod('ApplyChange').Invoke($document, @($changeSet, $false, 1))
-    if ($routes.Count -ne 1) {
-        throw 'Redo must restore the branch route created by the edit transaction.'
+    if ($routes.Count -ne 1 -or $customSections.Count -ne 1) {
+        throw 'Redo must restore the branch route and custom AllRoad marker created by the edit transaction.'
     }
 
     $largeDocument = [System.Activator]::CreateInstance($documentType, $true)

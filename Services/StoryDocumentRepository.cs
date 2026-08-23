@@ -11,7 +11,7 @@ namespace GalExcleTools.Services;
 internal sealed class StoryDocumentRepository
 {
     public const string DocumentFileName = "story.document.json";
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
     private readonly JsonSerializerOptions _jsonOptions;
 
     public StoryDocumentRepository(JsonSerializerOptions jsonOptions)
@@ -65,7 +65,8 @@ internal sealed class StoryDocumentRepository
             ChapterCode = chapter.Code,
             SavedAt = DateTimeOffset.Now,
             ChoiceNotes = document.ChoiceNotes.Clone(),
-            BranchRoutes = document.BranchRoutes.Select(route => route with { }).ToList()
+            BranchRoutes = document.BranchRoutes.Select(route => route with { }).ToList(),
+            CustomBranchSectionFirstRowIds = document.CustomBranchSectionFirstRowIds.ToList()
         };
         StoryDocumentSectionFile? currentSection = null;
         var previousSection = -1;
@@ -121,6 +122,7 @@ internal sealed class StoryDocumentRepository
         var document = new StoryDocument();
         document.ChoiceNotes = state.ChoiceNotes?.Clone() ?? new StoryChoiceNoteState();
         document.BranchRoutes.AddRange((state.BranchRoutes ?? []).Select(route => route with { }));
+        document.CustomBranchSectionFirstRowIds.UnionWith(state.CustomBranchSectionFirstRowIds ?? []);
         var assignedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var section in state.Sections)
         {

@@ -150,6 +150,28 @@ internal static class StoryBranchService
         return rowIndex < 0 ? null : GetSectionAtRowIndex(document, rowIndex);
     }
 
+    public static bool IsCustomBranchSection(StoryDocument document, int section)
+    {
+        var firstRowId = GetSectionFirstRowId(document, section);
+        return firstRowId is not null && document.CustomBranchSectionFirstRowIds.Contains(firstRowId);
+    }
+
+    public static void SetCustomBranchSection(StoryDocument document, int section, bool isCustom)
+    {
+        var firstRowId = GetSectionFirstRowId(document, section);
+        if (firstRowId is null)
+        {
+            return;
+        }
+
+        document.CustomBranchSectionFirstRowIds.RemoveWhere(id =>
+            FindTargetSection(document, id) == section);
+        if (isCustom)
+        {
+            document.CustomBranchSectionFirstRowIds.Add(firstRowId);
+        }
+    }
+
     private static int GetSectionAtRowIndex(StoryDocument document, int rowIndex)
     {
         if (rowIndex < 0 || rowIndex >= document.Rows.Count)
