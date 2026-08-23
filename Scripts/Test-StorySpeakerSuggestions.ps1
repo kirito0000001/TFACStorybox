@@ -35,8 +35,8 @@ if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?!string\.IsNullOr
 if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?knownValues[\s\S]*?StringComparer\.OrdinalIgnoreCase[\s\S]*?knownValues\.Add') {
     $issues.Add('Asset-library search results must not duplicate speakers already used in the chapter.')
 }
-if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?new StorySpeakerNameSuggestion\([\s\S]*?清空[\s\S]*?Concat\([\s\S]*?suggestions\.Add[\s\S]*?创建说话人') {
-    $issues.Add('The clear action must remain first and the create-speaker action must remain last.')
+if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?new StorySpeakerNameSuggestion\([\s\S]*?创建说话人[\s\S]*?OrderBy\([\s\S]*?suggestions\.Add[\s\S]*?清空') {
+    $issues.Add('The upward-opening popup source must be reversed so clear renders first, frequent speakers descend, and create renders last.')
 }
 if ($xaml -notmatch 'StorySpeakerTextBox[\s\S]*?Text="\{Binding DisplayName\}"[\s\S]*?Text="\{Binding SecondaryText\}"[\s\S]*?Text="\{Binding UsageCount\}"') {
     $issues.Add('Speaker suggestions must show display name, character code, and a right-aligned numeric usage count.')

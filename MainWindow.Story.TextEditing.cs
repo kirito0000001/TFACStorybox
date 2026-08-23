@@ -177,25 +177,26 @@ public sealed partial class MainWindow
             }
         }
 
-        var suggestions = new[]
-            {
-                new StorySpeakerNameSuggestion(
-                    string.Empty,
-                    "清空",
-                    "移除当前说话人",
-                    UsageCount: null,
-                    IsClearAction: true,
-                    IsCreateAction: false)
-            }
-            .Concat(filteredSuggestions)
-            .ToList();
+        var suggestions = new List<StorySpeakerNameSuggestion>
+        {
+            new(
+                query,
+                "创建说话人",
+                string.IsNullOrWhiteSpace(query) ? "直接采用输入" : $"使用“{query}”",
+                UsageCount: null,
+                IsClearAction: false,
+                IsCreateAction: true)
+        };
+        suggestions.AddRange(filteredSuggestions
+            .OrderBy(item => item.UsageCount ?? 0)
+            .ThenByDescending(item => item.DisplayName, StringComparer.OrdinalIgnoreCase));
         suggestions.Add(new StorySpeakerNameSuggestion(
-            query,
-            "创建说话人",
-            string.IsNullOrWhiteSpace(query) ? "直接采用输入" : $"使用“{query}”",
+            string.Empty,
+            "清空",
+            "移除当前说话人",
             UsageCount: null,
-            IsClearAction: false,
-            IsCreateAction: true));
+            IsClearAction: true,
+            IsCreateAction: false));
         box.ItemsSource = suggestions;
         box.IsSuggestionListOpen = true;
     }
