@@ -164,7 +164,7 @@ public sealed partial class MainWindow
         suggestions.Add(new StorySpeakerNameSuggestion(
             query,
             "创建说话人",
-            string.IsNullOrWhiteSpace(query) ? "输入名称后直接采用" : $"使用“{query}”",
+            string.IsNullOrWhiteSpace(query) ? "直接采用输入" : $"使用“{query}”",
             UsageCount: null,
             IsCreateAction: true));
         box.ItemsSource = suggestions;

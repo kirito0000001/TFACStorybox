@@ -41,6 +41,10 @@ if ($xaml -notmatch 'Text="\{Binding UsageCount\}"[\s\S]*?HorizontalAlignment="R
 if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?suggestions\.Add[\s\S]*?创建说话人') {
     $issues.Add('The fixed create-speaker action must remain last after filtering existing names.')
 }
+if ($code -notmatch 'string\.IsNullOrWhiteSpace\(query\)\s*\?\s*"直接采用输入"' -or
+    $code -match '输入名称后直接采用') {
+    $issues.Add('The empty create-speaker hint must stay short enough for one line.')
+}
 if ($code -match 'StorySpeakerTextBox_TextChanged[\s\S]*?StoryCharacterSlotService|StorySpeakerTextBox_TextChanged[\s\S]*?TalkBody') {
     $issues.Add('Speaker-name suggestions must not modify portrait data.')
 }
