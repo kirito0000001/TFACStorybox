@@ -7,6 +7,8 @@ namespace GalExcleTools;
 internal sealed class AiStoryFillManifest
 {
     public int SchemaVersion { get; set; } = 1;
+    public int ProtocolVersion { get; set; } = 1;
+    public string Profile { get; set; } = "V1";
     public string PackageType { get; set; } = "TFAC.AIStoryFill";
     public string PackageId { get; set; } = string.Empty;
     public DateTimeOffset GeneratedAt { get; set; }
@@ -17,8 +19,17 @@ internal sealed class AiStoryFillManifest
     public int AnchorRowIndex { get; set; }
     public string StoryDocumentSha256 { get; set; } = string.Empty;
     public int SourceStartParagraph { get; set; }
+    public List<string> Capabilities { get; set; } = ["story.text", "story.speaker"];
+    public string AiInstructionsFile { get; set; } = "AI-INSTRUCTIONS.md";
     public List<string> AllowedFields { get; set; } = ["TalkChar", "Tesxt"];
 }
+
+internal sealed record AiStoryFillProtocolDefinition(
+    int Version,
+    string Profile,
+    bool IsImplemented,
+    List<string> Capabilities,
+    List<string> AllowedFields);
 
 internal sealed class AiStorySpeakerCatalog
 {
@@ -84,6 +95,11 @@ internal sealed class AiStoryFillImportState
     public int SchemaVersion { get; set; } = 1;
     public List<AiStoryFillImportedPackage> Packages { get; set; } = [];
 }
+
+internal sealed record AiStoryFillImportResult(
+    int ImportedCount,
+    string BackupPath,
+    string StatePath);
 
 internal sealed class AiStoryFillImportedPackage
 {

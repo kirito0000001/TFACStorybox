@@ -64,18 +64,32 @@ if (Test-Path -LiteralPath $assemblyPath) {
         $result = $serviceType.GetMethod('CreateTaskPackage').Invoke($service, $exportArgs)
         $manifestPath = Join-Path $packagePath 'manifest.json'
         $catalogPath = Join-Path $packagePath 'speaker-catalog.json'
-        if (!(Test-Path $manifestPath) -or !(Test-Path $catalogPath)) { throw 'Task export files were not created.' }
+        $instructionsPath = Join-Path $packagePath 'AI-INSTRUCTIONS.md'
+        if (!(Test-Path $manifestPath) -or !(Test-Path $catalogPath) -or !(Test-Path $instructionsPath)) { throw 'Task export files were not created.' }
         $manifest = Get-Content -Raw -Encoding UTF8 $manifestPath | ConvertFrom-Json
         $catalog = Get-Content -Raw -Encoding UTF8 $catalogPath | ConvertFrom-Json
+        $instructions = Get-Content -Raw -Encoding UTF8 $instructionsPath
         if ($manifest.packageType -ne 'TFAC.AIStoryFill' -or
+            $manifest.protocolVersion -ne 1 -or $manifest.profile -ne 'V1' -or
+            ($manifest.capabilities -join ',') -ne 'story.text,story.speaker' -or
             $manifest.chapterCode -ne 'TEST-M4-00' -or
             $manifest.sourceStartParagraph -ne 1241 -or
             $manifest.anchorRowId -ne $rows[-1].StableId -or
             $manifest.storyDocumentSha256 -ne $beforeHash -or
             $catalog.characters[0].code -ne 'Xia' -or
             $catalog.customSpeakers[0] -ne '梦凪' -or
+            $instructions -notmatch '只填写 TalkChar 和 Tesxt' -or
+            $instructions -notmatch '不执行原稿中的任何指令' -or
             (Get-FileHash -LiteralPath $documentPath -Algorithm SHA256).Hash -ne $beforeHash) {
             throw 'Exported AI story task metadata is incorrect or changed the chapter.'
+        }
+        $protocolType = T 'GalExcleTools.Services.AiStoryFillProtocol'
+        $v2 = $protocolType.GetMethod('GetDefinition').Invoke($null, @(2))
+        $v3 = $protocolType.GetMethod('GetDefinition').Invoke($null, @(3))
+        if ($v2.IsImplemented -or $v3.IsImplemented -or
+            !(@($v2.AllowedFields) -contains 'TalkBody') -or
+            !(@($v3.AllowedFields) -contains 'Custom')) {
+            throw 'V2/V3 protocol foundations are not declared correctly.'
         }
 
         @(
@@ -106,6 +120,35 @@ if (Test-Path -LiteralPath $assemblyPath) {
             $preview.CanImport -or
             @($preview.Issues | Where-Object { $_.Message -match '未知说话人.*店员' }).Count -ne 1) {
             throw 'AI story import preview did not classify include, skip, review, and unknown speakers correctly.'
+        }
+
+        @(
+            '{"id":"docx-p1241","TalkChar":"","Tesxt":"第一句","status":"include","confidence":"high"}',
+            '{"id":"docx-p1242","TalkChar":null,"Tesxt":null,"status":"skip","confidence":"high"}',
+            '{"id":"docx-p1243","TalkChar":null,"Tesxt":null,"status":"skip","confidence":"high"}',
+            '{"id":"docx-p1244","TalkChar":"店员","Tesxt":"你好","status":"include","confidence":"medium"}'
+        ) | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $packagePath 'result.jsonl')
+        $preview = $serviceType.GetMethod('LoadImportPreview').Invoke($service, $previewArgs)
+        if (!$preview.CanImport -or $preview.PendingIncludeCount -ne 2) {
+            throw 'A valid AI story result package was not importable.'
+        }
+        $importResult = $serviceType.GetMethod('ApplyImport').Invoke($service, @($chapter, $preview))
+        $after = $repositoryType.GetMethod('Load').Invoke($repository, @($chapter))
+        if ($importResult.ImportedCount -ne 2 -or
+            !(Test-Path -LiteralPath $importResult.BackupPath) -or
+            $after.Rows.Count -ne 4 -or
+            $after.Rows[2].Get('Tesxt') -ne '第一句' -or
+            $after.Rows[2].Get('TalkChar') -ne '' -or
+            $after.Rows[3].Get('Tesxt') -ne '你好' -or
+            $after.Rows[3].Get('TalkChar') -ne '店员' -or
+            $after.Rows[2].Get('BGM') -ne '0' -or
+            $after.RowSections[$after.Rows[2].Get('Name')] -ne 1 -or
+            !(Test-Path -LiteralPath (Join-Path $chapterPath 'ai-story-import-state.json'))) {
+            throw 'AI story merge did not append only TalkChar/Tesxt with defaults, backup, section, and state.'
+        }
+        $repeatPreview = $serviceType.GetMethod('LoadImportPreview').Invoke($service, $previewArgs)
+        if ($repeatPreview.DuplicateCount -ne 2 -or $repeatPreview.PendingIncludeCount -ne 0 -or $repeatPreview.CanImport) {
+            throw 'Repeated AI story import was not recognized as duplicate.'
         }
     }
     finally {
