@@ -269,8 +269,20 @@ public sealed partial class MainWindow
                 suggestionsList.Items.Count > 0)
             {
                 suggestionsList.ScrollIntoView(
-                    suggestionsList.Items[0],
-                    ScrollIntoViewAlignment.Leading);
+                    suggestionsList.Items[suggestionsList.Items.Count - 1],
+                    ScrollIntoViewAlignment.Default);
+                suggestionsList.UpdateLayout();
+                var scrollViewer = FindStorySpeakerSuggestionScrollViewers(suggestionsList)
+                    .OrderByDescending(viewer => viewer.ScrollableHeight)
+                    .FirstOrDefault();
+                if (scrollViewer is not null)
+                {
+                    scrollViewer.ChangeView(
+                        null,
+                        scrollViewer.ScrollableHeight,
+                        null,
+                        disableAnimation: true);
+                }
             }
         };
         suggestionsList.LayoutUpdated += layoutUpdated;
@@ -288,6 +300,23 @@ public sealed partial class MainWindow
             }
 
             foreach (var descendant in FindStorySpeakerSuggestionLists(child))
+            {
+                yield return descendant;
+            }
+        }
+    }
+
+    private static IEnumerable<ScrollViewer> FindStorySpeakerSuggestionScrollViewers(DependencyObject root)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is ScrollViewer scrollViewer)
+            {
+                yield return scrollViewer;
+            }
+
+            foreach (var descendant in FindStorySpeakerSuggestionScrollViewers(child))
             {
                 yield return descendant;
             }

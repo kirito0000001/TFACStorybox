@@ -39,8 +39,8 @@ if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?new StorySpeakerN
     $issues.Add('The upward popup must visually render create, usage ascending, then clear so frequent speakers stay near the input.')
 }
 if ((Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $root 'MainWindow.xaml.cs')) -notmatch 'RegisterPropertyChangedCallback\([\s\S]*?IsSuggestionListOpenProperty[\s\S]*?StorySpeakerTextBox_SuggestionListOpenChanged' -or
-    $code -notmatch 'StorySpeakerTextBox_SuggestionListOpenChanged[\s\S]*?SuggestionsList[\s\S]*?LayoutUpdated[\s\S]*?ScrollIntoView\([\s\S]*?ScrollIntoViewAlignment\.Leading') {
-    $issues.Add('After WinUI finishes deferred layout, the SuggestionsList must align its first visual item at the leading edge.')
+    $code -notmatch 'StorySpeakerTextBox_SuggestionListOpenChanged[\s\S]*?SuggestionsList[\s\S]*?LayoutUpdated[\s\S]*?Items\.Count\s*-\s*1[\s\S]*?ScrollableHeight') {
+    $issues.Add('After WinUI reverses the upward popup, the SuggestionsList must initialize at its visual bottom.')
 }
 if ($xaml -notmatch 'StorySpeakerTextBox[\s\S]*?Text="\{Binding DisplayName\}"[\s\S]*?Text="\{Binding SecondaryText\}"[\s\S]*?Text="\{Binding UsageCount\}"') {
     $issues.Add('Speaker suggestions must show display name, character code, and a right-aligned numeric usage count.')
