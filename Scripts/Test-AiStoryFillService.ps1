@@ -77,6 +77,36 @@ if (Test-Path -LiteralPath $assemblyPath) {
             (Get-FileHash -LiteralPath $documentPath -Algorithm SHA256).Hash -ne $beforeHash) {
             throw 'Exported AI story task metadata is incorrect or changed the chapter.'
         }
+
+        @(
+            '{"id":"docx-p1241","order":1241,"raw":"旁白：第一句"}',
+            '{"id":"docx-p1242","order":1242,"raw":"【制作备注】"}',
+            '{"id":"docx-p1243","order":1243,"raw":"无法判断"}',
+            '{"id":"docx-p1244","order":1244,"raw":"店员：你好"}'
+        ) | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $packagePath 'source.jsonl')
+        @(
+            '{"id":"docx-p1241","TalkChar":"","Tesxt":"第一句","status":"include","confidence":"high"}',
+            '{"id":"docx-p1242","TalkChar":null,"Tesxt":null,"status":"skip","confidence":"high"}',
+            '{"id":"docx-p1243","TalkChar":null,"Tesxt":null,"status":"review","confidence":"low"}',
+            '{"id":"docx-p1244","TalkChar":"店员","Tesxt":"你好","status":"include","confidence":"medium"}'
+        ) | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $packagePath 'result.jsonl')
+        $knownSpeakers = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        [void]$knownSpeakers.Add('')
+        [void]$knownSpeakers.Add('梦凪')
+        [void]$knownSpeakers.Add('Xia')
+        $previewArgs = [object[]]::new(3)
+        $previewArgs[0] = $chapter.PSObject.BaseObject
+        $previewArgs[1] = [string]$packagePath
+        $previewArgs[2] = $knownSpeakers.PSObject.BaseObject
+        $preview = $serviceType.GetMethod('LoadImportPreview').Invoke($service, $previewArgs)
+        if ($preview.Items.Count -ne 4 -or
+            $preview.PendingIncludeCount -ne 2 -or
+            $preview.SkipCount -ne 1 -or
+            $preview.ReviewCount -ne 1 -or
+            $preview.CanImport -or
+            @($preview.Issues | Where-Object { $_.Message -match '未知说话人.*店员' }).Count -ne 1) {
+            throw 'AI story import preview did not classify include, skip, review, and unknown speakers correctly.'
+        }
     }
     finally {
         if (Test-Path $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
