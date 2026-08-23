@@ -22,6 +22,11 @@ $assemblyPath = Join-Path $root 'bin\x64\Debug\net8.0-windows10.0.19041.0\win-x6
 if (Test-Path -LiteralPath $assemblyPath) {
     $assembly = [Reflection.Assembly]::LoadFrom((Resolve-Path $assemblyPath))
     $type = $assembly.GetType('GalExcleTools.Services.StoryFunctionService', $true)
+    $indexType = $assembly.GetType('GalExcleTools.FunctionIndex', $true)
+    $legacyIndex = [Text.Json.JsonSerializer]::Deserialize('{"Entries":[]}', $indexType)
+    if ($indexType.GetProperty('SchemaVersion').GetValue($legacyIndex) -ne 0) {
+        throw 'A function index without SchemaVersion must be detected as legacy for backup.'
+    }
     $values = [Collections.Generic.List[string]]::new()
     foreach ($value in @(
         'BGM_Start', 'BGM_Stop', 'BGMStart', 'BGMStop',

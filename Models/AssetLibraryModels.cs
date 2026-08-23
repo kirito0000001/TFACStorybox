@@ -28,7 +28,7 @@ internal sealed record MusicRename(MusicEntry Entry, string TargetPath);
 
 internal sealed class FunctionIndex
 {
-    public int SchemaVersion { get; set; } = 2;
+    public int SchemaVersion { get; set; }
 
     public List<FunctionEntry> Entries { get; set; } = [];
 }
