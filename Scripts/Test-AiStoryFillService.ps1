@@ -61,7 +61,10 @@ if (Test-Path -LiteralPath $assemblyPath) {
         $customSpeakers = [Collections.Generic.List[string]]::new()
         [void]$customSpeakers.Add('梦凪')
         $exportArgs[5] = $customSpeakers.PSObject.BaseObject
-        $result = $serviceType.GetMethod('CreateTaskPackage').Invoke($service, $exportArgs)
+        $defaultExportMethod = $serviceType.GetMethods() |
+            Where-Object { $_.Name -eq 'CreateTaskPackage' -and $_.GetParameters().Count -eq 6 } |
+            Select-Object -First 1
+        $result = $defaultExportMethod.Invoke($service, $exportArgs)
         $manifestPath = Join-Path $packagePath 'manifest.json'
         $catalogPath = Join-Path $packagePath 'speaker-catalog.json'
         $instructionsPath = Join-Path $packagePath 'AI-INSTRUCTIONS.md'
@@ -90,6 +93,33 @@ if (Test-Path -LiteralPath $assemblyPath) {
             !(@($v2.AllowedFields) -contains 'TalkBody') -or
             !(@($v3.AllowedFields) -contains 'Custom')) {
             throw 'V2/V3 protocol foundations are not declared correctly.'
+        }
+        $versionedExportMethod = $serviceType.GetMethods() |
+            Where-Object { $_.Name -eq 'CreateTaskPackage' -and $_.GetParameters().Count -eq 7 } |
+            Select-Object -First 1
+        if ($null -eq $versionedExportMethod) {
+            throw 'Versioned AI story task export overload is missing.'
+        }
+        $versionedExportArgs = [object[]]::new(7)
+        [Array]::Copy($exportArgs, $versionedExportArgs, 6)
+        $versionedExportArgs[3] = [string](Join-Path $testRoot 'unsupported-v2')
+        $versionedExportArgs[6] = [int]2
+        $v2Rejected = $false
+        try {
+            [void]$versionedExportMethod.Invoke($service, $versionedExportArgs)
+        }
+        catch {
+            $exception = $_.Exception
+            while ($null -ne $exception.InnerException) { $exception = $exception.InnerException }
+            if ($exception -is [InvalidOperationException] -and $exception.Message -match 'V2.*尚未开放') {
+                $v2Rejected = $true
+            }
+            else {
+                throw
+            }
+        }
+        if (!$v2Rejected) {
+            throw 'V2 export was accepted before the protocol is implemented.'
         }
 
         @(

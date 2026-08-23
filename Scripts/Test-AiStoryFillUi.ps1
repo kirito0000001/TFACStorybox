@@ -19,14 +19,18 @@ foreach ($required in @(
     'LoadImportPreview',
     'ApplyImport',
     'FolderPicker',
-    'PromptTextAsync',
+    'ProtocolVersion',
+    'SourceStartParagraph',
     'ShowFloatingTip'
 )) {
     if ($workflow -notmatch [regex]::Escape($required)) {
         throw "AI story-fill workflow is missing $required."
     }
 }
-foreach ($required in @('导出 V1 任务', '导入填写结果', 'TalkChar', 'Tesxt', '待人工确认', '重复')) {
+if ($workflow -match 'PromptTextAsync') {
+    throw 'AI story-fill export must not open a second paragraph prompt.'
+}
+foreach ($required in @('协议版本', 'V1', 'V2', 'V3', '原稿起点（可选）', '导入填写结果', 'TalkChar', 'Tesxt', '待人工确认', '重复')) {
     if ($factory -notmatch [regex]::Escape($required)) {
         throw "AI story-fill dialog content is missing $required."
     }

@@ -18,17 +18,21 @@ public sealed partial class MainWindow
     {
         try
         {
+            var taskContent = AiStoryFillDialogContentFactory.CreateTaskContent(chapter);
             var action = await _dialogService.ShowContentAsync(new ContentDialogRequest(
                 "AI 剧情填表",
-                AiStoryFillDialogContentFactory.CreateOverviewContent(chapter),
-                "导出 V1 任务",
+                taskContent.Content,
+                "导出任务",
                 "取消",
                 "导入填写结果",
                 ContentDialogButton.Primary));
 
             if (action == DialogResultKind.Primary)
             {
-                await ExportAiStoryFillTaskAsync(chapter);
+                await ExportAiStoryFillTaskAsync(
+                    chapter,
+                    taskContent.ProtocolVersion,
+                    taskContent.SourceStartParagraph);
             }
             else if (action == DialogResultKind.Secondary)
             {
@@ -41,26 +45,11 @@ public sealed partial class MainWindow
         }
     }
 
-    private async Task ExportAiStoryFillTaskAsync(ChapterInfo chapter)
+    private async Task ExportAiStoryFillTaskAsync(
+        ChapterInfo chapter,
+        int protocolVersion,
+        int sourceStartParagraph)
     {
-        var paragraphText = await _dialogService.PromptTextAsync(new TextInputDialogRequest(
-            "导出 V1 任务",
-            "原稿起始段落",
-            "0",
-            "例如 1241",
-            "选择导出位置",
-            "取消",
-            "该数字会写入任务协议，供外接程序定位原稿。"));
-        if (paragraphText is null)
-        {
-            return;
-        }
-        if (!int.TryParse(paragraphText, out var sourceStartParagraph) || sourceStartParagraph < 0)
-        {
-            ShowFloatingTip(InfoBarSeverity.Warning, "无法导出任务", "原稿起始段落必须是 0 或更大的整数。");
-            return;
-        }
-
         var selectedFolder = await PickAiStoryFillFolderAsync();
         if (selectedFolder is null)
         {
@@ -77,10 +66,11 @@ public sealed partial class MainWindow
             characters,
             packagePath,
             sourceStartParagraph,
-            customSpeakers);
+            customSpeakers,
+            protocolVersion);
         ShowFloatingTip(
             InfoBarSeverity.Success,
-            "V1 任务已导出",
+            $"V{protocolVersion} 任务已导出",
             export.PackageDirectory,
             logMessage: $"导出 AI 剧情填表任务：{chapter.Code} -> {export.PackageDirectory}");
     }

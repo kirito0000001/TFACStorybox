@@ -42,6 +42,30 @@ internal sealed class AiStoryFillService
         int sourceStartParagraph,
         IReadOnlyList<string> customSpeakers)
     {
+        return CreateTaskPackage(
+            chapter,
+            document,
+            characters,
+            packageDirectory,
+            sourceStartParagraph,
+            customSpeakers,
+            protocolVersion: 1);
+    }
+
+    public AiStoryFillTaskExportResult CreateTaskPackage(
+        ChapterInfo chapter,
+        StoryDocument document,
+        IReadOnlyList<CharacterInfo> characters,
+        string packageDirectory,
+        int sourceStartParagraph,
+        IReadOnlyList<string> customSpeakers,
+        int protocolVersion)
+    {
+        var protocol = AiStoryFillProtocol.GetDefinition(protocolVersion);
+        if (!protocol.IsImplemented)
+        {
+            throw new InvalidOperationException($"AI 剧情填表协议 {protocol.Profile} 尚未开放导出。");
+        }
         if (document.Rows.Count == 0)
         {
             throw new InvalidDataException("章节没有可作为追加锚点的剧情行。");
@@ -55,7 +79,6 @@ internal sealed class AiStoryFillService
 
         Directory.CreateDirectory(packageDirectory);
         var anchor = document.Rows[^1];
-        var protocol = AiStoryFillProtocol.GetDefinition(1);
         var manifest = new AiStoryFillManifest
         {
             ProtocolVersion = protocol.Version,

@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -6,20 +7,71 @@ using Microsoft.UI.Xaml.Media;
 
 namespace GalExcleTools.Views;
 
-internal static class AiStoryFillDialogContentFactory
+internal sealed class AiStoryFillTaskDialogContent
 {
-    public static UIElement CreateOverviewContent(ChapterInfo chapter)
+    private readonly ComboBox _protocolBox;
+    private readonly NumberBox _sourceStartBox;
+
+    public AiStoryFillTaskDialogContent(ChapterInfo chapter)
     {
-        var panel = CreatePanel(520);
-        panel.Children.Add(CreateHeading($"{chapter.Name}  /  {chapter.Code}", 18));
-        panel.Children.Add(CreateMutedText("V1 仅处理剧情文本与说话人，不会写入素材、立绘或函数。"));
-        panel.Children.Add(CreateActionSummary(
-            "导出 V1 任务",
-            "生成协议、说话人目录和 AI-INSTRUCTIONS.md。"));
-        panel.Children.Add(CreateActionSummary(
+        _protocolBox = new ComboBox
+        {
+            Header = "协议版本",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            SelectedIndex = 0
+        };
+        _protocolBox.Items.Add(CreateProtocolItem("V1", "剧情文本与说话人", 1, isEnabled: true));
+        _protocolBox.Items.Add(CreateProtocolItem("V2", "角色与立绘层（尚未开放）", 2, isEnabled: false));
+        _protocolBox.Items.Add(CreateProtocolItem("V3", "函数与剧情控制（尚未开放）", 3, isEnabled: false));
+
+        _sourceStartBox = new NumberBox
+        {
+            Header = "原稿起点（可选）",
+            PlaceholderText = "通常留空",
+            Minimum = 0,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+
+        var panel = AiStoryFillDialogContentFactory.CreatePanel(520);
+        panel.Children.Add(AiStoryFillDialogContentFactory.CreateHeading($"{chapter.Name}  /  {chapter.Code}", 18));
+        panel.Children.Add(_protocolBox);
+        panel.Children.Add(_sourceStartBox);
+        panel.Children.Add(AiStoryFillDialogContentFactory.CreateMutedText("起点只作为外接程序的原稿参考；留空时按 0 写入协议。"));
+        panel.Children.Add(AiStoryFillDialogContentFactory.CreateActionSummary(
             "导入填写结果",
             "读取 result.jsonl，预览后追加 TalkChar 与 Tesxt。"));
-        return panel;
+        Content = panel;
+    }
+
+    public UIElement Content { get; }
+
+    public int ProtocolVersion => (_protocolBox.SelectedItem as ComboBoxItem)?.Tag is int version ? version : 1;
+
+    public int SourceStartParagraph => double.IsNaN(_sourceStartBox.Value)
+        ? 0
+        : Math.Max(0, (int)Math.Truncate(_sourceStartBox.Value));
+
+    private static ComboBoxItem CreateProtocolItem(
+        string version,
+        string description,
+        int value,
+        bool isEnabled)
+    {
+        return new ComboBoxItem
+        {
+            Content = $"{version}  {description}",
+            Tag = value,
+            IsEnabled = isEnabled
+        };
+    }
+}
+
+internal static class AiStoryFillDialogContentFactory
+{
+    public static AiStoryFillTaskDialogContent CreateTaskContent(ChapterInfo chapter)
+    {
+        return new AiStoryFillTaskDialogContent(chapter);
     }
 
     public static UIElement CreatePreviewContent(AiStoryFillImportPreview preview)
@@ -57,7 +109,7 @@ internal static class AiStoryFillDialogContentFactory
         return root;
     }
 
-    private static UIElement CreateActionSummary(string title, string description)
+    internal static UIElement CreateActionSummary(string title, string description)
     {
         var panel = new StackPanel { Spacing = 3 };
         panel.Children.Add(CreateHeading(title, 15));
@@ -131,17 +183,17 @@ internal static class AiStoryFillDialogContentFactory
         };
     }
 
-    private static StackPanel CreatePanel(double width)
+    internal static StackPanel CreatePanel(double width)
     {
         return new StackPanel { Width = width, Spacing = 12 };
     }
 
-    private static TextBlock CreateHeading(string text, double fontSize)
+    internal static TextBlock CreateHeading(string text, double fontSize)
     {
         return new TextBlock { Text = text, FontSize = fontSize, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
     }
 
-    private static TextBlock CreateMutedText(string text)
+    internal static TextBlock CreateMutedText(string text)
     {
         return new TextBlock
         {
