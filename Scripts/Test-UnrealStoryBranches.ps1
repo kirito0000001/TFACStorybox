@@ -31,6 +31,11 @@ Require-Pattern `
     'AllRoad generation must cover conditional, sequential, and terminal section routes.'
 
 Require-Pattern `
+    (Join-Path $root 'Services\UnrealSyncService.cs') `
+    'missingOptionIndex[\s\S]*?GetOptionKey\(missingOptionIndex\)[\s\S]*?convergenceSection\.TableAsset' `
+    'Unbound choices must conditionally enter the inferred common section.'
+
+Require-Pattern `
     (Join-Path $root 'Models\StoryDocument.cs') `
     'CustomBranchSectionFirstRowIds' `
     'StoryDocument must persist sections whose AllRoad logic stays manually managed.'
@@ -114,16 +119,21 @@ if (Test-Path -LiteralPath $assemblyPath) {
     }
 
     $targetIdA = $rowType.GetProperty('StableId').GetValue($createdRows[1])
-    $targetIdB = $rowType.GetProperty('StableId').GetValue($createdRows[2])
+    $targetIdC = $rowType.GetProperty('StableId').GetValue($createdRows[2])
     $managedRouteA = [System.Activator]::CreateInstance(
         $routeType,
         @('M1-00-Choice1', 0, 'A', $targetIdA, $true))
-    $managedRouteB = [System.Activator]::CreateInstance(
+    $managedRouteC = [System.Activator]::CreateInstance(
         $routeType,
-        @('M1-00-Choice1', 1, 'B', $targetIdB, $true))
+        @('M1-00-Choice1', 2, 'C', $targetIdC, $true))
     $branchRoutes = $documentType.GetProperty('BranchRoutes').GetValue($document)
     $branchRoutes.Add($managedRouteA)
-    $branchRoutes.Add($managedRouteB)
+    $branchRoutes.Add($managedRouteC)
+    $choiceNotes = $documentType.GetProperty('ChoiceNotes').GetValue($document)
+    $choices = $choiceNotes.GetType().GetProperty('Choices').GetValue($choiceNotes)
+    $notes = [System.Collections.Generic.List[string]]::new()
+    foreach ($text in @('A text', 'B text', 'C text', 'D text')) { [void]$notes.Add($text) }
+    $choices.Add('M1-00-Choice1', $notes)
     $customSectionIds = $documentType.GetProperty('CustomBranchSectionFirstRowIds').GetValue($document)
     [void]$customSectionIds.Add($rowType.GetProperty('StableId').GetValue($createdRows[3]))
 
@@ -151,10 +161,14 @@ if (Test-Path -LiteralPath $assemblyPath) {
     $bySource = @{}
     foreach ($source in $sources) { $bySource[$source.SourceTable] = $source }
     if ($sources.Count -ne 4 -or
-        $bySource['/Game/Story/S1.S1'].Routes.Count -ne 2 -or
+        $bySource['/Game/Story/S1.S1'].Routes.Count -ne 4 -or
         !$bySource['/Game/Story/S1.S1'].Routes[0].RequiresChoiceCondition -or
         $bySource['/Game/Story/S1.S1'].Routes[0].TargetTable -ne '/Game/Story/S2.S2' -or
-        $bySource['/Game/Story/S1.S1'].Routes[1].TargetTable -ne '/Game/Story/S3.S3' -or
+        $bySource['/Game/Story/S1.S1'].Routes[1].OptionKey -ne 'B' -or
+        $bySource['/Game/Story/S1.S1'].Routes[1].TargetTable -ne '/Game/Story/S4.S4' -or
+        $bySource['/Game/Story/S1.S1'].Routes[2].TargetTable -ne '/Game/Story/S3.S3' -or
+        $bySource['/Game/Story/S1.S1'].Routes[3].OptionKey -ne 'D' -or
+        $bySource['/Game/Story/S1.S1'].Routes[3].TargetTable -ne '/Game/Story/S4.S4' -or
         $bySource['/Game/Story/S2.S2'].Routes[0].RequiresChoiceCondition -or
         $bySource['/Game/Story/S2.S2'].Routes[0].TargetTable -ne '/Game/Story/S4.S4' -or
         $bySource['/Game/Story/S3.S3'].Routes[0].TargetTable -ne '/Game/Story/S4.S4' -or

@@ -37,7 +37,7 @@ Require-Pattern `
 
 Require-Pattern `
     (Join-Path $root 'MainWindow.Story.ChoiceEditor.cs') `
-    'ShowStoryChoiceEditorAsync[\s\S]*?StoryChoiceTargetOption[\s\S]*?不跳转' `
+    'ShowStoryChoiceEditorAsync[\s\S]*?StoryChoiceTargetOption[\s\S]*?进入共通线' `
     'Choice editing must capture optional target sections alongside option text.'
 
 Require-Pattern `

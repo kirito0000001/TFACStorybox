@@ -1360,30 +1360,61 @@ internal sealed class UnrealSyncService
         var convergenceByBranchSection = new Dictionary<int, UnrealStoryTableSyncEntry?>();
         foreach (var pair in managedRoutesBySection)
         {
-            var occupiedSections = pair.Value
-                .Select(route => chapterTables.FirstOrDefault(table =>
-                    string.Equals(table.TableAsset, route.TargetTable, StringComparison.OrdinalIgnoreCase))?.Section)
-                .Where(section => section is not null)
-                .Select(section => section!.Value)
-                .Distinct()
-                .OrderBy(section => section)
-                .ToList();
-            if (occupiedSections.Count == 0)
+            foreach (var choiceGroup in pair.Value
+                         .GroupBy(route => route.ChoiceFunction, StringComparer.OrdinalIgnoreCase)
+                         .ToList())
             {
-                continue;
-            }
+                var explicitRoutes = choiceGroup.ToList();
+                var occupiedSections = explicitRoutes
+                    .Select(route => chapterTables.FirstOrDefault(table =>
+                        string.Equals(table.TableAsset, route.TargetTable, StringComparison.OrdinalIgnoreCase))?.Section)
+                    .Where(section => section is not null)
+                    .Select(section => section!.Value)
+                    .Distinct()
+                    .OrderBy(section => section)
+                    .ToList();
+                if (occupiedSections.Count == 0)
+                {
+                    continue;
+                }
 
-            var convergenceSection = chapterTables
-                .FirstOrDefault(table => table.Section > occupiedSections[^1]);
-            foreach (var occupiedSection in occupiedSections)
-            {
-                convergenceByBranchSection[occupiedSection] = convergenceSection;
+                var convergenceSection = chapterTables
+                    .FirstOrDefault(table => table.Section > occupiedSections[^1]);
+                foreach (var occupiedSection in occupiedSections)
+                {
+                    convergenceByBranchSection[occupiedSection] = convergenceSection;
+                }
+
+                if (convergenceSection is null ||
+                    !document.ChoiceNotes.Choices.TryGetValue(choiceGroup.Key, out var optionTexts))
+                {
+                    continue;
+                }
+
+                var existingOptionKeys = explicitRoutes
+                    .Select(route => route.OptionKey)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                for (var missingOptionIndex = 0; missingOptionIndex < optionTexts.Count; missingOptionIndex++)
+                {
+                    var optionKey = StoryBranchService.GetOptionKey(missingOptionIndex);
+                    if (existingOptionKeys.Contains(optionKey))
+                    {
+                        continue;
+                    }
+
+                    pair.Value.Add(new UnrealStoryBranchRouteSyncEntry(
+                        choiceGroup.Key,
+                        optionKey,
+                        optionTexts[missingOptionIndex],
+                        convergenceSection.TableAsset,
+                        RequiresChoiceCondition: true));
+                }
             }
         }
 
         return chapterTables
             .Where(sourceTable => !customSections.Contains(sourceTable.Section))
-            .Select((sourceTable, index) =>
+            .Select(sourceTable =>
             {
                 if (managedRoutesBySection.TryGetValue(sourceTable.Section, out var choiceRoutes))
                 {

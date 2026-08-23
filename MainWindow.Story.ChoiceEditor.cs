@@ -67,7 +67,7 @@ public sealed partial class MainWindow
             StoryChoiceEditorTargetComboBox.Header = $"前往小节（{_storyChoiceEditorTargets.Count} 个已创建）";
             StoryChoiceEditorTargetComboBox.Items.Add(new ComboBoxItem
             {
-                Content = "不跳转",
+                Content = "进入共通线",
                 Tag = string.Empty
             });
             foreach (var target in _storyChoiceEditorTargets)
@@ -171,7 +171,7 @@ public sealed partial class MainWindow
             StoryBranchService.GetOptionKey(_storyChoiceEditorOptions.Count),
             string.Empty,
             string.Empty,
-            "不跳转");
+            "进入共通线");
         _storyChoiceEditorOptions.Add(option);
         StoryChoiceEditorListView.SelectedItem = option;
         RefreshStoryChoiceTargetBindingIndicators();
@@ -191,7 +191,7 @@ public sealed partial class MainWindow
         _storyChoiceEditorOptions.Remove(option);
         if (_storyChoiceEditorOptions.Count == 0)
         {
-            _storyChoiceEditorOptions.Add(new StoryChoiceEditorOptionViewModel("A", string.Empty, string.Empty, "不跳转"));
+            _storyChoiceEditorOptions.Add(new StoryChoiceEditorOptionViewModel("A", string.Empty, string.Empty, "进入共通线"));
         }
         RenumberStoryChoiceEditorOptions();
         StoryChoiceEditorListView.SelectedIndex = Math.Clamp(removedIndex, 0, _storyChoiceEditorOptions.Count - 1);
@@ -282,7 +282,7 @@ public sealed partial class MainWindow
     {
         if (string.IsNullOrWhiteSpace(targetId))
         {
-            return "不跳转";
+            return "进入共通线";
         }
 
         return _storyChoiceEditorTargets.FirstOrDefault(target => string.Equals(
