@@ -149,7 +149,32 @@ public sealed partial class MainWindow
             .Where(item => string.IsNullOrWhiteSpace(query) ||
                            item.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                            item.Value.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                           item.SecondaryText.Contains(query, StringComparison.OrdinalIgnoreCase));
+                           item.SecondaryText.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var knownValues = new HashSet<string>(
+                _storySpeakerNameSuggestions.Select(item => item.Value),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var character in GetStoryCharacters()
+                         .Where(character =>
+                             character.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                             character.Code.Contains(query, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!knownValues.Add(character.Code))
+                {
+                    continue;
+                }
+
+                filteredSuggestions.Add(new StorySpeakerNameSuggestion(
+                    character.Code,
+                    character.Name,
+                    character.Code,
+                    UsageCount: 0,
+                    IsCreateAction: false));
+            }
+        }
+
         var suggestions = new[]
             {
                 new StorySpeakerNameSuggestion(

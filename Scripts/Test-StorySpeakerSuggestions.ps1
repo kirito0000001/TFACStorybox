@@ -29,6 +29,12 @@ if ($xaml -notmatch 'StorySpeakerTextBox[\s\S]*?TextMemberPath="Value"[\s\S]*?Su
 if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?DisplayName\.Contains[\s\S]*?Value\.Contains[\s\S]*?SecondaryText\.Contains') {
     $issues.Add('Speaker search must match Chinese display names, English codes, and custom names.')
 }
+if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?!string\.IsNullOrWhiteSpace\(query\)[\s\S]*?GetStoryCharacters\(\)[\s\S]*?character\.Name\.Contains[\s\S]*?character\.Code\.Contains[\s\S]*?UsageCount:\s*0') {
+    $issues.Add('A non-empty search must include unused asset-library characters by Chinese name or English code with a zero count.')
+}
+if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?knownValues[\s\S]*?StringComparer\.OrdinalIgnoreCase[\s\S]*?knownValues\.Add') {
+    $issues.Add('Asset-library search results must not duplicate speakers already used in the chapter.')
+}
 if ($code -notmatch 'RefreshStorySpeakerNameSuggestions[\s\S]*?new StorySpeakerNameSuggestion\([\s\S]*?清空[\s\S]*?Concat\([\s\S]*?suggestions\.Add[\s\S]*?创建说话人') {
     $issues.Add('The clear action must remain first and the create-speaker action must remain last.')
 }
