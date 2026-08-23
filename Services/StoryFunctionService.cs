@@ -248,14 +248,28 @@ internal static class StoryFunctionService
         IEnumerable<StoryRow> rows)
     {
         var prefix = BuildChapterSectionChoicePrefix(chapterCode, editorSection, projectCode);
+        var chapterBaseCode = RemoveProjectCodePrefix(
+            StoryCsvService.RemoveChapterSectionSuffix(chapterCode),
+            projectCode);
         var maxChoiceIndex = rows
             .SelectMany(row => SplitFunctionValues(row.Get("Custom")))
-            .Select(function => TryParseChoiceFunctionIndex(function, prefix))
+            .Select(function => TryParseChapterChoiceFunctionIndex(function, chapterBaseCode))
             .Where(index => index > 0)
             .DefaultIfEmpty(0)
             .Max();
 
         return $"{prefix}{maxChoiceIndex + 1}";
+    }
+
+    public static int TryParseChapterChoiceFunctionIndex(string functionValue, string chapterBaseCode)
+    {
+        var match = Regex.Match(
+            functionValue.Trim(),
+            $"^{Regex.Escape(chapterBaseCode)}-\\d{{2}}-Choice(?<index>\\d+)$",
+            RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups["index"].Value, out var index)
+            ? index
+            : 0;
     }
 
     public static int TryParseChoiceFunctionIndex(string functionValue, string prefix)

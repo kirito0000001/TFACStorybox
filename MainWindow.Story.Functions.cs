@@ -57,6 +57,7 @@ namespace GalExcleTools
             }
 
             var changed = false;
+            var nextChoiceIndex = 1;
             var choiceRemap = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
             for (var rowIndex = 0; rowIndex < _storyRows.Count; rowIndex++)
             {
@@ -78,7 +79,8 @@ namespace GalExcleTools
                         continue;
                     }
 
-                    var normalized = $"{targetPrefix}{match.Groups["index"].Value}";
+                    var normalized = $"{targetPrefix}{nextChoiceIndex.ToString(CultureInfo.InvariantCulture)}";
+                    nextChoiceIndex++;
                     if (string.Equals(functions[functionIndex], normalized, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
