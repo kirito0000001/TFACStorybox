@@ -17,7 +17,7 @@ Require-Pattern `
 
 Require-Pattern `
     (Join-Path $root 'MainWindow.AssetLibrary.Loading.cs') `
-    'CreateFunctionCard\(FunctionEntry function\)[\s\S]*?260,[\s\S]*?126,[\s\S]*?CreateFunctionCardContent\(\s*function\.Name,\s*function\.Indicator,\s*string\.IsNullOrWhiteSpace\(function\.Description\)[\s\S]*?stretchContent:\s*true' `
+    'CreateFunctionCard\(FunctionEntry function\)[\s\S]*?260,[\s\S]*?126,[\s\S]*?CreateFunctionCardContent\(\s*function\.Name,\s*StoryFunctionService\.BuildFunctionCatalogSummary\(function\),\s*string\.IsNullOrWhiteSpace\(function\.Description\)[\s\S]*?stretchContent:\s*true' `
     'Function cards must use one fixed stretched size.'
 
 Require-Pattern `

@@ -133,11 +133,13 @@ internal sealed class ChapterEditorDialogContent
 
 internal sealed class FunctionEditorDialogContent
 {
-    private const string ChoiceFunctionCategory = "触发选项";
     private readonly TextBox _nameBox;
-    private readonly TextBox _indicatorBox;
+    private readonly TextBox _mainCodeBox;
     private readonly TextBox _descriptionBox;
-    private readonly StackPanel _choiceNotesPanel;
+    private readonly ToggleSwitch _hasBranchesToggle;
+    private readonly StackPanel _branchesPanel;
+    private readonly Button _addBranchButton;
+    private readonly bool _isSystemFunction;
     private readonly Action _playPositiveSound;
     private readonly Action _playNegativeSound;
 
@@ -149,19 +151,21 @@ internal sealed class FunctionEditorDialogContent
     {
         _playPositiveSound = playPositiveSound;
         _playNegativeSound = playNegativeSound;
+        _isSystemFunction = function?.BranchMode == FunctionBranchMode.System;
         _nameBox = new TextBox
         {
             Width = 420,
             Header = "中文名称",
-            Text = function?.Name ?? (string.IsNullOrWhiteSpace(suggestedChoiceIndicator) ? string.Empty : ChoiceFunctionCategory),
+            Text = function?.Name ?? string.Empty,
             PlaceholderText = "例如：播放一次性特殊音效"
         };
-        _indicatorBox = new TextBox
+        _mainCodeBox = new TextBox
         {
             Width = 420,
-            Header = "函数指示器",
+            Header = "主函数代号",
             Text = function?.Indicator ?? suggestedChoiceIndicator,
-            PlaceholderText = "例如：Scene_、BGM_Stop、M2-04-Choice2"
+            PlaceholderText = "例如：VFXON",
+            IsEnabled = !_isSystemFunction
         };
         _descriptionBox = new TextBox
         {
@@ -174,29 +178,32 @@ internal sealed class FunctionEditorDialogContent
             MinHeight = 72,
             MaxLength = 160
         };
-        _choiceNotesPanel = new StackPanel
+        _hasBranchesToggle = new ToggleSwitch
         {
-            Spacing = 8
+            Header = "分支",
+            OffContent = "无分支",
+            OnContent = "拥有分支",
+            IsOn = function?.BranchMode is FunctionBranchMode.Fixed or FunctionBranchMode.AssetIndex ||
+                   (function?.Branches.Count ?? 0) > 0,
+            IsEnabled = !_isSystemFunction
         };
-
-        foreach (var note in function?.ChoiceNotes ?? [])
+        _branchesPanel = new StackPanel { Spacing = 10 };
+        foreach (var branch in function?.Branches ?? [])
         {
-            AddChoiceNoteRow(note);
+            AddBranchRow(branch);
         }
-
-        var addChoiceNoteButton = new Button
+        _addBranchButton = new Button
         {
-            Width = 36,
-            Height = 32,
-            Padding = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Left,
-            Content = "+"
+            Content = "+ 新增分支",
+            IsEnabled = !_isSystemFunction
         };
-        addChoiceNoteButton.Click += (_, _) =>
+        _addBranchButton.Click += (_, _) =>
         {
             _playPositiveSound();
-            AddChoiceNoteRow();
+            AddBranchRow(new FunctionBranch(string.Empty, string.Empty));
         };
+        _hasBranchesToggle.Toggled += (_, _) => UpdateBranchVisibility();
 
         Content = new StackPanel
         {
@@ -204,14 +211,21 @@ internal sealed class FunctionEditorDialogContent
             Children =
             {
                 _nameBox,
-                _indicatorBox,
+                _mainCodeBox,
                 _descriptionBox,
-                DialogContentFactory.CreateResultHeading("选项备注"),
-                _choiceNotesPanel,
-                addChoiceNoteButton,
-                DialogContentFactory.CreateSubtleParagraph("备注只保存在函数卡里，方便查看选项内容，不会写入剧情表 Custom 字段。")
+                _hasBranchesToggle,
+                DialogContentFactory.CreateResultHeading("分支列表"),
+                new ScrollViewer
+                {
+                    MaxHeight = 300,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Content = _branchesPanel
+                },
+                _addBranchButton,
+                DialogContentFactory.CreateSubtleParagraph("实际代号会拼接到主函数之后并写入 Custom；备注只在工具箱中显示。")
             }
         };
+        UpdateBranchVisibility();
     }
 
     public StackPanel Content { get; }
@@ -219,59 +233,69 @@ internal sealed class FunctionEditorDialogContent
     public FunctionEditorInput ReadInput()
     {
         var name = _nameBox.Text.Trim();
-        var indicator = _indicatorBox.Text.Trim();
+        var mainCode = _mainCodeBox.Text.Trim();
         var description = _descriptionBox.Text.Trim();
-        var choiceNotes = _choiceNotesPanel.Children
+        var branches = _branchesPanel.Children
             .OfType<Grid>()
-            .Select(row => row.Children.OfType<TextBox>().FirstOrDefault()?.Text)
-            .Select(TextUtility.NormalizeFunctionChoiceNote)
-            .Where(note => !string.IsNullOrWhiteSpace(note))
+            .Select(row => row.Children.OfType<TextBox>().ToList())
+            .Where(boxes => boxes.Count >= 2 && !string.IsNullOrWhiteSpace(boxes[0].Text))
+            .Select(boxes => new FunctionBranch(boxes[0].Text.Trim(), boxes[1].Text.Trim()))
             .ToList();
-
-        return new FunctionEditorInput(name, indicator, description, choiceNotes);
+        var mode = _isSystemFunction
+            ? FunctionBranchMode.System
+            : !_hasBranchesToggle.IsOn
+                ? FunctionBranchMode.None
+                : FunctionBranchMode.Fixed;
+        return new FunctionEditorInput(name, mainCode, description, mode, branches);
     }
 
-    private void AddChoiceNoteRow(string note = "")
+    private void AddBranchRow(FunctionBranch branch)
     {
         var row = new Grid
         {
             ColumnSpacing = 8
         };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.9, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var noteBox = new TextBox
+        var codeBox = new TextBox
         {
-            Header = $"选项备注 {_choiceNotesPanel.Children.Count + 1}",
-            Text = note,
-            PlaceholderText = "仅用于查看，不写入剧情表"
+            Header = "实际代号",
+            Text = branch.Code,
+            PlaceholderText = "例如：Sunshine"
+        };
+        var remarkBox = new TextBox
+        {
+            Header = "备注",
+            Text = branch.Remark,
+            PlaceholderText = "例如：阳光特效"
         };
         var removeButton = new Button
         {
             Content = "删除",
-            Margin = new Thickness(0, 28, 0, 0)
+            Margin = new Thickness(0, 28, 0, 0),
+            IsEnabled = !_isSystemFunction
         };
         removeButton.Click += (_, _) =>
         {
             _playNegativeSound();
-            _choiceNotesPanel.Children.Remove(row);
-            RenumberChoiceNoteRows();
+            _branchesPanel.Children.Remove(row);
         };
 
-        Grid.SetColumn(removeButton, 1);
-        row.Children.Add(noteBox);
+        Grid.SetColumn(remarkBox, 1);
+        Grid.SetColumn(removeButton, 2);
+        row.Children.Add(codeBox);
+        row.Children.Add(remarkBox);
         row.Children.Add(removeButton);
-        _choiceNotesPanel.Children.Add(row);
+        _branchesPanel.Children.Add(row);
     }
 
-    private void RenumberChoiceNoteRows()
+    private void UpdateBranchVisibility()
     {
-        var index = 1;
-        foreach (var noteBox in _choiceNotesPanel.Children.OfType<Grid>().SelectMany(row => row.Children.OfType<TextBox>()))
-        {
-            noteBox.Header = $"选项备注 {index}";
-            index++;
-        }
+        var visibility = _hasBranchesToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        _branchesPanel.Visibility = visibility;
+        _addBranchButton.Visibility = visibility;
     }
 }
 

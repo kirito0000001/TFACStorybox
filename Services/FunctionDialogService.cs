@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using GalExcleTools.Views;
 
@@ -39,7 +41,18 @@ internal sealed class FunctionDialogService
         }
 
         var input = editorContent.ReadInput();
-        return string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Indicator)
+        if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.MainCode) ||
+            input.MainCode.Contains('_') || input.MainCode.Contains('/') || input.MainCode.Any(char.IsWhiteSpace))
+        {
+            return null;
+        }
+        if (input.BranchMode == FunctionBranchMode.Fixed && input.Branches.Count == 0)
+        {
+            return null;
+        }
+        var branchCodes = input.Branches.Select(branch => branch.Code).ToList();
+        return branchCodes.Any(code => code.Contains('/') || code.Any(char.IsWhiteSpace)) ||
+               branchCodes.Distinct(System.StringComparer.OrdinalIgnoreCase).Count() != branchCodes.Count
             ? null
             : input;
     }

@@ -58,9 +58,10 @@ internal sealed record FunctionEntry(
 
 internal sealed record FunctionEditorInput(
     string Name,
-    string Indicator,
+    string MainCode,
     string Description,
-    List<string> ChoiceNotes);
+    FunctionBranchMode BranchMode,
+    List<FunctionBranch> Branches);
 
 internal sealed class CharacterFilterIndex
 {

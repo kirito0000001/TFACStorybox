@@ -274,6 +274,15 @@ internal static class StoryFunctionService
         return $"{function.Name} / {indicator} / {function.Category}";
     }
 
+    public static string BuildFunctionCatalogSummary(FunctionEntry function)
+    {
+        return function.BranchMode == FunctionBranchMode.System
+            ? function.Indicator
+            : function.Branches.Count == 0
+                ? $"{function.Indicator} · 无分支"
+                : $"{function.Indicator} · {function.Branches.Count} 个分支";
+    }
+
     public static List<FunctionEntry> OrderByUsageFrequency(IEnumerable<FunctionEntry> functions)
     {
         return functions

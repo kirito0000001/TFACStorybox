@@ -397,13 +397,22 @@ namespace GalExcleTools
             }
 
             var functions = StoryFunctionService.ReadFunctions(_currentAssetLibrary, _jsonOptions);
+            if (functions.Any(function => string.Equals(function.Indicator, input.MainCode, StringComparison.OrdinalIgnoreCase)))
+            {
+                ShowFloatingTip(InfoBarSeverity.Warning, "主函数已存在", input.MainCode);
+                return;
+            }
             functions.Add(new FunctionEntry(
                 Guid.NewGuid().ToString("N"),
                 input.Name,
-                input.Indicator,
-                "自定义",
-                input.ChoiceNotes,
-                input.Description));
+                input.MainCode,
+                "函数",
+                [],
+                input.Description)
+            {
+                BranchMode = input.BranchMode,
+                Branches = input.Branches
+            });
             StoryFunctionService.WriteFunctions(_currentAssetLibrary, functions, _jsonOptions);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             LoadFunctions(_currentAssetLibrary);
@@ -426,13 +435,21 @@ namespace GalExcleTools
                 return;
             }
 
-            var functions = StoryFunctionService.ReadFunctions(_currentAssetLibrary, _jsonOptions)
+            var existingFunctions = StoryFunctionService.ReadFunctions(_currentAssetLibrary, _jsonOptions);
+            if (existingFunctions.Any(entry => entry.Id != function.Id &&
+                                               string.Equals(entry.Indicator, input.MainCode, StringComparison.OrdinalIgnoreCase)))
+            {
+                ShowFloatingTip(InfoBarSeverity.Warning, "主函数已存在", input.MainCode);
+                return;
+            }
+            var functions = existingFunctions
                 .Select(entry => entry.Id == function.Id ? entry with
                 {
                     Name = input.Name,
-                    Indicator = input.Indicator,
-                    ChoiceNotes = input.ChoiceNotes,
-                    Description = input.Description
+                    Indicator = input.MainCode,
+                    Description = input.Description,
+                    BranchMode = input.BranchMode,
+                    Branches = input.Branches
                 } : entry)
                 .ToList();
             StoryFunctionService.WriteFunctions(_currentAssetLibrary, functions, _jsonOptions);
@@ -880,7 +897,7 @@ namespace GalExcleTools
                 126,
                 AssetCardContentFactory.CreateFunctionCardContent(
                     function.Name,
-                    function.Indicator,
+                    StoryFunctionService.BuildFunctionCatalogSummary(function),
                     string.IsNullOrWhiteSpace(function.Description) ? "暂无介绍" : function.Description),
                 function,
                 async (_, _) => await EditFunctionAsync(function),
