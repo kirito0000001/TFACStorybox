@@ -789,8 +789,9 @@
                             <StackPanel Spacing="8">
                                 <AutoSuggestBox
                                      x:Name="StorySpeakerTextBox"
-                                     Header="当前说话人"
-                                     PlaceholderText="输入或选择本章出现过的名称"
+                                     Width="190"
+                                     HorizontalAlignment="Center"
+                                     PlaceholderText="输入或选择说话人"
                                      TextMemberPath="Value"
                                      Background="#66FFFFFF"
                                      BorderBrush="#50000000"
@@ -829,7 +830,7 @@
                             <TextBox
                                 x:Name="StoryTextTextBox"
                                 Grid.Column="1"
-                                Header="剧情文本"
+                                PlaceholderText="剧情文本"
                                 AcceptsReturn="True"
                                 TextWrapping="Wrap"
                                 FontSize="20"
