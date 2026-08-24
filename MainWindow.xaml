@@ -316,8 +316,7 @@
                                         AllowDrop="True"
                                         DragOver="ChaptersGridView_DragOver"
                                         Drop="ChaptersGridView_Drop"
-                                        MaxWidth="980"
-                                        HorizontalAlignment="Left"
+                                        HorizontalAlignment="Stretch"
                                         SelectionMode="None" />
                                 </StackPanel>
                             </Border>
