@@ -250,8 +250,6 @@ Require-SourcePattern "Scripts/Package-App.ps1" 'update-package\.json' "Packagin
 Require-SourcePattern "Scripts/Package-App.ps1" 'toolbox-update\.json' "Packaging must generate the remote update manifest."
 Require-SourcePattern "Scripts/Package-App.ps1" 'Get-FileHash[\s\S]*?SHA256' "Packaging must generate a SHA-256 for the update ZIP."
 Require-SourcePattern "Scripts/Publish-GiteeRelease.ps1" 'GITEE_TOKEN[\s\S]*?toolbox-update\.json[\s\S]*?attach_files' "Gitee publishing must use an environment token and upload the manifest plus package assets."
-Require-SourcePattern "GalExcleTools.csproj" 'Compile Remove="Tools\\\*\*\\\*\.cs"' "Independent tools must not be compiled into the WinUI application."
-Require-SourcePattern "Scripts/Test-SourceHealth.ps1" 'dotnet build GalExcleTools\.csproj[\s\S]*?LASTEXITCODE[\s\S]*?build failed' "Source health must fail when the requested build fails."
 Require-SourcePattern "Models/StoryModels.cs" 'class StoryRow[\s\S]*?StableId[\s\S]*?Guid\.NewGuid[\s\S]*?clone\.StableId\s*=\s*StableId' "Story rows must own a stable identity that survives cloning."
 Require-MethodPattern "Services/StoryEditorService.cs" "MoveNext" 'new StoryRowsEditResult\(Math\.Min\(currentRowIndex \+ 1, rows\.Count - 1\), false' "Next-row navigation must never create story data."
 Require-MethodPattern "Services/StoryEditorService.cs" "InsertRelativeToCurrent" 'insertedRow\.StableId\s*=\s*StoryRow\.CreateStableId\(\)' "Inserted story rows must receive a new stable identity."

@@ -30,11 +30,8 @@ AI 和外接程序只负责剧情文本与说话人。素材、函数、语音�
 - 读取任务包和 Word 原稿。
 - 按 Word 段落生成稳定原稿 ID。
 - 提取角色提示、原始文本和上下文。
-- 续写模式根据 Word 原稿生成 `source.jsonl/result.jsonl`。
-- 起始段落为 0 时，按 `chapterName` 自动定位章节标题，并在下一个章节标题前结束。
-- 修补模式读取工具箱生成的 `source.jsonl`，按正文和上下文对齐 Word 段落并生成 `result.jsonl`。
-- 仅对角色名称、角色英文代号和自定义说话人做精确映射；未登记别名进入 `review`。
-- 默认拒绝覆盖非空结果；`--force` 覆盖前必须创建 `.bak`。
+- 续写模式根据 Word 原稿生成 `source.jsonl`。
+- 修补模式读取工具箱生成的 `source.jsonl`，只补充原稿判断结果。
 - 接收并校验 AI 填写的 `result.jsonl`。
 - 不直接修改 StoryDocument、CSV 或 Unreal 资产。
 

@@ -71,7 +71,6 @@ TFAC剧情箱-轮椅版是一个面向 Unreal Engine 视觉小说 / 剧情项目
 - 音频素材：仅加载 `.wav` 文件，加载音频分类时会自动清理 Adobe Audition 生成的 `.pkf` 元数据文件。
 - 文本工具：按章节维护文本语音和文本本地化，剧情文本只读，映射数据保存在项目 `Tools` 目录。
 - Story 编辑器：编辑 Unreal `FStoryStruct` 对应的 StoryDocument，支持分小节、稳定行、后台自动保存、背景 / BGM / 环境音 / 角色预览。
-- AI 剧情填表：章节卡可导出续写或空字段修补任务，外接程序读取 Word 原稿生成 JSONL，确认预览后再写入 StoryDocument。
 - 函数与选项：维护剧情函数与触发选项备注，和剧情行一起保存在章节 `story.document.json`。
 - 角色立绘：按 `DN_Cloth`、`FC_Face`、`AD_Adorn`、`VFX` 分层管理，支持导入、排序、备注、服装适用范围和小预览。
 - 备份与导入导出：项目、素材库、章节都支持右键备份 / 还原；项目和素材库支持导出 `.zip` 与拖入导入。
@@ -141,29 +140,6 @@ GalExcelProject/
 - `Custom` 可用 `/` 分隔多个函数。
 - 选项备注、小节边界和稳定行 ID 都保存在 `story.document.json`。
 - 小节 CSV 例如 `WHK-M2-00.csv`、`WHK-M2-01.csv`，只在 Unreal 同步或显式导出时生成。
-
-## AI 剧情填表
-
-章节卡右键“AI 剧情填表”支持两种 V1 任务：
-
-- 续写章节：从 Word 原稿生成新剧情行，并追加到导出时的章节锚点之后。
-- 补齐已有内容：按 `StableId` 只补当前为空的说话人或剧情文本，不新增和重排行。
-
-外接程序单独发布：
-
-```powershell
-.\Scripts\Publish-AiStoryBridge.ps1
-```
-
-默认生成 `D:\TFAC-AI剧情外接程序\TFAC-AI剧情外接程序.exe`。使用方式：
-
-```powershell
-& "D:\TFAC-AI剧情外接程序\TFAC-AI剧情外接程序.exe" generate `
-  --package "D:\TFAC-AI-Story-WHK-M2-00-..." `
-  --docx "D:\原稿.docx"
-```
-
-程序会生成 `source.jsonl/result.jsonl`。明确匹配的内容标记为 `include`，制作备注或无需修补的旁白标记为 `skip`，身份和结构不明确的内容标记为 `review`。外接程序不会猜测未登记的角色别名；导入前必须在工具箱预览并处理待确认项。
 
 ## Unreal 同步
 
@@ -282,7 +258,6 @@ Assets/       应用图标、默认缩略图等静态资源
 Docs/         内部维护说明
 Models/       项目、素材库、Story、同步等数据模型
 Services/     文件工作区、CSV、素材、同步、弹窗、音效等服务
-Tools/        独立外接程序；TFAC.AiStoryBridge 不依赖 WinUI 主程序
 ViewModels/   可绑定状态、命令和基础命令类
 Views/        可复用 UI 工厂、卡片、弹窗内容
 Scripts/      打包脚本和验证脚本
