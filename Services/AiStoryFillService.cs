@@ -279,11 +279,16 @@ internal sealed partial class AiStoryFillService
                 : 1,
             StringComparer.OrdinalIgnoreCase);
         var targetSection = sectionsByStableId[document.Rows[anchorIndex].StableId];
-        var insertedRows = importItems.Select(item =>
+        var firstInsertedItemIndex = 0;
+        if (document.Rows.Count == 1 && anchorIndex == 0 && IsDefaultEmptyRow(document.Rows[0]))
+        {
+            SetAppendValues(document.Rows[0], importItems[0]);
+            firstInsertedItemIndex = 1;
+        }
+        var insertedRows = importItems.Skip(firstInsertedItemIndex).Select(item =>
         {
             var row = StoryDocument.CreateEmptyRow();
-            row.Set("TalkChar", item.TalkChar ?? string.Empty);
-            row.Set("Tesxt", item.Tesxt ?? string.Empty);
+            SetAppendValues(row, item);
             sectionsByStableId[row.StableId] = targetSection;
             return row;
         }).ToList();
@@ -324,6 +329,22 @@ internal sealed partial class AiStoryFillService
         }
 
         return new AiStoryFillImportResult(importItems.Count, backupPath, statePath);
+    }
+
+    private static bool IsDefaultEmptyRow(StoryRow row)
+    {
+        return StorySchema.Columns
+            .Where(column => column != "Name")
+            .All(column => string.Equals(
+                row.Get(column),
+                StorySchema.NumericColumns.Contains(column) ? "0" : string.Empty,
+                StringComparison.Ordinal));
+    }
+
+    private static void SetAppendValues(StoryRow row, AiStoryFillPreviewItem item)
+    {
+        row.Set("TalkChar", item.TalkChar ?? string.Empty);
+        row.Set("Tesxt", item.Tesxt ?? string.Empty);
     }
 
     private void ValidateManifest(

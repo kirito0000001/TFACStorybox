@@ -180,6 +180,51 @@ if (Test-Path -LiteralPath $assemblyPath) {
         if ($repeatPreview.DuplicateCount -ne 2 -or $repeatPreview.PendingIncludeCount -ne 0 -or $repeatPreview.CanImport) {
             throw 'Repeated AI story import was not recognized as duplicate.'
         }
+
+        $emptyChapterPath = Join-Path $testRoot 'empty-chapter'
+        [void](New-Item -ItemType Directory -Force -Path $emptyChapterPath)
+        $emptyChapterArgs = [object[]]::new(6)
+        $emptyChapterArgs[0] = [string]'Empty Chapter'
+        $emptyChapterArgs[1] = [string]'TEST-M5-00'
+        $emptyChapterArgs[2] = [string]'MainThread'
+        $emptyChapterArgs[3] = [string]$emptyChapterPath
+        $emptyChapterArgs[4] = [datetime]::Now
+        $emptyChapterArgs[5] = [int]0
+        $emptyChapter = ($chapterType.GetConstructors() | Where-Object { $_.GetParameters().Count -eq 6 } | Select-Object -First 1).Invoke($emptyChapterArgs).PSObject.BaseObject
+        $emptyDocument = $documentType.GetMethod('CreateEmpty').Invoke($null, @())
+        $emptyAnchorId = $emptyDocument.Rows[0].StableId
+        $repositoryType.GetMethod('Save').Invoke($repository, @($emptyChapter, $emptyDocument))
+        $emptyPackagePath = Join-Path $testRoot 'empty-package'
+        $emptyExportArgs = [object[]]::new(6)
+        $emptyExportArgs[0] = $emptyChapter.PSObject.BaseObject
+        $emptyExportArgs[1] = $emptyDocument.PSObject.BaseObject
+        $emptyExportArgs[2] = $characters.PSObject.BaseObject
+        $emptyExportArgs[3] = [string]$emptyPackagePath
+        $emptyExportArgs[4] = [int]2000
+        $emptyExportArgs[5] = $customSpeakers.PSObject.BaseObject
+        [void]$defaultExportMethod.Invoke($service, $emptyExportArgs)
+        @(
+            '{"id":"docx-p2000","order":2000,"raw":"旁白：第一句"}',
+            '{"id":"docx-p2001","order":2001,"raw":"梦凪：第二句"}'
+        ) | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $emptyPackagePath 'source.jsonl')
+        @(
+            '{"id":"docx-p2000","TalkChar":"","Tesxt":"第一句","status":"include","confidence":"high"}',
+            '{"id":"docx-p2001","TalkChar":"梦凪","Tesxt":"第二句","status":"include","confidence":"high"}'
+        ) | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $emptyPackagePath 'result.jsonl')
+        $emptyPreviewArgs = [object[]]::new(3)
+        $emptyPreviewArgs[0] = $emptyChapter.PSObject.BaseObject
+        $emptyPreviewArgs[1] = [string]$emptyPackagePath
+        $emptyPreviewArgs[2] = $knownSpeakers.PSObject.BaseObject
+        $emptyPreview = $serviceType.GetMethod('LoadImportPreview').Invoke($service, $emptyPreviewArgs)
+        if (!$emptyPreview.CanImport) { throw 'Empty chapter append package was not importable.' }
+        [void]$serviceType.GetMethod('ApplyImport').Invoke($service, @($emptyChapter, $emptyPreview))
+        $emptyAfter = $repositoryType.GetMethod('Load').Invoke($repository, @($emptyChapter))
+        if ($emptyAfter.Rows.Count -ne 2 -or
+            $emptyAfter.Rows[0].StableId -ne $emptyAnchorId -or
+            $emptyAfter.Rows[0].Get('Tesxt') -ne '第一句' -or
+            $emptyAfter.Rows[1].Get('Tesxt') -ne '第二句') {
+            throw 'Appending into an empty chapter left the default placeholder row behind.'
+        }
     }
     finally {
         if (Test-Path $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
