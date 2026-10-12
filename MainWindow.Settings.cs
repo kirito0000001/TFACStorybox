@@ -120,9 +120,32 @@ namespace GalExcleTools
 
         private void ApplyThemeSettings()
         {
-            RootGrid.RequestedTheme = Settings.NightModeEnabled
+            var isDark = Settings.NightModeEnabled;
+            RootGrid.RequestedTheme = isDark
                 ? ElementTheme.Dark
                 : ElementTheme.Light;
+            ApplyTitleBarTheme(isDark);
+        }
+
+        // 最小化/最大化/关闭这三个按钮是系统画的，不跟 RootGrid.RequestedTheme 走，
+        // 而是按系统深浅色决定字形颜色。强制浅色时（系统可能正是深色）字形会保持浅色，
+        // 压在浅色标题栏上就看不见了，所以这里跟着主题显式指定。
+        private void ApplyTitleBarTheme(bool isDark)
+        {
+            var titleBar = AppWindow.TitleBar;
+            var foreground = isDark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
+            titleBar.ButtonForegroundColor = foreground;
+            titleBar.ButtonInactiveForegroundColor = isDark
+                ? Windows.UI.Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)
+                : Windows.UI.Color.FromArgb(0x80, 0x00, 0x00, 0x00);
+            titleBar.ButtonHoverForegroundColor = foreground;
+            titleBar.ButtonHoverBackgroundColor = isDark
+                ? Windows.UI.Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)
+                : Windows.UI.Color.FromArgb(0x20, 0x00, 0x00, 0x00);
+            titleBar.ButtonPressedForegroundColor = foreground;
+            titleBar.ButtonPressedBackgroundColor = isDark
+                ? Windows.UI.Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)
+                : Windows.UI.Color.FromArgb(0x40, 0x00, 0x00, 0x00);
         }
 
         private async void ShellNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
