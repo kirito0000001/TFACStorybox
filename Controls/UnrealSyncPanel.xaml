@@ -17,9 +17,15 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:GalExcleTools.Controls">
 
+    <!--
+        注意：这个 ScrollViewer **不能**再带 Visibility="Collapsed"。
+        那个 Collapsed 原本是给"页面切换"用的；搬出来之后，切换由外层
+        UserControl（MainWindow 里的 x:Name="SyncPanel"）承担，
+        内层再留着 Collapsed 就没人打开它了 —— 面板显示出来是一片空白。
+        （2026-10-12 就是这么白了一整页，截图对出来的。）
+    -->
     <ScrollViewer
         x:Name="PageScrollViewer"
-        Visibility="Collapsed"
         VerticalScrollBarVisibility="Auto"
         HorizontalScrollBarVisibility="Disabled">
         <Grid Padding="0,0,12,0" RowSpacing="14">
