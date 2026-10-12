@@ -35,6 +35,20 @@
     <Content Include="Assets\DefaultProjectThumbnail.png" />
     <Content Include="Assets\AppIcon.ico" />
     <Content Include="Assets\AppIcon.png" />
+    <!--
+      Unreal 侧的 Python 脚本（在线执行用的那两个）。必须是 Content 才会随程序复制到
+      BaseDirectory —— 代码按 AppContext.BaseDirectory\Tools\UnrealBridge\ 找它们
+      （见 UnrealPythonTaskExecutionService.RemoteRunnerRelativePath）。
+      排除 __pycache__ / *.pyc：那是本机跑出来的字节码缓存，不该进包。
+    -->
+    <Content Include="Tools\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Remove="Tools\**\__pycache__\**\*" />
+    <Content Remove="Tools\**\*.pyc" />
+    <None Remove="Tools\**\__pycache__\**\*" />
+    <None Remove="Tools\**\*.pyc" />
   </ItemGroup>
 
   <ItemGroup>
