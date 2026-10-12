@@ -11,6 +11,17 @@
 - 完善文本语音导入、试听、筛选、相对路径存储，以及剧情编辑中的语音播放。
 - 基础素材支持从当前句向后连续替换，直到遇到不同素材为止。
 
+**同一批（2026-10-12）Unreal 同步台重建：**
+
+- **落点整体换到新工程结构**：固定在 `Content/AssetMaterial` 下的 ImageS / Sound / Lustration_Image / LustrationPreview_Image / ExcelTexts。不再手选「目标内容夹」，`Narrative` 那条硬校验也一并退休。
+- **背景图、BGM、环境音改成直接写变量列表**（`UI_Story.BGMaps`、MusicActor 的 `BGMaps` / `BGMapsLoopStart` / `SceneMaps`），不再经过 ExcelTexts 的索引表。**特殊音效没有目标变量**，仍走 `ExsIndexMap` —— 它是唯一保留下来的索引表。
+- **新增在线执行**：编辑器开着时走 Python 远程执行，比冷启无头实例快约十倍；连不上才退回离线，并在日志里留痕。**建议保持编辑器开着。**
+- **同步前改为全量本地提交**（取代给工程打 zip）：只提交、不推送；工程不在 git 仓库里时提示，但不拦路。
+- **判成败改为「结果文件是不是这一轮写的」**，不再看退出码 —— commandlet 只要工程别处有编译错误就会返回非 0。
+- **进度条按阶段耗时加权分配**，并修掉三个老坑：取消时进程杀不掉（编辑器成孤儿占着工程锁）、子进程输出没固定 UTF-8（中文日志乱码）、长时间阶段进度条冻住。
+- **同步台多了「同步前检测」一层**：按 检查项 / 期望 / 实际 / 状态 / 问题 列表显示，只读磁盘、不跑 Unreal。
+- 蓝图自建变量（`UI_Story` 那类）改由 GALLibrary 的 C++ 写入器处理：写 `FBPVariableDescription::DefaultValue` 后编译、保存、丢包重载再验 —— 只改 CDO 会被下次编译盖回去。
+
 ### 2.1.0
 
 `2.1.0` 是 2026-05-26 小预览与文本工具功能版本。
@@ -143,51 +154,62 @@ GalExcelProject/
 
 ## Unreal 同步
 
-同步目标必须位于当前 Unreal 项目的 `Content` 目录下，并且最后一级文件夹必须命名为 `Narrative`，例如：
+### 目标落点
+
+目标落点**由 `.uproject` 推导，不需要手选**：固定在工程的 `Content/AssetMaterial` 下。
 
 ```text
-Content/AssetMaterial/Narrative
+Content/AssetMaterial/
+  ImageS/Background_Image/PlotUse/        背景图
+  Sound/BGM/PlotUse/                      BGM
+  Sound/Scene_Effect/                     环境音与特殊音效（共用同一目录）
+  Sound/Voice/                            项目文本语音
+  Lustration_Image/                       立绘图层，以及 DA_LustrationInfor
+  LustrationPreview_Image/                小预览，以及 DA_LustrationPreviewInfor
+  ExcelTexts/                             剧情表、ExsIndexMap、AllRoad
 ```
 
-建议提前准备这些子目录：
+工具箱只**检查**这些目录在不在（在「同步前检测」那一层逐条列出），**不会替你创建** ——
+缺什么请先在 Unreal 内容浏览器里建好。
 
-```text
-Narrative/
-  BackGround/
-  BGM/
-  Scene_Effect/
-  ExcelTexts/
-  Lustration/
-  Voice/
-```
+### 写什么
 
-同步落点：
+- **背景图 / BGM / 环境音直接写变量列表**，不再经过 ExcelTexts 的索引表：
+  - 背景图 → `UI_Story` 的 `BGMaps`
+  - BGM → MusicActor 的 `BGMaps`，以及**等长**的 `BGMapsLoopStart`（默认全 0，防止索引缺失）
+  - 环境音 → MusicActor 的 `SceneMaps`
+- **特殊音效没有目标变量**，所以它仍然写 `ExcelTexts/ExsIndexMap` —— 唯一保留下来的索引表。
+- 剧情 CSV 写入 `ExcelTexts` 下的章节目录；剧情选项分支写入 `ExcelTexts/AllRoad`。
+- 立绘与小预览分别写入 `DA_LustrationInfor` 与 `DA_LustrationPreviewInfor` 的 `Infor` 表。
+- 差异检测比较源文件的 SHA-256；文件名不变但内容重新导出时，也会进入同步计划。
 
-- 背景图：`Narrative/BackGround`
-- BGM：`Narrative/BGM`
-- 环境音和特殊音效：`Narrative/Scene_Effect`
-- 项目文本语音：`Narrative/Voice`
-- 剧情 CSV 和素材索引表：`Narrative/ExcelTexts`
-- 立绘图层、立绘信息和小预览：`Narrative/Lustration`
-- 差异检测会比较工具箱源文件和目标 `.uasset` 的写入时间；文件名不变但内容重新导出时，只要源文件写入时间更新，也会进入同步计划。
-- 同步会清理 `Narrative` 中多余的工具箱素材资产，让背景、音频、剧情表和立绘贴图与当前素材库 / 项目数据对应。
-- 角色数据资产里的 Unreal 侧 `Vfx` 数组和角色滤镜索引不由清理流程删除，它们属于角色数据资产内部配置。
+### 执行方式
 
-Unreal 侧需要提前具备对应结构体 / 数据资产：
+- **编辑器开着**：走 Python 远程执行，在你打开的那个编辑器里跑，比冷启无头实例快约十倍。
+  **建议保持编辑器开着。**
+- **编辑器没开 / 连不上**：退回离线执行，冷启 `UnrealEditor-Cmd.exe`，慢十几到 40 秒；
+  日志里会留一行痕说明本次走了离线。
+- 判成败看**结果文件是不是这一轮写的**，不看退出码。
+- 同步前会做一次**全量本地提交**当回退点（只提交、不推送）；
+  工程不在 git 仓库里时会提示，但不拦路。
+
+### 清理
+
+- 同步会清理目标目录里多余的工具箱素材，让它们与当前素材库 / 项目数据对应。
+- ⚠️ `Sound/Voice` 与 `ExcelTexts` 这两个是**递归清理**：目录下凡不在期望集合里的资产都会被删。
+  别往这两个目录里放工具箱不认识的东西。
+- 角色数据资产里的 `Vfx` 数组与滤镜索引不由清理流程删除，它们属于数据资产内部配置。
+
+### Unreal 侧需要提前具备
 
 - `/Script/GALLibrary.StoryStruct`：剧情表 RowStruct，对应 C++ `FStoryStruct`
-- `/Script/GALLibrary.Texture2DTable`：背景索引表 RowStruct，对应 `FTexture2DTable`
-- `/Script/GALLibrary.WaveTable`：音频索引表 RowStruct，对应 `FWaveTable`
-- `Narrative/Lustration/DA_LustrationInfor.DA_LustrationInfor`：立绘信息数据资产，包含名为 `Infor` 的 Map 属性
-- `Narrative/Lustration/DA_Portraits.DA_Portraits`：小预览数据资产，启用小预览时写入
+- `/Script/GALLibrary.WaveTable`：特殊音效索引表 RowStruct，对应 `FWaveTable`
+- `/Script/GALLibrary.FLustrationStruct`：立绘信息 Map 的值类型，对应 C++ `FLustrationStruct`
+- `Lustration_Image/DA_LustrationInfor` 与 `LustrationPreview_Image/DA_LustrationPreviewInfor`：
+  各含一个名为 `Infor` 的 Map 属性，Key 用角色英文代号，Value 用 `FLustrationStruct`
 
-索引表约定：
-
-- `BGIndexMap.uasset`：背景图索引表，使用 `Texture2D` 列
-- `BGMap.uasset`：BGM 索引表，使用 `Wave` 列
-- `SceneIndexMap.uasset`：环境音索引表，使用 `Wave` 列
-- `ExsIndexMap.uasset`：特殊音效索引表，使用 `Wave` 列
-- 文本语音不生成 DataTable，只导入 wav 文件。
+> `FTexture2DTable` 不再需要 —— 背景图改成写变量之后，那张索引表退休了。
+> 文本语音不生成 DataTable，只导入 wav 文件。
 
 ## 界面与交互样式规范
 

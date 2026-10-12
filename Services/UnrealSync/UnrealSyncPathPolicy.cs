@@ -210,6 +210,26 @@ internal static class UnrealSyncPathPolicy
     }
 
     /// <summary>
+    /// **目标内容夹**的磁盘路径：<c>&lt;工程&gt;/Content/AssetMaterial</c>。
+    ///
+    /// 它就是 <c>UnrealSyncContext.TargetContentFolderPath</c> 该取的值，和
+    /// <see cref="AssetMaterialRoot"/> 是**成对**的：
+    /// <see cref="UnrealSyncService.AssetObjectPathToFilePath"/> 的做法是
+    /// "剥掉 /Game/AssetMaterial、再拼到 TargetContentFolderPath 上"，
+    /// 两者对不上，所有磁盘路径都会整体错位。
+    ///
+    /// 收在这里是因为它原先在两处各写了一遍 Replace 链（窗口的验证与保存各一处），
+    /// 而它必须和 <see cref="AssetMaterialRoot"/> 保持一致 —— 只能有一份。
+    /// </summary>
+    public static string ResolveTargetContentFolderPath(string unrealProjectPath)
+    {
+        var relative = AssetMaterialRoot
+            .Replace(GameRoot + "/", string.Empty, StringComparison.Ordinal)
+            .Replace('/', Path.DirectorySeparatorChar);
+        return Path.Combine(ResolveContentFolderPath(unrealProjectPath), relative);
+    }
+
+    /// <summary>
     /// 把 <c>/Game/...</c> 的对象路径换成磁盘路径。
     /// 不是 /Game 开头的一律拒绝，免得把引擎内容当成工程内容去写。
     /// </summary>

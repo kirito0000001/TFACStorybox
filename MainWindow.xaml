@@ -1035,7 +1035,7 @@
                                         Checked="AssetLibraryPortraitPreviewEnabledCheckBox_Changed"
                                         Unchecked="AssetLibraryPortraitPreviewEnabledCheckBox_Changed" />
                                     <TextBlock x:Name="AssetLibraryDiskUsageText" Style="{StaticResource SubtleTextStyle}" />
-                                    <TextBlock Text="启用后，服装、表情和装饰图层需要在右键菜单里设置对应小预览；同步时会写入 Narrative/Lustration/DA_Portraits。" Style="{StaticResource SubtleTextStyle}" />
+                                    <TextBlock Text="启用后，服装、表情和装饰图层需要在右键菜单里设置对应小预览；同步时会写入 LustrationPreview_Image，并落到 DA_LustrationPreviewInfor 的 Infor 表里。" Style="{StaticResource SubtleTextStyle}" />
                                 </StackPanel>
                             </Expander>
                             <Expander x:Name="BackgroundImagesExpander" Header="背景图">
@@ -1786,14 +1786,9 @@
                                         SelectionChanged="UnrealSyncProjectComboBox_SelectionChanged" />
                                     <TextBox
                                         x:Name="UnrealContentFolderTextBox"
-                                        Header="目标内容文件夹"
+                                        Header="目标落点（由 .uproject 推导，不需要手选）"
                                         IsReadOnly="True"
-                                        PlaceholderText="选择 Content 下的目录，例如 AssetMaterial\\Narrative" />
-                                    <Button
-                                        Grid.Column="1"
-                                        Margin="0,28,0,0"
-                                        Content="关联文件夹"
-                                        Click="ChooseUnrealContentFolderButton_Click" />
+                                        PlaceholderText="选好 .uproject 之后自动确定为 内容目录/AssetMaterial" />
                                 </Grid>
                             </Grid>
                         </Border>
@@ -1859,24 +1854,23 @@
                         <Border Grid.Row="5" Style="{StaticResource PanelBorderStyle}">
                             <StackPanel Padding="18" Spacing="10">
                                 <TextBlock Text="同步规则" Style="{StaticResource SectionTitleStyle}" />
-                                <TextBlock Text="1. 在虚幻项目的 Content 目录下先建好目标根目录，最后一级文件夹名称必须是 Narrative，例如 Content/AssetMaterial/Narrative。工具箱会校验目标是否位于当前 .uproject 的 Content 内，并要求文件夹名等于 Narrative，避免同步到错误资源目录。" Style="{StaticResource SubtleTextStyle}" />
-                                <TextBlock Text="2. Narrative 下建议提前准备 BackGround、BGM、Scene_Effect、ExcelTexts、Lustration 这些子目录。同步时工具会尝试补齐缺失目录，但提前建好能更容易检查资源归位，也能减少虚幻导入脚本首次创建目录时的失败概率。" Style="{StaticResource SubtleTextStyle}" />
-                                <TextBlock Text="3. 虚幻项目需要启用 Python Editor Script Plugin，并保证当前引擎可以通过命令行启动 UnrealEditor.exe。同步会生成导入清单和 Python 脚本，再用 Unreal Editor 的自动导入接口创建或更新 .uasset，素材源文件不会直接改名成 .uasset。" Style="{StaticResource SubtleTextStyle}" />
-                                <TextBlock Text="4. 点击同步前请保存并关闭正在打开的 Unreal Editor。工具箱会尝试关闭同一个 .uproject 的编辑器进程，但主动关闭最稳，可以避免资源被占用、DataTable 未保存或编辑器缓存覆盖本次导入结果。" Style="{StaticResource SubtleTextStyle}" />
-                                <TextBlock Text="5. 资源落点固定：背景图导入 Narrative/BackGround，BGM 导入 Narrative/BGM，环境音和特殊音效导入 Narrative/Scene_Effect，剧情 CSV 与素材索引表写入 Narrative/ExcelTexts，立绘图层与立绘信息表写入 Narrative/Lustration。" Style="{StaticResource SubtleTextStyle}" />
-                                <TextBlock Text="6. 剧情表使用 /Script/GALLibrary.StoryStruct 作为 RowStruct，立绘信息会写入 Lustration/DA_LustrationInfor。虚幻项目里需要提前具备对应的结构体、数据资产类或插件接口；如果这些类型不存在，图片和音频仍可能导入成功，但 DataTable 或立绘信息写入会在日志里报错。" Style="{StaticResource SubtleTextStyle}" />
-                                <TextBlock Text="7. 普通同步只处理有变化的素材、CSV 和立绘信息；完整重新同步会忽略上次缓存，重新检查并提交全部清单。同步完成后请先看下方预检结果和输出日志，再到虚幻里确认资产、DataTable 行数和保存状态。" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="1. 目标落点由 .uproject 推导，不需要手选目录：固定在 Content/AssetMaterial 下。工具箱只检查它和下面那些子目录在不在，**不会替你创建** —— 缺什么请先在 Unreal 内容浏览器里建好。" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="2. AssetMaterial 下需要这些目录：ImageS/Background_Image/PlotUse（背景图）、Sound/BGM/PlotUse（BGM）、Sound/Scene_Effect（环境音与特殊音效）、Sound/Voice（语音）、Lustration_Image（立绘与立绘信息表）、LustrationPreview_Image（小预览）、ExcelTexts（剧情表与特殊音效索引表）。上面那层「同步前检测」会逐条告诉你缺哪几个。" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="3. 虚幻项目需要启用 Python Editor Script Plugin。编辑器开着时工具箱走在线执行（Python 远程执行协议），比冷启一个无头实例快约十倍；连不上才退回离线。" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="4. **建议保持 Unreal Editor 开着**：工具箱会通过远程执行在你打开的那个编辑器里跑，快得多。只有连不上（没开、或没启用远程执行）时才退回离线冷启 UnrealEditor-Cmd，会慢十几到 40 秒。同步前请先保存编辑器里的改动，避免它把同步结果覆盖掉。" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="5. 资源落点：背景图 → AssetMaterial/ImageS/Background_Image/PlotUse；BGM → Sound/BGM/PlotUse；环境音与特殊音效 → Sound/Scene_Effect；语音 → Sound/Voice；立绘 → Lustration_Image/角色/图层；小预览 → LustrationPreview_Image。素材本身由 Unreal 侧导入，工具箱只写清单。" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="6. 背景图、BGM、环境音改成**直接写变量列表**：背景图 → UI_Story 的 BGMaps；BGM → MusicActor 的 BGMaps 与 BGMapsLoopStart；环境音 → MusicActor 的 SceneMaps。**特殊音效没有目标变量**，所以它仍然写 ExcelTexts/ExsIndexMap 这一张表。剧情表仍用 /Script/GALLibrary.StoryStruct，立绘信息写入 Lustration_Image/DA_LustrationInfor。" Style="{StaticResource SubtleTextStyle}" />
+                                <TextBlock Text="7. 普通同步只处理有变化的素材、CSV 与立绘信息；「全部重新同步」会忽略上次缓存、重新检查并提交全部清单。同步前会做一次**全量本地提交**当回退点（工程不在 git 仓库里时会提示，但不拦路）。同步完成后请先看下方预检结果与输出日志，再到虚幻里确认资产。" Style="{StaticResource SubtleTextStyle}" />
 
                                 <Expander
                                     Margin="0,6,0,0"
                                     Header="虚幻侧需要提前准备">
                                     <StackPanel Spacing="8">
-                                        <TextBlock Text="结构体：需要在 GALLibrary 模块或等价插件里准备 FStoryStruct、FTexture2DTable、FWaveTable、FLustrationStruct。同步脚本会按 /Script/GALLibrary.StoryStruct、/Script/GALLibrary.Texture2DTable、/Script/GALLibrary.WaveTable 查找 RowStruct；C++ 结构体带 F 前缀，虚幻反射路径里通常省略 F。" Style="{StaticResource SubtleTextStyle}" />
-                                        <TextBlock Text="StoryStruct：剧情 CSV 的 DataTable 行结构。CSV 表头需要和 StoryStruct 字段匹配；工具箱会把章节剧情表写入 Narrative/ExcelTexts 下的章节目录，旧路径里的同名剧情表会被清理。" Style="{StaticResource SubtleTextStyle}" />
-                                        <TextBlock Text="Texture2DTable：背景索引表 BGIndexMap 的 RowStruct，至少要有一个能接收 Texture2D 资源引用的字段，当前同步 CSV 使用列名 Texture2D。" Style="{StaticResource SubtleTextStyle}" />
-                                        <TextBlock Text="WaveTable：音频索引表 BGMap、SceneIndexMap、ExsIndexMap 的 RowStruct，至少要有一个能接收 SoundWave 资源引用的字段，当前同步 CSV 使用列名 Wave。" Style="{StaticResource SubtleTextStyle}" />
-                                        <TextBlock Text="LustrationStruct：立绘信息 Map 的值类型，当前写入字段名为 Name、Color、Cloth、Face、Adorn；其中 Color 是 LinearColor，Cloth/Face/Adorn 是贴图数组。VFX 仍建议在 Unreal 侧手动维护，工具箱不会覆盖已有 VFX 设置。" Style="{StaticResource SubtleTextStyle}" />
-                                        <TextBlock Text="数据资产：Narrative/Lustration 里需要有 DA_LustrationInfor，完整对象路径为 Narrative/Lustration/DA_LustrationInfor.DA_LustrationInfor。这个数据资产需要有名为 Infor 的 Map 属性，Key 使用角色英文代号，Value 使用 LustrationStruct。" Style="{StaticResource SubtleTextStyle}" />
+                                        <TextBlock Text="结构体：需要在 GALLibrary 模块里准备 FStoryStruct、FWaveTable、FLustrationStruct。（FTexture2DTable 已不再需要 —— 背景图改成写变量，那张索引表退休了。）" Style="{StaticResource SubtleTextStyle}" />
+                                        <TextBlock Text="StoryStruct：剧情 CSV 的 DataTable 行结构。CSV 表头需要和它字段匹配；工具箱会把章节剧情表写入 AssetMaterial/ExcelTexts 下的章节目录，旧路径里的同名剧情表会被清理。" Style="{StaticResource SubtleTextStyle}" />
+                                        <TextBlock Text="WaveTable：特殊音效索引表 ExsIndexMap 的 RowStruct，需要一个能接收 SoundWave 资源引用的字段（当前列名 Wave）。BGM 与环境音改成写变量之后，它们不再用这张结构体。" Style="{StaticResource SubtleTextStyle}" />
+                                        <TextBlock Text="LustrationStruct：立绘信息 Map 的值类型，写入字段名为 Name、Color、Cloth、Face、Adorn；其中 Color 是 LinearColor。Vfx 由人工在数据资产里配，工具箱不覆盖。" Style="{StaticResource SubtleTextStyle}" />
+                                        <TextBlock Text="数据资产：Lustration_Image 下需要有 DA_LustrationInfor（立绘），LustrationPreview_Image 下需要有 DA_LustrationPreviewInfor（小预览）。两者结构相同：都有一个名为 Infor 的 Map 属性，Key 用角色英文代号，Value 用 LustrationStruct。" Style="{StaticResource SubtleTextStyle}" />
                                     </StackPanel>
                                 </Expander>
 
@@ -2072,11 +2066,8 @@ public:
                                 <Expander
                                     Header="ExcelTexts 里会生成或更新的表">
                                     <StackPanel Spacing="8">
-                                        <TextBlock Text="AllRoad.uasset：剧情总路线或章节路线表，需要放在 Narrative/ExcelTexts。当前工具箱主要负责章节剧情 CSV 和索引表同步，如果你的 Unreal 逻辑依赖 AllRoad，请先在项目内按现有规则准备好这个 DataTable。" Style="{StaticResource SubtleTextStyle}" />
-                                        <TextBlock Text="BGIndexMap.uasset：背景图索引表，路径 Narrative/ExcelTexts/BGIndexMap.BGIndexMap，RowStruct 是 /Script/GALLibrary.Texture2DTable，资源引用来自 Narrative/BackGround。" Style="{StaticResource SubtleTextStyle}" />
-                                        <TextBlock Text="BGMap.uasset：BGM 索引表，路径 Narrative/ExcelTexts/BGMap.BGMap，RowStruct 是 /Script/GALLibrary.WaveTable，资源引用来自 Narrative/BGM。" Style="{StaticResource SubtleTextStyle}" />
-                                        <TextBlock Text="SceneIndexMap.uasset：环境音索引表，路径 Narrative/ExcelTexts/SceneIndexMap.SceneIndexMap，RowStruct 是 /Script/GALLibrary.WaveTable，资源引用来自 Narrative/Scene_Effect。" Style="{StaticResource SubtleTextStyle}" />
-                                        <TextBlock Text="ExsIndexMap.uasset：特殊音效索引表，路径 Narrative/ExcelTexts/ExsIndexMap.ExsIndexMap，RowStruct 是 /Script/GALLibrary.WaveTable，资源引用同样来自 Narrative/Scene_Effect。" Style="{StaticResource SubtleTextStyle}" />
+                                        <TextBlock Text="AllRoad.uasset：剧情总路线或章节路线表，需要放在 AssetMaterial/ExcelTexts。工具箱负责同步它的选项分支数据，表本身请先在项目内准备好。" Style="{StaticResource SubtleTextStyle}" />
+                                        <TextBlock Text="ExsIndexMap.uasset：特殊音效索引表，路径 AssetMaterial/ExcelTexts/ExsIndexMap.ExsIndexMap，RowStruct 是 /Script/GALLibrary.WaveTable，资源引用来自 AssetMaterial/Sound/Scene_Effect。它是唯一保留下来的索引表 —— 因为特殊音效没有对应的目标变量。" Style="{StaticResource SubtleTextStyle}" />
                                     </StackPanel>
                                 </Expander>
                             </StackPanel>

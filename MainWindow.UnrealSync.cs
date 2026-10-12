@@ -212,25 +212,10 @@ namespace GalExcleTools
             RefreshUnrealSyncStatus();
         }
 
-        private async void ChooseUnrealContentFolderButton_Click(object sender, RoutedEventArgs e)
-        {
-            var picker = new FolderPicker
-            {
-                SuggestedStartLocation = PickerLocationId.ComputerFolder
-            };
-            picker.FileTypeFilter.Add("*");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-
-            var selectedFolder = await picker.PickSingleFolderAsync();
-            if (selectedFolder is null)
-            {
-                return;
-            }
-
-            UnrealContentFolderTextBox.Text = selectedFolder.Path;
-            SaveUnrealSyncSettingsFromUi();
-            RefreshUnrealSyncStatus();
-        }
+        // ChooseUnrealContentFolderButton_Click 已删除（2026-10-12）：
+        // 目标落点不再由用户手选 —— 它固定是 <工程>/Content/AssetMaterial，由 .uproject 推导。
+        // 老方案是"手选一个夹 + 硬性要求它叫 Narrative"，新落点跨了 /Game 下三个顶层目录，
+        // 选一个"目标夹"已经没有意义；界面那个框改成只读，显示推导结果。
 
         private void UnrealSyncProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -530,17 +515,34 @@ namespace GalExcleTools
 
             var enginePath = UnrealEnginePathTextBox.Text.Trim();
             var unrealProjectPath = UnrealProjectPathTextBox.Text.Trim();
-            var contentFolderPath = UnrealContentFolderTextBox.Text.Trim();
             var selectedProject = GetSelectedUnrealSyncProject();
             _appSettings.UnrealToolProjectFolderName = selectedProject?.FolderName ?? (UnrealSyncProjectComboBox.SelectedItem as ComboBoxItem)?.Tag as string;
             _appSettings.UnrealEnginePath = enginePath;
             _appSettings.UnrealProjectPath = unrealProjectPath;
-            _appSettings.UnrealContentFolderPath = contentFolderPath;
+            // 内容夹不再持久化：它由 .uproject 推导（UnrealSyncPathPolicy.ResolveContentFolderPath），
+            // 存下来只会在换工程时变成一个过期的值、并让人以为它还能手选。
+            _appSettings.UnrealContentFolderPath = null;
             SaveAppSettings();
 
             if (selectedProject is not null)
             {
-                _projectWorkspaceService.SaveProjectUnrealBinding(selectedProject, enginePath, unrealProjectPath, contentFolderPath);
+                // 每项目那份绑定里的内容夹也写成"推导值" —— 它不再由用户选。
+                // 留空会让 UnrealProjectBinding.IsComplete 判成"绑定不完整"，
+                // 于是回落到全局设置，而那条路已经不再是权威来源。
+                var derivedContentFolder = string.Empty;
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(unrealProjectPath))
+                    {
+                        derivedContentFolder = UnrealSyncPathPolicy.ResolveTargetContentFolderPath(unrealProjectPath);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    AppendLog(LogKind.Warning, $"推导目标落点失败，本次不写入项目绑定：{exception.Message}");
+                }
+
+                _projectWorkspaceService.SaveProjectUnrealBinding(selectedProject, enginePath, unrealProjectPath, derivedContentFolder);
                 LoadUnrealSyncProjectOptions();
             }
         }
@@ -610,6 +612,14 @@ namespace GalExcleTools
 
             UnrealSyncSummaryText.Text = validation.Summary;
             RunUnrealSyncButton.IsEnabled = validation.CanSync;
+
+            // 目标落点不再手选：它由 .uproject 推导。这里把推导结果显示出来 ——
+            // 那个框留着是为了让人**看得见会同步到哪**，而不是让人填。
+            var derivedContentFolder = validation.Context?.TargetContentFolderPath;
+            if (!string.IsNullOrWhiteSpace(derivedContentFolder))
+            {
+                UnrealContentFolderTextBox.Text = derivedContentFolder;
+            }
         }
 
         private void SetUnrealSyncStatus(InfoBarSeverity severity, string title, string message)

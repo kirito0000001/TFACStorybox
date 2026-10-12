@@ -114,10 +114,9 @@ namespace GalExcleTools
                 }
                 else
                 {
-                    var assetMaterialRelative = UnrealSyncPathPolicy.AssetMaterialRoot
-                        .Replace(UnrealSyncPathPolicy.GameRoot + "/", string.Empty, StringComparison.Ordinal)
-                        .Replace('/', Path.DirectorySeparatorChar);
-                    contentFolderPath = Path.Combine(contentRootPath, assetMaterialRelative);
+                    // 目标内容夹 = <工程>/Content/AssetMaterial，推导收口在 policy 里 ——
+                    // 它必须和 AssetMaterialRoot 成对，两处各写一遍迟早走歪。
+                    contentFolderPath = UnrealSyncPathPolicy.ResolveTargetContentFolderPath(unrealProjectPath);
                     targetAssetRoot = UnrealSyncPathPolicy.AssetMaterialRoot;
                     planItems.Add($"目标内容路径：{targetAssetRoot}");
 
