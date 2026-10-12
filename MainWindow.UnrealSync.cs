@@ -549,6 +549,38 @@ namespace GalExcleTools
         {
             var validation = ValidateUnrealSync(useUiValues: true);
             ApplyUnrealSyncValidation(validation);
+            // 顺手把「同步前检测」也刷一遍。它只读磁盘、不跑 Unreal，所以很便宜；
+            // 而它的触发点恰好和状态刷新一模一样（进页面、换项目、换引擎、换文件夹）。
+            RunUnrealSyncPreflightCheck();
+        }
+
+        /// <summary>
+        /// 跑一遍「同步前检测」并铺到检测层上（三层里的第二层）。
+        ///
+        /// 只读磁盘，所以随点随跑。检查项与判定口径都在
+        /// <see cref="UnrealSyncPreflightCheck"/> 里 —— 这个方法只负责
+        /// "从界面上把路径取出来、把结果交给 VM"。
+        /// </summary>
+        private void RunUnrealSyncPreflightCheck()
+        {
+            var enginePath = UnrealEnginePathTextBox.Text.Trim();
+            var unrealProjectPath = UnrealProjectPathTextBox.Text.Trim();
+
+            // 素材库是从项目推导的（同步台不单独选它），拿不到就算了 ——
+            // 检测会把这一项跳过，而不是报一条假的"目录不存在"。
+            var assetLibraryPath = ValidateUnrealSync(useUiValues: true).Context?.AssetLibrary.Path
+                ?? string.Empty;
+
+            try
+            {
+                var result = UnrealSyncPreflightCheck.Run(enginePath, unrealProjectPath, assetLibraryPath);
+                _applicationViewModel.UnrealSync.ApplyCheckResult(result);
+            }
+            catch (Exception exception)
+            {
+                _applicationViewModel.UnrealSync.ClearCheckResult($"检测失败：{exception.Message}");
+                AppendLog(LogKind.Error, "同步前检测失败。", exception);
+            }
         }
 
         private void RefreshWorkbenchUnrealSyncTip()

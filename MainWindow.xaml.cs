@@ -454,6 +454,8 @@ namespace GalExcleTools
             _functionDialogService = new FunctionDialogService(_dialogService, _uiSoundService);
             _applicationViewModel.Settings.AuxiliaryDisplayChanged += (_, _) => UpdateAuxiliaryDisplayVisibility();
             _applicationViewModel.Settings.ThemeSettingsChanged += (_, _) => ApplyThemeSettings();
+            // 检测层自己不做检测（它要读界面上的路径、要写日志），所以发事件让窗口接过去。
+            SyncCheckPanel.CheckRequested += (_, _) => RunUnrealSyncPreflightCheck();
             _applicationViewModel.Settings.LogSettingsChanged += (_, _) =>
             {
                 UpdateLogOptionEnabledState();

@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:controls="using:GalExcleTools.Controls"
     Title="TFAC剧情箱-轮椅版"
     mc:Ignorable="d">
 
@@ -1710,6 +1711,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <StackPanel Spacing="6">
@@ -1796,7 +1798,8 @@
                             </Grid>
                         </Border>
 
-                        <Border Grid.Row="3" Style="{StaticResource PanelBorderStyle}">
+                        <controls:UnrealSyncCheckPanel x:Name="SyncCheckPanel" Grid.Row="3" />
+                        <Border Grid.Row="4" Style="{StaticResource PanelBorderStyle}">
                             <Grid Padding="18" RowSpacing="12">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
@@ -1853,7 +1856,7 @@
                             </Grid>
                         </Border>
 
-                        <Border Grid.Row="4" Style="{StaticResource PanelBorderStyle}">
+                        <Border Grid.Row="5" Style="{StaticResource PanelBorderStyle}">
                             <StackPanel Padding="18" Spacing="10">
                                 <TextBlock Text="同步规则" Style="{StaticResource SectionTitleStyle}" />
                                 <TextBlock Text="1. 在虚幻项目的 Content 目录下先建好目标根目录，最后一级文件夹名称必须是 Narrative，例如 Content/AssetMaterial/Narrative。工具箱会校验目标是否位于当前 .uproject 的 Content 内，并要求文件夹名等于 Narrative，避免同步到错误资源目录。" Style="{StaticResource SubtleTextStyle}" />

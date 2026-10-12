@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    同步台的「合规检测」层（三层里的第二层）。
+
+    形态照参考项目同步的第一步：一张 检查项 / 期望 / 实际 / 状态 / 问题 的表，
+    加一个「只看没过的」和一个「开始检测」。
+
+    这里只做显示与绑定：检测结果在 UnrealSyncViewModel 里，
+    检测本身在 Services/UnrealSync/UnrealSyncPreflightCheck（纯磁盘、不跑 Unreal）。
+    样式来自 App.xaml 的应用级字典 —— 所以这个控件放在哪儿都能解析到。
+-->
+<UserControl
+    x:Class="GalExcleTools.Controls.UnrealSyncCheckPanel"
+    x:Name="UnrealSyncCheckPanelRoot"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Expander
+        HorizontalAlignment="Stretch"
+        HorizontalContentAlignment="Stretch"
+        IsExpanded="{Binding UnrealSync.IsCheckPanelExpanded, Mode=TwoWay}">
+        <Expander.Header>
+            <TextBlock Text="{Binding UnrealSync.CheckHeaderText}" Style="{StaticResource SectionTitleStyle}" />
+        </Expander.Header>
+
+        <StackPanel Padding="18,14,18,18" Spacing="12">
+            <!-- 汇总 + 过滤 + 触发 -->
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    VerticalAlignment="Center"
+                    Style="{StaticResource SubtleTextStyle}"
+                    Text="{Binding UnrealSync.CheckSummaryText}" />
+                <ToggleSwitch
+                    x:Name="HidePassedToggle"
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    OffContent="只看没过的"
+                    OnContent="只看没过的"
+                    IsOn="{Binding UnrealSync.HidePassedChecks, Mode=TwoWay}" />
+                <Button
+                    x:Name="RunCheckButton"
+                    Grid.Column="2"
+                    VerticalAlignment="Center"
+                    Content="开始检测"
+                    Click="RunCheckButton_Click"
+                    IsEnabled="{Binding UnrealSync.CheckButtonEnabled}" />
+            </Grid>
+
+            <!-- 表头 -->
+            <Grid ColumnSpacing="12" Visibility="{Binding UnrealSync.CheckListVisibility}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="180" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="86" />
+                    <ColumnDefinition Width="3*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="检查项" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+                <TextBlock Grid.Column="1" Text="期望" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+                <TextBlock Grid.Column="2" Text="实际" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+                <TextBlock Grid.Column="3" Text="状态" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+                <TextBlock Grid.Column="4" Text="问题" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+            </Grid>
+
+            <!-- 条目：一行一项，列宽和表头对齐（同一个星号比例） -->
+            <ItemsControl ItemsSource="{Binding UnrealSync.VisibleCheckRows}" Visibility="{Binding UnrealSync.CheckListVisibility}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border
+                            Padding="0,6"
+                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                            BorderThickness="0,0,0,1">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="86" />
+                                    <ColumnDefinition Width="3*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    Text="{Binding DisplayName}"
+                                    TextWrapping="Wrap" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Style="{StaticResource SubtleTextStyle}"
+                                    Text="{Binding ExpectedPath}" />
+                                <TextBlock
+                                    Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Style="{StaticResource SubtleTextStyle}"
+                                    Text="{Binding ActualPath}" />
+                                <StackPanel
+                                    Grid.Column="3"
+                                    Orientation="Horizontal"
+                                    Spacing="6"
+                                    VerticalAlignment="Center">
+                                    <FontIcon
+                                        FontSize="14"
+                                        Foreground="{Binding StatusBrush}"
+                                        Glyph="{Binding StatusGlyph}" />
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        FontSize="12"
+                                        Foreground="{Binding StatusBrush}"
+                                        Text="{Binding StatusText}" />
+                                </StackPanel>
+                                <TextBlock
+                                    Grid.Column="4"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Style="{StaticResource SubtleTextStyle}"
+                                    Text="{Binding ProblemText}" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- 空态：全合规、或"只看没过的"把合规项都滤掉了 -->
+            <TextBlock
+                Style="{StaticResource SubtleTextStyle}"
+                Text="没有需要处理的项。"
+                Visibility="{Binding UnrealSync.CheckEmptyVisibility}" />
+        </StackPanel>
+    </Expander>
+</UserControl>
