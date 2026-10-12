@@ -1801,53 +1801,64 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
+
+                                <!-- 标题与次级操作 -->
                                 <Grid ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="同步预检" Style="{StaticResource SectionTitleStyle}" />
-                                    <Button Grid.Column="1" Content="重新检测" Click="CheckUnrealSyncButton_Click" />
-                                    <Button Grid.Column="2" Content="全部重新同步" Click="RunFullUnrealSyncButton_Click" />
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Text="同步" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Text="先看下面这份变更清单，确认无误再点最下面的按钮。" Style="{StaticResource SubtleTextStyle}" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" VerticalAlignment="Center" Content="重新检测" Click="CheckUnrealSyncButton_Click" />
+                                    <Button Grid.Column="2" VerticalAlignment="Center" Content="全部重新同步" Click="RunFullUnrealSyncButton_Click" />
+                                </Grid>
+
+                                <InfoBar
+                                    x:Name="UnrealSyncStatusInfoBar"
+                                    Grid.Row="1"
+                                    IsOpen="True"
+                                    IsClosable="False"
+                                    Severity="Informational"
+                                    Title="等待关联"
+                                    Message="请选择引擎、虚幻项目和工作台项目。" />
+
+                                <!--
+                                    变更清单。
+                                    这里是"确认同步之前要看的全部内容"，所以：
+                                    ① 排在按钮**上面** —— 先看清要改什么，再决定点不点；
+                                    ② 限高 + 自己滚 —— 条目多的时候不会把按钮顶到看不见的地方。
+                                    原来那个 x:Name="UnrealSyncProgressPanel" 的进度条已删：
+                                    它恒为 Collapsed，真正的进度走全局浮层（SetUnrealSyncProgress 里）。
+                                -->
+                                <Grid Grid.Row="2" RowSpacing="8">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock x:Name="UnrealSyncSummaryText" Style="{StaticResource SubtleTextStyle}" />
+                                    <ScrollViewer
+                                        Grid.Row="1"
+                                        MaxHeight="260"
+                                        HorizontalScrollBarVisibility="Disabled"
+                                        VerticalScrollBarVisibility="Auto">
+                                        <ItemsControl x:Name="UnrealSyncPlanItemsControl" />
+                                    </ScrollViewer>
                                 </Grid>
 
                                 <Button
                                     x:Name="RunUnrealSyncButton"
-                                    Grid.Row="1"
+                                    Grid.Row="3"
                                     Height="56"
                                     HorizontalAlignment="Stretch"
                                     FontSize="18"
                                     FontWeight="SemiBold"
                                     Content="确认同步到虚幻"
                                     Click="RunUnrealSyncButton_Click" />
-
-                                <InfoBar
-                                    x:Name="UnrealSyncStatusInfoBar"
-                                    Grid.Row="2"
-                                    IsOpen="True"
-                                    IsClosable="False"
-                                    Severity="Informational"
-                                    Title="等待关联"
-                                    Message="请选择引擎、虚幻项目、工作台项目和目标内容文件夹。" />
-
-                                <StackPanel
-                                    x:Name="UnrealSyncProgressPanel"
-                                    Grid.Row="3"
-                                    Spacing="6"
-                                    Visibility="Collapsed">
-                                    <ProgressBar
-                                        x:Name="UnrealSyncProgressBar"
-                                        IsIndeterminate="True" />
-                                    <TextBlock x:Name="UnrealSyncProgressText" Style="{StaticResource SubtleTextStyle}" />
-                                </StackPanel>
-
-                                <StackPanel Grid.Row="4" Spacing="8">
-                                    <TextBlock x:Name="UnrealSyncSummaryText" Style="{StaticResource SubtleTextStyle}" />
-                                    <ItemsControl x:Name="UnrealSyncPlanItemsControl" />
-                                </StackPanel>
                             </Grid>
                         </Border>
 

@@ -632,10 +632,9 @@ namespace GalExcleTools
 
         private void SetUnrealSyncProgress(bool isVisible, string message, bool isIndeterminate = true, double value = 0)
         {
-            UnrealSyncProgressPanel.Visibility = Visibility.Collapsed;
-            UnrealSyncProgressBar.IsIndeterminate = false;
-            UnrealSyncProgressBar.Value = 0;
-            UnrealSyncProgressText.Text = string.Empty;
+            // 这里原来还有三行重置页面内进度面板（UnrealSyncProgressPanel / Bar / Text）的代码。
+            // 那三个元素**恒为 Collapsed**、从来没显示过 —— 真正的进度走下面的全局浮层。
+            // 一并删掉：死控件 + 死代码只会让人以为"页面上也有个进度条"。
             if (isVisible)
             {
                 if (!_isGlobalProgressVisible)
