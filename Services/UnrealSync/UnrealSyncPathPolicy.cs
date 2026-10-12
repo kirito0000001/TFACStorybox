@@ -81,16 +81,21 @@ internal static class UnrealSyncPathPolicy
     /// <summary>
     /// 小预览的数据资产。
     ///
-    /// ⚠️ **待确认**：这个资产在 WHK 与 CrossingVoid **两边都不存在**（和那 4 张索引表一样，
-    /// 是丢工程时一起没的），而 <c>FLustrationStruct</c> 里也没有预览字段
-    /// （只有 Name / Color / Cloth / Face / Adorn / Vfx）。
-    /// 所以小预览到底写哪儿还没定：补一个 DA_Portraits，还是并进 DA_LustrationInfor 的某个字段。
-    /// 这里先按老结构保留同一个名字、只把路径挪到新布局下；**开启小预览前需要你确认**。
+    /// 与立绘信息资产**同构**：同一个父类（<c>/Game/BaseC/ExCordLibrary/PDA_LustrationData</c>）、
+    /// 同一个 <c>Infor</c> Map，只是住在 <c>LustrationPreview_Image</c> 下。
+    /// （2026-10-12 新建并核实过。）
     /// </summary>
-    public const string PortraitsInfoAsset = LustrationRoot + "/DA_Portraits.DA_Portraits";
+    public const string PortraitsInfoAsset =
+        LustrationPreviewRoot + "/DA_LustrationPreviewInfor.DA_LustrationPreviewInfor";
 
     /// <summary>剧情选项分支表。</summary>
-    public const string StoryBranchTableAsset = AssetMaterialRoot + "/AllRoad.AllRoad";
+    /// <remarks>
+    /// 放在 <c>ExcelTexts</c> 下（2026-10-12 定）。
+    /// WHK 里的实际位置就是 <c>Content/AssetMaterial/ExcelTexts/AllRoad.uasset</c> ——
+    /// 这个常量原先指向 <c>AssetMaterial/AllRoad</c>，与磁盘对不上；
+    /// 定的是**改常量**而不是挪资产。
+    /// </remarks>
+    public const string StoryBranchTableAsset = ExcelTextsRoot + "/AllRoad.AllRoad";
 
     /// <summary>
     /// 特殊音效索引表 —— 特殊音效**没有目标变量**，所以只能靠这张表。

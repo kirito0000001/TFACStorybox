@@ -138,6 +138,14 @@ internal static class UnrealSyncPreflightCheck
         AddAssetCheck(items, contentFolderPath, UnrealSyncPathPolicy.StoryWidgetAsset, "剧情 UI 蓝图（背景图列表的落点）");
         AddAssetCheck(items, contentFolderPath, UnrealSyncPathPolicy.MusicPlayerAsset, "MusicActor 蓝图（BGM/环境音/语音的落点）");
         AddAssetCheck(items, contentFolderPath, UnrealSyncPathPolicy.LustrationInfoAsset, "立绘信息数据资产");
+        // 小预览是**可选功能**：IsPortraitPreviewEnabled 关着时整段跳过，
+        // 所以它缺了只提醒、不拦路。
+        AddAssetCheck(
+            items,
+            contentFolderPath,
+            UnrealSyncPathPolicy.PortraitsInfoAsset,
+            "小预览数据资产（仅开启小预览时用）",
+            UnrealSyncCheckSeverity.Warning);
 
         // ── 5. 素材库 ────────────────────────────────────────────────
         if (!string.IsNullOrWhiteSpace(assetLibraryPath))
@@ -165,7 +173,8 @@ internal static class UnrealSyncPreflightCheck
         List<UnrealSyncCheckItem> items,
         string contentFolderPath,
         string assetObjectPath,
-        string displayName)
+        string displayName,
+        UnrealSyncCheckSeverity severity = UnrealSyncCheckSeverity.Error)
     {
         var diskPath = ResolveAssetDiskPath(contentFolderPath, assetObjectPath);
         var exists = File.Exists(diskPath);
@@ -174,8 +183,12 @@ internal static class UnrealSyncPreflightCheck
             assetObjectPath,
             exists ? diskPath : string.Empty,
             exists,
-            UnrealSyncCheckSeverity.Error,
-            exists ? string.Empty : "资产不存在。目录在但资产不在，变量会写到一个不存在的资产上。"));
+            severity,
+            exists
+                ? string.Empty
+                : severity == UnrealSyncCheckSeverity.Warning
+                    ? "资产不存在；用到这个功能之前需要先建好。"
+                    : "资产不存在。目录在但资产不在，变量会写到一个不存在的资产上。"));
     }
 
     /// <summary>对象路径 → 磁盘 <c>.uasset</c> 路径。资产名那段（<c>.C</c>）是包内名字，不进路径。</summary>
