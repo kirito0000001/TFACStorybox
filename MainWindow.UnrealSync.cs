@@ -244,11 +244,23 @@ namespace GalExcleTools
             {
                 checkButton.IsEnabled = false;
             }
-            SetUnrealSyncProgress(true, "正在检测虚幻同步差异... 5%", false, 5);
+            // 「重新检测」这条路不跑 Unreal，但它的头两步和完整同步是一样的：
+            // 先导出剧情 CSV，再做全量扫描比较。所以也走计划区间，别再硬编码百分比。
+            var detectionPlan = UnrealSyncProgressPlan.ForDetection();
+            SetUnrealSyncProgress(
+                true,
+                detectionPlan.Caption(UnrealSyncProgressPlan.StoryCsvExport, "正在从 StoryDocument 生成剧情 CSV..."),
+                false,
+                detectionPlan[UnrealSyncProgressPlan.StoryCsvExport].At(5));
             UnrealSyncSummaryText.Text = "正在比较工具箱源文件与虚幻项目内的 .uasset 时间戳。";
             try
             {
                 await PrepareStoryCsvForUnrealSyncAsync(validation.Context.Project);
+                SetUnrealSyncProgress(
+                    true,
+                    detectionPlan.Caption(UnrealSyncProgressPlan.Detect, "正在检测虚幻同步差异..."),
+                    false,
+                    detectionPlan[UnrealSyncProgressPlan.Detect].At(10));
                 var changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context));
                 ApplyUnrealSyncChangePlan(changePlan);
                 AppendUnrealSyncDiffDetails(changePlan);
@@ -303,12 +315,16 @@ namespace GalExcleTools
             // 而差异检测在询问之前。它权重只有 3%，选了"继续同步"就跳过那一段，
             // 不值得为它把计划拆成两份。
             var progressPlan = UnrealSyncProgressPlan.ForSync(includesCloseEditors: true);
+            var csvExportBand = progressPlan[UnrealSyncProgressPlan.StoryCsvExport];
             var detectBand = progressPlan[UnrealSyncProgressPlan.Detect];
+
+            // 这里的顺序是"先导出剧情 CSV、再做差异检测"，所以进度也从 CSV 那一段开始报 ——
+            // 原来这一段被硬编码成 4%，和计划里其它阶段的百分比互相打架。
             SetUnrealSyncProgress(
                 true,
-                progressPlan.Caption(UnrealSyncProgressPlan.Detect, "正在检测虚幻同步差异..."),
+                progressPlan.Caption(UnrealSyncProgressPlan.StoryCsvExport, "正在从 StoryDocument 生成剧情 CSV..."),
                 false,
-                detectBand.At(5));
+                csvExportBand.At(5));
             UnrealSyncSummaryText.Text = forceFullSync
                 ? "正在准备全量重新同步，将忽略本地同步状态。"
                 : "正在计算工具箱源文件的 SHA-256，并与上次成功同步状态比较；只有内容真正变化时才会进入同步计划。";
@@ -316,6 +332,11 @@ namespace GalExcleTools
             try
             {
                 await PrepareStoryCsvForUnrealSyncAsync(validation.Context.Project);
+                SetUnrealSyncProgress(
+                    true,
+                    progressPlan.Caption(UnrealSyncProgressPlan.Detect, "正在检测虚幻同步差异..."),
+                    false,
+                    detectBand.At(5));
                 changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context, forceFullSync));
             }
             catch (Exception ex)

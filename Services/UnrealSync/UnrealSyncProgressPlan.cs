@@ -34,6 +34,12 @@ internal readonly record struct UnrealSyncProgressBand(double Start, double End)
 /// </summary>
 internal sealed class UnrealSyncProgressPlan
 {
+    /// <summary>
+    /// 生成剧情 CSV：把每个章节的 StoryDocument 导出成 CSV。
+    /// 它在差异检测**之前**跑，而导出是逐章写盘 + 读回校验，章节多时并不便宜。
+    /// </summary>
+    public const string StoryCsvExport = "story-csv-export";
+
     /// <summary>差异检测：读全部素材 + 逐文件算哈希。</summary>
     public const string Detect = "detect";
 
@@ -90,20 +96,23 @@ internal sealed class UnrealSyncProgressPlan
     /// <summary>
     /// 一次完整同步的阶段与权重（估算，跑过几次后按实测调）。
     ///
-    /// 差异检测 ≈10s（要读完素材并逐个算哈希）、关闭编辑器 ≈3s、
-    /// 同步前本地提交 ≈25s（首次在 LFS 工程上会更久）、写清单与脚本 ≈2s、
-    /// Unreal 执行 ≈60s（离线冷启；在线通常只要几秒到十几秒）。
+    /// 生成剧情 CSV ≈15s（逐章导出 + 读回校验）、差异检测 ≈10s（读完素材并逐个算哈希）、
+    /// 关闭编辑器 ≈3s、同步前本地提交 ≈25s（首次在 LFS 工程上会更久）、
+    /// 写清单与脚本 ≈2s、Unreal 执行 ≈60s（离线冷启；在线通常只要几秒到十几秒）。
     /// </summary>
     public static UnrealSyncProgressPlan ForSync(bool includesCloseEditors) =>
         new(BuildPhases(includesCloseEditors));
 
-    /// <summary>只做差异检测：唯一的重活就是那次全量扫描。</summary>
+    /// <summary>
+    /// 只做差异检测（「重新检测」按钮那条路）：**也是先导出剧情 CSV，再全量扫描比较**。
+    /// 两条路的第一步是同一件事，所以阶段列表的头两段也一样。
+    /// </summary>
     public static UnrealSyncProgressPlan ForDetection() =>
-        new([(Detect, 100d)]);
+        new([(StoryCsvExport, 15d), (Detect, 10d)]);
 
     private static List<(string, double)> BuildPhases(bool includesCloseEditors)
     {
-        var phases = new List<(string, double)> { (Detect, 10d) };
+        var phases = new List<(string, double)> { (StoryCsvExport, 15d), (Detect, 10d) };
         if (includesCloseEditors)
         {
             phases.Add((CloseEditors, 3d));

@@ -19,7 +19,8 @@ public sealed partial class MainWindow
         var chapters = _projectWorkspaceService.GetChapters(project)
             .OrderBy(chapter => chapter.Code, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        SetUnrealSyncProgress(true, "正在从 StoryDocument 生成剧情 CSV... 4%", false, 4);
+        // 进度由调用方按「生成剧情 CSV」那一段的区间来报（见 UnrealSyncProgressPlan）。
+        // 这里原来硬编码了一条 "4%"，和计划里其它阶段的百分比互相打架。
         await Task.Run(() => _storyCsvExporter.ExportProject(chapters));
     }
 }
