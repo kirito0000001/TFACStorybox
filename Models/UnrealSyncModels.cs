@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GalExcleTools.Services;
 
 namespace GalExcleTools;
 
@@ -26,6 +27,7 @@ internal sealed record UnrealSyncChangePlan(
     List<UnrealSyncDeleteGroup> DeleteGroups,
     List<UnrealStoryTableSyncEntry> StoryTables,
     List<UnrealAssetIndexTableSyncEntry> AssetIndexTables,
+    UnrealSyncVariablePlan VariablePlan,
     bool StoryBranchesChanged,
     List<UnrealStoryBranchSourceSyncEntry> StoryBranches,
     string StoryBranchesHash,

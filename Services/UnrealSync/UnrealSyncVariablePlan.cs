@@ -36,29 +36,13 @@ internal enum UnrealVariableValueKind
 
     /// <summary>浮点数组，用 <see cref="UnrealVariableWriteRequest.Numbers"/>。</summary>
     FloatList,
-
-    /// <summary>「章节表格 → 语音列表」的映射，用 <see cref="UnrealVariableWriteRequest.VoiceEntries"/>。</summary>
-    VoiceMap,
 }
-
-/// <summary>
-/// 语音映射的一项：某个章节表格对应哪些语音。
-/// </summary>
-/// <param name="ChapterTableObjectPath">
-/// 章节表格的对象路径，形如 <c>/Game/AssetMaterial/ExcelTexts/MainStory/Chapter1.Chapter1</c>。
-/// </param>
-/// <param name="WaveObjectPaths">
-/// 这个表格包含的语音对象路径，**索引 0 是占位空槽**（见 <see cref="UnrealSyncVariablePlanBuilder"/>）。
-/// </param>
-internal sealed record UnrealVoiceMapEntry(
-    string ChapterTableObjectPath,
-    IReadOnlyList<string> WaveObjectPaths);
 
 /// <summary>
 /// 一条变量写入请求。
 ///
-/// 【为什么载荷是扁平的三个字段】
-/// 三条路线/三种载荷本来可以做成子类，但这份计划要**序列化进同步清单、逐条给人核对**，
+/// 【为什么载荷是扁平的几个字段】
+/// 几种载荷本来可以做成子类，但这份计划要**序列化进同步清单、逐条给人核对**，
 /// 扁平结构在清单里最好读；分支由 <see cref="Kind"/> 决定，读哪个字段也是一眼的事。
 /// </summary>
 /// <param name="TargetAssetPath">目标资产的对象路径（<c>/Game/.../Asset.Asset</c>）。</param>
@@ -71,7 +55,6 @@ internal sealed record UnrealVoiceMapEntry(
 /// </param>
 /// <param name="AssetObjectPaths">规范对象路径，**顺序即数组顺序**（游戏侧按下标取用）。</param>
 /// <param name="Numbers">浮点数组的值。</param>
-/// <param name="VoiceEntries">语音映射的条目。</param>
 /// <param name="Description">给人看的说明，进日志和界面。</param>
 internal sealed record UnrealVariableWriteRequest(
     string TargetAssetPath,
@@ -81,7 +64,6 @@ internal sealed record UnrealVariableWriteRequest(
     string ReferenceClassName,
     IReadOnlyList<string> AssetObjectPaths,
     IReadOnlyList<float> Numbers,
-    IReadOnlyList<UnrealVoiceMapEntry> VoiceEntries,
     string Description)
 {
     /// <summary>
@@ -119,9 +101,15 @@ internal sealed record UnrealSyncVariablePlan(
 /// 由同步输入构建变量写入计划。
 ///
 /// 【它替掉了什么】
-/// 老做法是把 4 张索引/映射表（BGIndexMap / BGMap / SceneIndexMap / ExsIndexMap）
-/// 写进 <c>ExcelTexts</c>，游戏侧再查表。现在除了**特殊音效**（它没有目标变量），
-/// 其余全部改成直接写变量列表 —— 所以这里产出的是"变量请求"，不再是"表格"。
+/// 老做法是把索引/映射表写进 <c>ExcelTexts</c>（BGIndexMap 背景图、BGMap 其实是 BGM、
+/// SceneIndexMap 环境音），游戏侧再查表。现在这三样改成**直接写变量列表** ——
+/// 所以这里产出的是"变量请求"，不再是"表格"。
+///
+/// 【为什么这里没有语音】
+/// 语音的 <c>VoiceMaps</c> 走的是**另一条已经跑通的路径**（清单里的 <c>VoiceMap</c> 段 +
+/// 脚本里那段 CDO 写入），而且那条还额外负责"清理 ExcelTexts 下过期的章节表"。
+/// 把它挪进这里只会把两套逻辑搅在一起、还得再实现一遍清理 —— 所以先不动。
+/// 将来若要统一，方向是把那边整段搬过来，而不是两边各写一半。
 ///
 /// 【一个刻意的缺席：特殊音效】
 /// 它没有对应的变量（口述：「特殊音效和环境音位置一致，但是不需要置入变量」），
@@ -130,24 +118,14 @@ internal sealed record UnrealSyncVariablePlan(
 /// </summary>
 internal static class UnrealSyncVariablePlanBuilder
 {
-    /// <summary>
-    /// 语音数组的**索引 0 是占位空槽**。
-    ///
-    /// 口述：「从 1 开始，所以 0 所以默认是空的」—— 游戏侧按下标取语音，
-    /// 第 0 项留空以免整体错位一位。所以这里在真正的语音前面插一个空路径。
-    /// </summary>
-    private const string VoicePlaceholderPath = "";
-
     public static UnrealSyncVariablePlan Build(
-        IReadOnlyList<string> backgroundPaths,
-        IReadOnlyList<string> musicPaths,
-        IReadOnlyList<string> ambientPaths,
-        IReadOnlyList<UnrealVoiceMapEntry> voiceEntries)
+        IReadOnlyCollection<string> backgroundPaths,
+        IReadOnlyCollection<string> musicPaths,
+        IReadOnlyCollection<string> ambientPaths)
     {
         ArgumentNullException.ThrowIfNull(backgroundPaths);
         ArgumentNullException.ThrowIfNull(musicPaths);
         ArgumentNullException.ThrowIfNull(ambientPaths);
-        ArgumentNullException.ThrowIfNull(voiceEntries);
 
         var requests = new List<UnrealVariableWriteRequest>
         {
@@ -160,7 +138,6 @@ internal static class UnrealSyncVariablePlanBuilder
                 "Texture2D",
                 BuildObjectPaths(UnrealSyncPathPolicy.BackgroundFolder, backgroundPaths),
                 [],
-                [],
                 "背景图列表（剧情 UI 用它按下标取背景）"),
 
             // 2. BGM → MusicActor 的 C++ 列表
@@ -171,7 +148,6 @@ internal static class UnrealSyncVariablePlanBuilder
                 UnrealVariableValueKind.AssetList,
                 "SoundWave",
                 BuildObjectPaths(UnrealSyncPathPolicy.BgmFolder, musicPaths),
-                [],
                 [],
                 "BGM 列表"),
 
@@ -184,7 +160,6 @@ internal static class UnrealSyncVariablePlanBuilder
                 string.Empty,
                 [],
                 Enumerable.Repeat(0f, musicPaths.Count).ToArray(),
-                [],
                 "BGM 循环起始（与 BGM 列表等长，默认全 0，防止索引缺失）"),
 
             // 4. 环境音 → 同上的列表。
@@ -198,20 +173,7 @@ internal static class UnrealSyncVariablePlanBuilder
                 "SoundWave",
                 BuildObjectPaths(UnrealSyncPathPolicy.SceneEffectFolder, ambientPaths),
                 [],
-                [],
                 "环境音列表"),
-
-            // 5. 语音 → 章节表格到语音列表的映射
-            new(
-                UnrealSyncPathPolicy.MusicPlayerAsset,
-                UnrealSyncPathPolicy.MusicPlayerVoiceMapVariable,
-                UnrealVariableWriteRoute.CdoProperty,
-                UnrealVariableValueKind.VoiceMap,
-                string.Empty,
-                [],
-                [],
-                BuildVoiceEntriesWithPlaceholder(voiceEntries),
-                "语音映射（每个章节表格对应它包含的语音；索引 0 留空）"),
         };
 
         return new UnrealSyncVariablePlan(requests, ComputeHash(requests));
@@ -225,26 +187,12 @@ internal static class UnrealSyncVariablePlanBuilder
     /// 变量里写的路径就会指向不存在的资产，而且是静默的。
     /// 等老服务拆开时这个方法跟着搬过来，届时只留一份。
     /// </summary>
-    private static IReadOnlyList<string> BuildObjectPaths(string destinationFolder, IReadOnlyList<string> sourcePaths) =>
+    private static IReadOnlyList<string> BuildObjectPaths(string destinationFolder, IReadOnlyCollection<string> sourcePaths) =>
         sourcePaths.Select(path => UnrealSyncService.BuildAssetObjectPath(destinationFolder, path)).ToArray();
-
-    private static IReadOnlyList<UnrealVoiceMapEntry> BuildVoiceEntriesWithPlaceholder(
-        IReadOnlyList<UnrealVoiceMapEntry> entries)
-    {
-        var result = new List<UnrealVoiceMapEntry>(entries.Count);
-        foreach (var entry in entries)
-        {
-            var waves = new List<string>(entry.WaveObjectPaths.Count + 1) { VoicePlaceholderPath };
-            waves.AddRange(entry.WaveObjectPaths);
-            result.Add(new UnrealVoiceMapEntry(entry.ChapterTableObjectPath, waves));
-        }
-
-        return result;
-    }
 
     private static string ComputeHash(IReadOnlyList<UnrealVariableWriteRequest> requests)
     {
-        var builder = new StringBuilder("unreal-variable-plan-v1");
+        var builder = new StringBuilder("unreal-variable-plan-v2");
         foreach (var request in requests)
         {
             builder.Append('\n')
@@ -254,9 +202,7 @@ internal static class UnrealSyncVariablePlanBuilder
                 .Append(request.Kind).Append('|')
                 .Append(request.ReferenceClassName).Append('|')
                 .Append(string.Join(',', request.AssetObjectPaths)).Append('|')
-                .Append(string.Join(',', request.Numbers)).Append('|')
-                .Append(string.Join(';', request.VoiceEntries.Select(
-                    entry => entry.ChapterTableObjectPath + "=" + string.Join(',', entry.WaveObjectPaths))));
+                .Append(string.Join(',', request.Numbers));
         }
 
         return FileSystemUtility.ComputeSha256Hex(builder.ToString());

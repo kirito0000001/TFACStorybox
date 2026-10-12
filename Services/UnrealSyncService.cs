@@ -277,6 +277,20 @@ internal sealed class UnrealSyncService
             },
             StoryTables = changePlan.StoryTables,
             AssetIndexTables = changePlan.AssetIndexTables,
+            // 变量列表写入（背景图 / BGM / 环境音）。C# 侧只声明"写什么"，
+            // 具体怎么落由脚本按每条请求的 Route 决定（见 UnrealVariableWriteRoute）。
+            Variables = changePlan.VariablePlan.Requests.Select(request => new
+            {
+                request.TargetAssetPath,
+                request.VariableName,
+                Route = request.Route.ToString(),
+                Kind = request.Kind.ToString(),
+                request.ReferenceClassName,
+                request.AssetObjectPaths,
+                request.Numbers,
+                ExportText = request.BuildPayloadText(),
+                request.Description
+            }),
             StoryBranches = new
             {
                 DataTable = StoryBranchDataTableAssetPath,
@@ -868,6 +882,99 @@ internal sealed class UnrealSyncService
                         else:
                             add_error("GalExcleTools could not set MusicPlayer voice-map property '{}' on {}".format(map_property, blueprint_asset_path))
 
+            # ── 变量列表写入 ────────────────────────────────────────────
+            # 背景图 / BGM / 环境音改成**直接写变量列表**，不再走 ExcelTexts 的索引表。
+            # 两条路线由 C# 侧决定（UnrealVariableWriteRoute）：
+            #   CdoProperty      —— C++ 声明的 UPROPERTY，写蓝图子类的 CDO；Python 直接能做，
+            #                       手法和上面 VoiceMaps 那段一致（那条已经跑通）。
+            #   BlueprintDefault —— 蓝图自建的变量，必须写 FBPVariableDescription::DefaultValue。
+            #                       脚本层做不可靠（蓝图下次编译会把 CDO 改动盖回去），
+            #                       所以调 GALLibrary 里那个 C++ 写入器。
+            write_progress("UpdateVariables", "正在写入素材变量列表", 94)
+            variable_requests = manifest.get("Variables", []) or []
+            variables_written = 0
+            variables_unchanged = 0
+            for variable_request in variable_requests:
+                variable_asset_path = variable_request.get("TargetAssetPath") or ""
+                variable_name = variable_request.get("VariableName") or ""
+                variable_route = variable_request.get("Route") or ""
+                if not variable_asset_path or not variable_name:
+                    continue
+
+                if variable_route == "BlueprintDefault":
+                    variable_writer = getattr(unreal, "GALLBlueprintVariableWriter", None)
+                    if variable_writer is None:
+                        add_error("GalExcleTools 找不到 GALLBlueprintVariableWriter，无法写蓝图变量 {}（确认 GALLibrary 插件已编译）".format(variable_name))
+                        continue
+                    try:
+                        writer_result = variable_writer.ensure_blueprint_variable_default(
+                            variable_asset_path,
+                            variable_name,
+                            variable_request.get("ExportText") or "")
+                    except Exception as exc:
+                        add_error("GalExcleTools 写蓝图变量 {} 失败：{}".format(variable_name, exc))
+                        continue
+                    # C++ 那边返回 JSON 字符串；这里只做粗判，细节整条留在日志里给人看。
+                    compact_result = str(writer_result).replace(" ", "")
+                    if '"ok":true' in compact_result:
+                        if '"changed":true' in compact_result:
+                            variables_written += 1
+                        else:
+                            variables_unchanged += 1
+                        unreal.log("GalExcleTools 变量 {}：{}".format(variable_name, writer_result))
+                    else:
+                        add_error("GalExcleTools 写蓝图变量 {} 返回失败：{}".format(variable_name, writer_result))
+                    continue
+
+                variable_asset = unreal.EditorAssetLibrary.load_asset(variable_asset_path)
+                variable_class = None
+                try:
+                    variable_class = unreal.EditorAssetLibrary.load_blueprint_class(variable_asset_path.split(".")[0])
+                except Exception:
+                    variable_class = None
+                if variable_class is None and variable_asset is not None:
+                    try:
+                        variable_class = variable_asset.generated_class()
+                    except Exception:
+                        variable_class = None
+                variable_cdo = unreal.get_default_object(variable_class) if variable_class else None
+                if not variable_asset or not variable_cdo:
+                    add_error("GalExcleTools 变量写入：载入蓝图失败 {}".format(variable_asset_path))
+                    continue
+
+                variable_kind = variable_request.get("Kind") or ""
+                if variable_kind == "AssetList":
+                    loaded_assets = []
+                    list_valid = True
+                    for asset_object_path in variable_request.get("AssetObjectPaths", []) or []:
+                        loaded_asset = unreal.EditorAssetLibrary.load_asset(asset_object_path)
+                        if not loaded_asset:
+                            add_error("GalExcleTools 变量写入：找不到资产 {}".format(asset_object_path))
+                            list_valid = False
+                        loaded_assets.append(loaded_asset)
+                    if not list_valid:
+                        continue
+                    new_variable_value = loaded_assets
+                elif variable_kind == "FloatList":
+                    new_variable_value = [float(number) for number in (variable_request.get("Numbers", []) or [])]
+                else:
+                    add_error("GalExcleTools 变量写入：不认识的载荷类型 {}".format(variable_kind))
+                    continue
+
+                try:
+                    variable_cdo.modify()
+                except Exception:
+                    pass
+                if not set_first_editor_property(variable_cdo, [variable_name, variable_name.lower()], new_variable_value):
+                    add_error("GalExcleTools 变量写入：设置 {} 失败（{}）".format(variable_name, variable_asset_path))
+                    continue
+                if save_loaded_asset_with_retry(variable_asset, variable_asset_path):
+                    variables_written += 1
+                    unreal.log("GalExcleTools 变量 {} 已写入 {}".format(variable_name, variable_asset_path))
+                else:
+                    add_error("GalExcleTools 变量写入：保存失败 {}".format(variable_asset_path))
+            unreal.log("GalExcleTools 变量写入完成：写入 {} 项，未变 {} 项".format(variables_written, variables_unchanged))
+
             def build_lustration_struct(row, existing_item=None):
                 # Keep Unreal-side Vfx data intact. The tool owns imported texture
                 # layers, but VFX materials are configured manually in the data asset.
@@ -1241,11 +1348,17 @@ internal sealed class UnrealSyncService
                 ? $"已准备全部重新同步，共处理 {totalChanged} 项：{string.Join("；", changeItems)}。"
                 : $"本次同步将处理 {totalChanged} 项：{string.Join("；", changeItems)}。";
 
+        // 变量写入计划（背景图 / BGM / 环境音三个列表）。
+        // 「要不要写」不在这里做增量判断：值一样时 GALLibrary 的写入器会直接跳过，
+        // CDO 那条也只是赋一次值；真正的开销在"编译蓝图"，而那只发生在真的变了的时候。
+        var variablePlan = UnrealSyncVariablePlanBuilder.Build(backgroundPaths, musicPaths, ambientPaths);
+
         return new UnrealSyncChangePlan(
             importGroups,
             deleteGroups,
             storyTables,
             assetIndexTables,
+            variablePlan,
             storyBranchesChanged,
             storyBranches,
             storyBranchesHash,
