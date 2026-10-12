@@ -118,6 +118,13 @@ namespace GalExcleTools
             Settings.Save();
         }
 
+        private void ApplyThemeSettings()
+        {
+            RootGrid.RequestedTheme = Settings.NightModeEnabled
+                ? ElementTheme.Dark
+                : ElementTheme.Light;
+        }
+
         private async void ShellNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
         {
             if (args.SelectedItemContainer?.Tag is not string tag)

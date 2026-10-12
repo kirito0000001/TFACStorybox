@@ -17,6 +17,7 @@ internal sealed class SettingsViewModel : ObservableObject
     private string _projectRootStatusMessage = string.Empty;
     private InfoBarSeverity _projectRootStatusSeverity = InfoBarSeverity.Success;
     private bool _showWorkspacePath = true;
+    private bool _nightModeEnabled;
     private bool _logEnabled = true;
     private bool _logUserOperations = true;
     private bool _logWarnings = true;
@@ -39,6 +40,8 @@ internal sealed class SettingsViewModel : ObservableObject
     }
 
     public event EventHandler? AuxiliaryDisplayChanged;
+
+    public event EventHandler? ThemeSettingsChanged;
 
     public event EventHandler? LogSettingsChanged;
 
@@ -97,6 +100,23 @@ internal sealed class SettingsViewModel : ObservableObject
                 {
                     Save();
                     AuxiliaryDisplayChanged?.Invoke(this, EventArgs.Empty);
+                }
+            }
+        }
+    }
+
+    public bool NightModeEnabled
+    {
+        get => _nightModeEnabled;
+        set
+        {
+            if (SetProperty(ref _nightModeEnabled, value))
+            {
+                _settings.NightModeEnabled = value;
+                if (!_isLoadingSettings)
+                {
+                    Save();
+                    ThemeSettingsChanged?.Invoke(this, EventArgs.Empty);
                 }
             }
         }
@@ -395,6 +415,7 @@ internal sealed class SettingsViewModel : ObservableObject
         try
         {
             ShowWorkspacePath = settings.ShowWorkspacePath;
+            NightModeEnabled = settings.NightModeEnabled;
             LogEnabled = settings.LogEnabled;
             LogUserOperations = settings.LogUserOperations;
             LogWarnings = settings.LogWarnings;

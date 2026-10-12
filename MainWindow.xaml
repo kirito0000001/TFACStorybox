@@ -2249,6 +2249,17 @@ public:
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
+                                <TextBlock Text="夜晚模式" VerticalAlignment="Center" />
+                                <ToggleSwitch
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    IsOn="{Binding Settings.NightModeEnabled, Mode=TwoWay}" />
+                            </Grid>
+                            <Grid MinHeight="44" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
                                 <TextBlock Text="显示工作区路径" VerticalAlignment="Center" />
                                 <CheckBox
                                     x:Name="WorkspacePathVisibleCheckBox"

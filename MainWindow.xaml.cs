@@ -453,6 +453,7 @@ namespace GalExcleTools
             _storyDialogService = new StoryDialogService(_dialogService);
             _functionDialogService = new FunctionDialogService(_dialogService, _uiSoundService);
             _applicationViewModel.Settings.AuxiliaryDisplayChanged += (_, _) => UpdateAuxiliaryDisplayVisibility();
+            _applicationViewModel.Settings.ThemeSettingsChanged += (_, _) => ApplyThemeSettings();
             _applicationViewModel.Settings.LogSettingsChanged += (_, _) =>
             {
                 UpdateLogOptionEnabledState();
@@ -558,6 +559,7 @@ namespace GalExcleTools
             RegisterCharacterDetailExpanderLazyLoading();
 
             Settings.Load();
+            ApplyThemeSettings();
             SyncUpdateControls();
             _uiSoundService.IsEnabled = Settings.UiSoundEnabled;
             UpdateLogOptionEnabledState();

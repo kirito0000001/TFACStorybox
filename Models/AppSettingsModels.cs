@@ -6,6 +6,8 @@ internal sealed class AppSettings
 {
     public string? ProjectRootPath { get; set; }
 
+    public bool NightModeEnabled { get; set; }
+
     public bool ShowWorkspacePath { get; set; } = true;
 
     public bool LogEnabled { get; set; } = true;

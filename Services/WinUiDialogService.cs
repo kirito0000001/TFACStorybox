@@ -163,6 +163,7 @@ internal sealed class WinUiDialogService : IDialogService
         string closeButtonText,
         string? secondaryButtonText = null)
     {
+        var xamlRoot = _getXamlRoot();
         return new ContentDialog
         {
             Title = title,
@@ -171,7 +172,10 @@ internal sealed class WinUiDialogService : IDialogService
             SecondaryButtonText = secondaryButtonText ?? string.Empty,
             CloseButtonText = closeButtonText,
             DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = _getXamlRoot()
+            XamlRoot = xamlRoot,
+            // 对话框挂在 XamlRoot 上、不在 RootGrid 的可视树里，不会跟着夜晚模式走；
+            // 把根内容当前的实际主题抄给它（对齐零境工具箱 WinUiDialogService 的做法）。
+            RequestedTheme = (xamlRoot.Content as FrameworkElement)?.ActualTheme ?? ElementTheme.Default
         };
     }
 
