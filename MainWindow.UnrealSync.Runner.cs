@@ -91,43 +91,44 @@ namespace GalExcleTools
                 }
             }
 
+            // 目标内容夹不再由用户手选 —— 固定是 <工程>/Content/AssetMaterial，由 .uproject 推导。
+            //
+            // 老方案是「手选一个夹 + 硬性要求它叫 Narrative」，那条校验的注释原话是
+            // 「避免素材同步到错误目录」。新落点跨了 /Game 下三个顶层目录
+            // （AssetMaterial / BaseC / UIWidget），选一个"目标夹"已经没有意义，
+            // 所以选择项与那条校验一起退休（2026-10-12 定）。
+            //
+            // ⚠️ 下面这一对**必须成对**：
+            //     TargetAssetRoot        = /Game/AssetMaterial
+            //     TargetContentFolderPath = <工程>/Content/AssetMaterial
+            // 服务里的 AssetObjectPathToFilePath 是「剥掉 /Game/AssetMaterial 再拼磁盘路径」，
+            // 两者对不上，所有磁盘路径都会整体错位。
             string? contentRootPath = null;
             string? targetAssetRoot = null;
             if (!string.IsNullOrWhiteSpace(unrealProjectPath) && File.Exists(unrealProjectPath))
             {
-                var unrealProjectRoot = Path.GetDirectoryName(unrealProjectPath)!;
-                contentRootPath = Path.Combine(unrealProjectRoot, "Content");
+                contentRootPath = UnrealSyncPathPolicy.ResolveContentFolderPath(unrealProjectPath);
                 if (!Directory.Exists(contentRootPath))
                 {
                     errors.Add("虚幻项目缺少 Content 文件夹。");
                 }
-
-            }
-
-            if (string.IsNullOrWhiteSpace(contentFolderPath) || !Directory.Exists(contentFolderPath))
-            {
-                errors.Add("请选择 Content 下的目标同步文件夹。");
-            }
-            else if (contentRootPath is not null && Directory.Exists(contentRootPath))
-            {
-                if (!IsPathInsideDirectoryOrEqual(contentFolderPath, contentRootPath))
-                {
-                    errors.Add("目标同步文件夹必须位于所选虚幻项目的 Content 目录内。");
-                }
-                else if (!string.Equals(new DirectoryInfo(contentFolderPath).Name, "Narrative", StringComparison.OrdinalIgnoreCase))
-                {
-                    errors.Add("目标同步文件夹必须命名为 Narrative，避免素材同步到错误目录。");
-                }
                 else
                 {
-                    targetAssetRoot = ToUnrealAssetPath(contentRootPath, contentFolderPath);
+                    var assetMaterialRelative = UnrealSyncPathPolicy.AssetMaterialRoot
+                        .Replace(UnrealSyncPathPolicy.GameRoot + "/", string.Empty, StringComparison.Ordinal)
+                        .Replace('/', Path.DirectorySeparatorChar);
+                    contentFolderPath = Path.Combine(contentRootPath, assetMaterialRelative);
+                    targetAssetRoot = UnrealSyncPathPolicy.AssetMaterialRoot;
                     planItems.Add($"目标内容路径：{targetAssetRoot}");
-                    var missingFolders = UnrealSyncService.ExpectedNarrativeFolders
-                        .Where(folder => !Directory.Exists(Path.Combine(contentFolderPath, folder)))
+
+                    var missingFolders = UnrealSyncPathPolicy.ExpectedContentFolders
+                        .Where(relative => !Directory.Exists(Path.Combine(
+                            contentRootPath,
+                            relative.Replace('/', Path.DirectorySeparatorChar))))
                         .ToList();
                     if (missingFolders.Count > 0)
                     {
-                        warnings.Add($"目标目录缺少参考结构：{string.Join(", ", missingFolders)}。同步时会在引擎导入阶段尝试创建。");
+                        warnings.Add($"目标工程缺少参考结构：{string.Join(", ", missingFolders)}。请在 Unreal 内容浏览器里先建好，工具不会替你创建。");
                     }
                 }
             }

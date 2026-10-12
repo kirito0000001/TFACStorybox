@@ -78,6 +78,17 @@ internal static class UnrealSyncPathPolicy
     /// <summary>立绘信息数据资产（立绘与小预览共用）。纯蓝图数据资产，父类 PrimaryDataAsset。</summary>
     public const string LustrationInfoAsset = LustrationRoot + "/DA_LustrationInfor.DA_LustrationInfor";
 
+    /// <summary>
+    /// 小预览的数据资产。
+    ///
+    /// ⚠️ **待确认**：这个资产在 WHK 与 CrossingVoid **两边都不存在**（和那 4 张索引表一样，
+    /// 是丢工程时一起没的），而 <c>FLustrationStruct</c> 里也没有预览字段
+    /// （只有 Name / Color / Cloth / Face / Adorn / Vfx）。
+    /// 所以小预览到底写哪儿还没定：补一个 DA_Portraits，还是并进 DA_LustrationInfor 的某个字段。
+    /// 这里先按老结构保留同一个名字、只把路径挪到新布局下；**开启小预览前需要你确认**。
+    /// </summary>
+    public const string PortraitsInfoAsset = LustrationRoot + "/DA_Portraits.DA_Portraits";
+
     /// <summary>剧情选项分支表。</summary>
     public const string StoryBranchTableAsset = AssetMaterialRoot + "/AllRoad.AllRoad";
 

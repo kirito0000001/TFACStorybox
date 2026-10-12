@@ -19,19 +19,14 @@ namespace GalExcleTools.Services;
 internal sealed class UnrealSyncService
 {
     private const int CurrentUnrealSyncStateVersion = 4;
-    public const string MusicPlayerBlueprintAssetPath = "/Game/BaseC/EXActor/MusicPlayer.MusicPlayer";
-    public const string StoryBranchDataTableAssetPath = "/Game/AssetMaterial/AllRoad.AllRoad";
+    public const string MusicPlayerBlueprintAssetPath = UnrealSyncPathPolicy.MusicPlayerAsset;
+    public const string StoryBranchDataTableAssetPath = UnrealSyncPathPolicy.StoryBranchTableAsset;
     private const string InvalidUnrealObjectNameCharacters = "\\:*?\"<>|' ,/.&!~@#(){}[]=;^%$`";
 
-    public static readonly string[] ExpectedNarrativeFolders =
-    [
-        "BackGround",
-        "BGM",
-        "ExcelTexts",
-        "Lustration",
-        "Scene_Effect",
-        "Voice"
-    ];
+    // 这里原来有一份 ExpectedNarrativeFolders（BackGround / BGM / ExcelTexts / Lustration /
+    // Scene_Effect / Voice），已删 —— 落点整组换到 UnrealSyncPathPolicy.ExpectedContentFolders，
+    // 而且那份是**相对 Content** 的路径（Content 由 .uproject 推导，不再手选目标夹）。
+    // 与之配套的那条「目标同步文件夹必须命名为 Narrative」的硬校验也一并退休。
 
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly StoryCsvService _storyCsvService;
@@ -132,9 +127,9 @@ internal sealed class UnrealSyncService
         IReadOnlyCollection<string> voicePaths)
     {
         var groups = new List<UnrealSyncImportGroup>();
-        AddImportGroup(groups, $"{context.TargetAssetRoot}/BackGround", backgroundPaths);
-        AddImportGroup(groups, $"{context.TargetAssetRoot}/BGM", musicPaths);
-        AddImportGroup(groups, $"{context.TargetAssetRoot}/Scene_Effect", ambientPaths.Concat(soundEffectPaths).ToList());
+        AddImportGroup(groups, UnrealSyncPathPolicy.BackgroundFolder, backgroundPaths);
+        AddImportGroup(groups, UnrealSyncPathPolicy.BgmFolder, musicPaths);
+        AddImportGroup(groups, UnrealSyncPathPolicy.SceneEffectFolder, ambientPaths.Concat(soundEffectPaths).ToList());
         AddProjectVoiceImportGroups(groups, context, voicePaths);
 
         foreach (var character in characters)
@@ -265,17 +260,17 @@ internal sealed class UnrealSyncService
                 context.Project.Path
             },
             UnrealProjectPath = context.UnrealProjectPath,
-            TargetRoot = context.TargetAssetRoot,
+            TargetRoot = UnrealSyncPathPolicy.AssetMaterialRoot,
             LustrationInfo = new
             {
-                DataAsset = $"{context.TargetAssetRoot}/Lustration/DA_LustrationInfor.DA_LustrationInfor",
+                DataAsset = UnrealSyncPathPolicy.LustrationInfoAsset,
                 MapProperty = "Infor",
                 ShouldUpdate = changePlan.LustrationChanged,
                 Rows = changePlan.LustrationChanged ? changePlan.LustrationRows : []
             },
             PortraitsInfo = new
             {
-                DataAsset = $"{context.TargetAssetRoot}/Lustration/DA_Portraits.DA_Portraits",
+                DataAsset = UnrealSyncPathPolicy.PortraitsInfoAsset,
                 MapProperty = "Infor",
                 ShouldUpdate = changePlan.PortraitsChanged,
                 Rows = changePlan.PortraitsChanged ? changePlan.PortraitRows : []
@@ -292,7 +287,7 @@ internal sealed class UnrealSyncService
             {
                 BlueprintAsset = MusicPlayerBlueprintAssetPath,
                 MapProperty = "VoiceMaps",
-                ManagedTableRoot = $"{context.TargetAssetRoot}/ExcelTexts/",
+                ManagedTableRoot = UnrealSyncPathPolicy.ExcelTextsRoot + "/",
                 ShouldUpdate = changePlan.VoiceMapsChanged,
                 Entries = changePlan.VoiceMapsChanged ? changePlan.VoiceMaps : []
             },
@@ -1138,7 +1133,7 @@ internal sealed class UnrealSyncService
 
         var lustrationRows = BuildLustrationSyncEntries(context, characters);
         var lustrationHash = ComputeSha256Hex("lustration-dataasset-v3-preserve-vfx|" + JsonSerializer.Serialize(lustrationRows, _jsonOptions));
-        var lustrationAssetPath = $"{context.TargetAssetRoot}/Lustration/DA_LustrationInfor.DA_LustrationInfor";
+        var lustrationAssetPath = UnrealSyncPathPolicy.LustrationInfoAsset;
         var lustrationAssetFilePath = AssetObjectPathToFilePath(context, lustrationAssetPath);
         var lustrationChanged =
             forceFullSync ||
@@ -1151,7 +1146,7 @@ internal sealed class UnrealSyncService
         var portraitsHash = context.AssetLibrary.IsPortraitPreviewEnabled
             ? ComputeSha256Hex("portrait-dataasset-v1|" + JsonSerializer.Serialize(portraitRows, _jsonOptions))
             : string.Empty;
-        var portraitsAssetPath = $"{context.TargetAssetRoot}/Lustration/DA_Portraits.DA_Portraits";
+        var portraitsAssetPath = UnrealSyncPathPolicy.PortraitsInfoAsset;
         var portraitsAssetFilePath = AssetObjectPathToFilePath(context, portraitsAssetPath);
         var portraitsChanged =
             context.AssetLibrary.IsPortraitPreviewEnabled &&
@@ -1482,43 +1477,26 @@ internal sealed class UnrealSyncService
     {
         Directory.CreateDirectory(cacheFolder);
 
+        // 只剩特殊音效这一张表。
+        //
+        // 老做法是 4 张索引/映射表（BGIndexMap 装背景图、BGMap 其实装的是 BGM、
+        // SceneIndexMap 装环境音、ExsIndexMap 装特殊音效），游戏侧查表取素材。
+        // 现在背景图 / BGM / 环境音都改成**直接写变量列表**（见 UnrealSyncVariablePlanBuilder），
+        // 那三张表连同它们的行结构体一起退休 —— 而且那两个结构体
+        // （/Script/GALLibrary.Texture2DTable、/Script/GALLibrary.WaveTable）
+        // 在两个工程里都已经不存在了，本来也建不起来。
+        //
+        // 特殊音效**没有目标变量**，所以它仍然需要这张表。
         return
         [
             CreateAssetIndexTableSyncEntry(
                 cacheFolder,
-                "BGIndexMap",
-                $"{context.TargetAssetRoot}/ExcelTexts/BGIndexMap.BGIndexMap",
-                "/Script/GALLibrary.Texture2DTable",
-                "Texture2D",
-                backgroundPaths
-                    .Select(path => BuildTextureReference($"{context.TargetAssetRoot}/BackGround", path))
-                    .ToList()),
-            CreateAssetIndexTableSyncEntry(
-                cacheFolder,
-                "BGMap",
-                $"{context.TargetAssetRoot}/ExcelTexts/BGMap.BGMap",
-                "/Script/GALLibrary.WaveTable",
-                "Wave",
-                musicPaths
-                    .Select(path => BuildSoundWaveReference($"{context.TargetAssetRoot}/BGM", path))
-                    .ToList()),
-            CreateAssetIndexTableSyncEntry(
-                cacheFolder,
-                "SceneIndexMap",
-                $"{context.TargetAssetRoot}/ExcelTexts/SceneIndexMap.SceneIndexMap",
-                "/Script/GALLibrary.WaveTable",
-                "Wave",
-                ambientPaths
-                    .Select(path => BuildSoundWaveReference($"{context.TargetAssetRoot}/Scene_Effect", path))
-                    .ToList()),
-            CreateAssetIndexTableSyncEntry(
-                cacheFolder,
                 "ExsIndexMap",
-                $"{context.TargetAssetRoot}/ExcelTexts/ExsIndexMap.ExsIndexMap",
-                "/Script/GALLibrary.WaveTable",
-                "Wave",
+                UnrealSyncPathPolicy.EffectIndexTableAsset,
+                UnrealSyncPathPolicy.EffectIndexTableRowStruct,
+                UnrealSyncPathPolicy.EffectIndexTableValueColumn,
                 soundEffectPaths
-                    .Select(path => BuildSoundWaveReference($"{context.TargetAssetRoot}/Scene_Effect", path))
+                    .Select(path => BuildSoundWaveReference(UnrealSyncPathPolicy.SceneEffectFolder, path))
                     .ToList())
         ];
     }
@@ -1542,15 +1520,18 @@ internal sealed class UnrealSyncService
         CharacterInfo character,
         CharacterLayerKind layerKind)
     {
-        var folderName = layerKind == CharacterLayerKind.Cloth
-            ? "DN_Cloths"
-            : CharacterLayerAssetService.GetFolderName(layerKind);
-        return $"{context.TargetAssetRoot}/Lustration/{character.Code}/{folderName}";
+        // 图层目录名的映射收口到 UnrealSyncPathPolicy.GetCharacterLayerFolderName 一处。
+        //
+        // 这里原来写的是：服装硬编码 "DN_Cloths"、其余走 CharacterLayerAssetService.GetFolderName。
+        // 而那个 GetFolderName 是**本地素材库**那套（服装叫 DN_Cloth，单数），
+        // 和目标不是同一套名字 —— 两边混用迟早出事，现在明确分开：
+        // 本地布局用 GetFolderName，Unreal 目标用 PathPolicy。
+        return UnrealSyncPathPolicy.GetCharacterLayerFolder(character.Code, layerKind);
     }
 
     public static string GetPortraitPreviewDestinationPath(UnrealSyncContext context, CharacterInfo character)
     {
-        return $"{context.TargetAssetRoot}/Lustration/{character.Code}/Log_Preview";
+        return UnrealSyncPathPolicy.GetPortraitPreviewFolder(character.Code);
     }
 
     private static string? BuildPortraitPreviewAssetReference(
@@ -1581,7 +1562,7 @@ internal sealed class UnrealSyncService
         var relativeFolder = GetProjectVoiceRelativeFolder(voiceRootPath, voicePath);
         if (string.IsNullOrWhiteSpace(relativeFolder))
         {
-            return $"{context.TargetAssetRoot}/Voice";
+            return UnrealSyncPathPolicy.VoiceFolder;
         }
 
         var segments = relativeFolder
@@ -1590,11 +1571,11 @@ internal sealed class UnrealSyncService
             .ToArray();
         if (segments.Length == 0)
         {
-            return $"{context.TargetAssetRoot}/Voice";
+            return UnrealSyncPathPolicy.VoiceFolder;
         }
 
         segments[0] = SanitizeUnrealAssetName(StoryCsvService.RemoveChapterSectionSuffix(segments[0]));
-        return $"{context.TargetAssetRoot}/Voice/{string.Join("/", segments)}";
+        return $"{UnrealSyncPathPolicy.VoiceFolder}/{string.Join("/", segments)}";
     }
 
     public static string BuildAssetObjectPath(string destinationPath, string sourcePath)
@@ -1655,7 +1636,7 @@ internal sealed class UnrealSyncService
     public static string AssetObjectPathToFilePath(UnrealSyncContext context, string objectPath)
     {
         var packagePath = objectPath.Split('.')[0].Trim('/');
-        var targetRoot = context.TargetAssetRoot.Trim('/');
+        var targetRoot = UnrealSyncPathPolicy.AssetMaterialRoot.Trim('/');
         var relativePath = packagePath.StartsWith(targetRoot, StringComparison.OrdinalIgnoreCase)
             ? packagePath[targetRoot.Length..].Trim('/')
             : packagePath;
@@ -1667,7 +1648,7 @@ internal sealed class UnrealSyncService
 
     private static string AssetFolderPathToFilePath(UnrealSyncContext context, string folderPath)
     {
-        var targetRoot = context.TargetAssetRoot.Trim('/');
+        var targetRoot = UnrealSyncPathPolicy.AssetMaterialRoot.Trim('/');
         var relativePath = folderPath.Trim('/').StartsWith(targetRoot, StringComparison.OrdinalIgnoreCase)
             ? folderPath.Trim('/')[targetRoot.Length..].Trim('/')
             : folderPath.Trim('/');
@@ -1690,7 +1671,7 @@ internal sealed class UnrealSyncService
         }
 
         var assetName = Path.GetFileNameWithoutExtension(assetFilePath);
-        return $"{context.TargetAssetRoot.TrimEnd('/')}/{packagePath}.{assetName}";
+        return $"{UnrealSyncPathPolicy.AssetMaterialRoot.TrimEnd('/')}/{packagePath}.{assetName}";
     }
 
     private static string BuildAssetFolderPathFromFolder(UnrealSyncContext context, string folderPath)
@@ -1698,10 +1679,10 @@ internal sealed class UnrealSyncService
         var relativePath = Path.GetRelativePath(context.TargetContentFolderPath, folderPath);
         if (relativePath.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativePath))
         {
-            return context.TargetAssetRoot;
+            return UnrealSyncPathPolicy.AssetMaterialRoot;
         }
 
-        return $"{context.TargetAssetRoot.TrimEnd('/')}/{relativePath.Replace(Path.DirectorySeparatorChar, '/')}";
+        return $"{UnrealSyncPathPolicy.AssetMaterialRoot.TrimEnd('/')}/{relativePath.Replace(Path.DirectorySeparatorChar, '/')}";
     }
 
     public UnrealSyncState ReadState(UnrealSyncContext context)
@@ -1779,21 +1760,24 @@ internal sealed class UnrealSyncService
         Func<CharacterInfo, IReadOnlyDictionary<string, string>> getPortraitPreviewPathsByLayerFileName)
     {
         var groups = new List<UnrealSyncDeleteGroup>();
-        AddDeleteGroup(groups, context, $"{context.TargetAssetRoot}/BackGround", backgroundPaths.Select(GetExpectedImportedAssetName));
-        AddDeleteGroup(groups, context, $"{context.TargetAssetRoot}/BGM", musicPaths.Select(GetExpectedImportedAssetName));
-        AddDeleteGroup(groups, context, $"{context.TargetAssetRoot}/Scene_Effect", ambientPaths.Concat(soundEffectPaths).Select(GetExpectedImportedAssetName));
+        AddDeleteGroup(groups, context, UnrealSyncPathPolicy.BackgroundFolder, backgroundPaths.Select(GetExpectedImportedAssetName));
+        AddDeleteGroup(groups, context, UnrealSyncPathPolicy.BgmFolder, musicPaths.Select(GetExpectedImportedAssetName));
+        AddDeleteGroup(groups, context, UnrealSyncPathPolicy.SceneEffectFolder, ambientPaths.Concat(soundEffectPaths).Select(GetExpectedImportedAssetName));
         AddProjectVoiceDeleteGroups(groups, context, voicePaths);
 
         var expectedExcelTextAssets = storyTables
             .Select(entry => entry.TableAsset)
             .Concat(new[]
             {
-                $"{context.TargetAssetRoot}/ExcelTexts/BGIndexMap.BGIndexMap",
-                $"{context.TargetAssetRoot}/ExcelTexts/BGMap.BGMap",
-                $"{context.TargetAssetRoot}/ExcelTexts/SceneIndexMap.SceneIndexMap",
-                $"{context.TargetAssetRoot}/ExcelTexts/ExsIndexMap.ExsIndexMap"
+                UnrealSyncPathPolicy.EffectIndexTableAsset,
+                // ⚠️ 剧情选项分支表**必须列进来**：这个删除组是 recursive 的，
+                // 凡是 ExcelTexts 下不在期望集合里的资产都会被删。
+                // 而 WHK 里 AllRoad.uasset 恰好就放在 ExcelTexts 下
+                // （工具箱的常量指向 AssetMaterial/AllRoad —— 两处路径目前对不上，
+                //  这一条是保底，避免同步顺手把它删掉）。
+                StoryBranchDataTableAssetPath
             });
-        AddDeleteGroupByExpectedAssets(groups, context, $"{context.TargetAssetRoot}/ExcelTexts", expectedExcelTextAssets, recursive: true);
+        AddDeleteGroupByExpectedAssets(groups, context, UnrealSyncPathPolicy.ExcelTextsRoot, expectedExcelTextAssets, recursive: true);
 
         var expectedLustrationRootAssets = new[] { "DA_LustrationInfor" };
         if (context.AssetLibrary.IsPortraitPreviewEnabled)
@@ -1801,7 +1785,7 @@ internal sealed class UnrealSyncService
             expectedLustrationRootAssets = expectedLustrationRootAssets.Append("DA_Portraits").ToArray();
         }
 
-        AddDeleteGroup(groups, context, $"{context.TargetAssetRoot}/Lustration", expectedLustrationRootAssets);
+        AddDeleteGroup(groups, context, $"{UnrealSyncPathPolicy.LustrationRoot}", expectedLustrationRootAssets);
         AddLustrationLayerDeleteGroups(groups, context, characters);
         if (context.AssetLibrary.IsPortraitPreviewEnabled)
         {
@@ -1819,7 +1803,7 @@ internal sealed class UnrealSyncService
         var expectedAssetPaths = voicePaths
             .Where(File.Exists)
             .Select(path => BuildAssetObjectPath(GetProjectVoiceDestinationPath(context, path), path));
-        AddDeleteGroupByExpectedAssets(groups, context, $"{context.TargetAssetRoot}/Voice", expectedAssetPaths, recursive: true);
+        AddDeleteGroupByExpectedAssets(groups, context, UnrealSyncPathPolicy.VoiceFolder, expectedAssetPaths, recursive: true);
     }
 
     private static string GetProjectVoiceRelativeFolder(string voiceRootPath, string voicePath)
@@ -1851,14 +1835,16 @@ internal sealed class UnrealSyncService
             AddExpectedLustrationLayerAssets(expectedByDestination, context, character, CharacterLayerKind.Adorn);
         }
 
-        var lustrationFolderPath = AssetFolderPathToFilePath(context, $"{context.TargetAssetRoot}/Lustration");
+        var lustrationFolderPath = AssetFolderPathToFilePath(context, $"{UnrealSyncPathPolicy.LustrationRoot}");
         if (!Directory.Exists(lustrationFolderPath))
         {
             return;
         }
 
         var managedLayerFolders = new HashSet<string>(
-            new[] { "DN_Cloths", CharacterLayerAssetService.GetFolderName(CharacterLayerKind.Face), CharacterLayerAssetService.GetFolderName(CharacterLayerKind.Adorn) },
+            Enum.GetValues<CharacterLayerKind>()
+                .Where(UnrealSyncPathPolicy.IsSyncableCharacterLayer)
+                .Select(UnrealSyncPathPolicy.GetCharacterLayerFolderName),
             StringComparer.OrdinalIgnoreCase);
         var extrasByDestination = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var assetFilePath in Directory.EnumerateFiles(lustrationFolderPath, "*.uasset", SearchOption.AllDirectories))
@@ -1933,7 +1919,7 @@ internal sealed class UnrealSyncService
             AddDeleteGroup(groups, context, destination, expectedAssetNames);
         }
 
-        var lustrationFolderPath = AssetFolderPathToFilePath(context, $"{context.TargetAssetRoot}/Lustration");
+        var lustrationFolderPath = AssetFolderPathToFilePath(context, $"{UnrealSyncPathPolicy.LustrationRoot}");
         if (!Directory.Exists(lustrationFolderPath))
         {
             return;
@@ -2103,7 +2089,7 @@ internal sealed class UnrealSyncService
 
     private static string BuildImportedAssetFilePath(UnrealSyncContext context, string destinationPath, string sourcePath)
     {
-        var targetRoot = context.TargetAssetRoot.Trim('/');
+        var targetRoot = UnrealSyncPathPolicy.AssetMaterialRoot.Trim('/');
         var relativeDestination = destinationPath.Trim('/').StartsWith(targetRoot, StringComparison.OrdinalIgnoreCase)
             ? destinationPath.Trim('/')[targetRoot.Length..].Trim('/')
             : destinationPath.Trim('/');
@@ -2233,7 +2219,7 @@ internal sealed class UnrealSyncService
     private static string BuildStoryTableFolder(UnrealSyncContext context, ChapterInfo chapter, bool hasMultipleSections)
     {
         var categoryFolder = GetChapterCategoryFolder(chapter.Type);
-        var folder = $"{context.TargetAssetRoot}/ExcelTexts/{categoryFolder}";
+        var folder = $"{UnrealSyncPathPolicy.ExcelTextsRoot}/{categoryFolder}";
         return hasMultipleSections
             ? $"{folder}/{SanitizeUnrealAssetName(StoryCsvService.RemoveChapterSectionSuffix(chapter.Code))}"
             : folder;
@@ -2247,7 +2233,7 @@ internal sealed class UnrealSyncService
         string targetAssetName)
     {
         var categoryFolder = GetChapterCategoryFolder(chapter.Type);
-        var rootFolder = $"{context.TargetAssetRoot}/ExcelTexts/{categoryFolder}";
+        var rootFolder = $"{UnrealSyncPathPolicy.ExcelTextsRoot}/{categoryFolder}";
         var previousFolder = $"{rootFolder}/{SanitizeUnrealAssetName(chapter.Code)}";
         var previousUnderscoreFolder = $"{rootFolder}/{SanitizeUnrealAssetName(chapter.Code.Replace('-', '_'))}";
         var legacyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
