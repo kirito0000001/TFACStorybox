@@ -254,8 +254,9 @@ namespace GalExcleTools
                     false,
                     detectionPlan[UnrealSyncProgressPlan.Detect].At(10));
                 var changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context));
+                // 变更细节已经并进 ApplyUnrealSyncChangePlan 了（原来还有一个
+                // AppendUnrealSyncDiffDetails 往同一块区域再铺一遍、把每个文件名都列出来）。
                 ApplyUnrealSyncChangePlan(changePlan);
-                AppendUnrealSyncDiffDetails(changePlan);
                 SetUnrealSyncStatus(
                     changePlan.HasChanges ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
                     changePlan.HasChanges ? "检测到同步差异" : "没有同步差异",
@@ -587,7 +588,11 @@ namespace GalExcleTools
 
             try
             {
-                var result = UnrealSyncPreflightCheck.Run(enginePath, unrealProjectPath, assetLibraryPath);
+                // 注意参数顺序：Run(unrealProjectPath, enginePath, assetLibraryPath)。
+                // 这里原先传反了（引擎在前），后果不只是两行显示错 ——
+                // 检测发现"工程不存在"就会**提前返回**，后面十几项目录/资产检查根本没跑，
+                // 于是整层只剩两条"不合规"。2026-10-12 从截图上看出来的。
+                var result = UnrealSyncPreflightCheck.Run(unrealProjectPath, enginePath, assetLibraryPath);
                 _applicationViewModel.UnrealSync.ApplyCheckResult(result);
             }
             catch (Exception exception)
@@ -610,12 +615,19 @@ namespace GalExcleTools
         private void ApplyUnrealSyncValidation(UnrealSyncValidation validation)
         {
             SetUnrealSyncStatus(validation.Severity, validation.Title, validation.Message);
-            SyncPanel.ClearPlanItems();
+            // 校验信息也铺进同一张对比表 —— 检测之前它是这张表唯一的内容。
+            //
+            // 那些行是 Runner 里拼好的「类别：说明」文本，所以在第一个全角冒号处切开
+            // （只切第一个：说明里可以再出现冒号）。拼装格式在 Runner 的
+            // CreateUnrealSyncPlanItems 里，改那边时记得这里的假设。
+            SyncPanel.ClearDiffRows();
             foreach (var item in validation.PlanItems)
             {
-                // 前面那个「• 」是**校验清单**自己的记号（变更清单的正文不带），
-                // 所以在这儿加，而不是让面板替所有正文都加。
-                SyncPanel.AddPlanText($"• {item}");
+                var separator = item.IndexOf('：');
+                SyncPanel.AddDiffRow(
+                    separator > 0 ? item[..separator] : item,
+                    string.Empty,
+                    separator > 0 ? item[(separator + 1)..] : string.Empty);
             }
 
             SyncPanel.SummaryText = validation.Summary;
@@ -684,160 +696,139 @@ namespace GalExcleTools
             }
         }
 
+        /// <summary>
+        /// 把变更计划铺成**一张对比表**：一行 = 一个类别变了多少。
+        ///
+        /// 这里原来是"把每个文件名都列出来"（27 个背景 + 18 个 BGM + 138 个立绘……几百行），
+        /// 一屏装不下、也没人看得下去。现在只报数量与目标位置 ——
+        /// 想知道具体是哪些文件，去 Unreal 内容浏览器里看比在日志里翻更直接。
+        /// </summary>
         private void ApplyUnrealSyncChangePlan(UnrealSyncChangePlan changePlan)
         {
-            SyncPanel.ClearPlanItems();
-            SyncPanel.AddPlanHeading("同步方式");
-            SyncPanel.AddPlanText(changePlan.IsFullSync
-                ? "全部重新同步：忽略同步记录，重新处理全部内容。"
-                : "仅同步本次检测到的变化，未变化的内容不会重复处理。");
+            SyncPanel.ClearDiffRows();
 
-            SyncPanel.AddPlanHeading("本次同步", topMargin: 10);
-            if (changePlan.ChangeItems.Count == 0)
-            {
-                SyncPanel.AddPlanText("没有需要处理的内容。");
-            }
-            else
-            {
-                foreach (var item in changePlan.ChangeItems)
-                {
-                    SyncPanel.AddPlanText($"• {item}");
-                }
-            }
-
-            if (changePlan.UnchangedItems.Count > 0)
-            {
-                SyncPanel.AddPlanHeading("无需处理", topMargin: 10);
-                foreach (var item in changePlan.UnchangedItems)
-                {
-                    SyncPanel.AddPlanText($"• {item}");
-                }
-            }
-
-            SyncPanel.SummaryText = changePlan.Summary;
-        }
-
-        private void AppendUnrealSyncDiffDetails(UnrealSyncChangePlan changePlan)
-        {
             if (!changePlan.HasChanges)
             {
+                SyncPanel.AddDiffRow("（无变化）", "当前内容与虚幻项目一致", "不会启动 Unreal，也不会做本地提交。");
+                SyncPanel.SummaryText = changePlan.Summary;
                 return;
             }
 
             foreach (var group in changePlan.ImportGroups)
             {
-                var displayName = GetUnrealSyncDestinationDisplayName(group.Destination);
-                SyncPanel.AddPlanHeading($"新增或更新：{displayName}（{group.Files.Count} 个）", topMargin: 12);
-                SyncPanel.AddPlanText($"目标位置：{group.Destination}");
-                foreach (var path in group.Files)
-                {
-                    SyncPanel.AddPlanText($"  - {Path.GetFileName(path)}");
-                }
+                SyncPanel.AddDiffRow(
+                    GetUnrealSyncDestinationDisplayName(group.Destination),
+                    $"新增或更新 {group.Files.Count} 个",
+                    group.Destination);
             }
 
             foreach (var group in changePlan.DeleteGroups)
             {
-                var displayName = GetUnrealSyncDestinationDisplayName(group.Destination);
-                SyncPanel.AddPlanHeading($"清理多余素材：{displayName}（{group.Assets.Count} 个）", topMargin: 12);
-                SyncPanel.AddPlanText($"虚幻位置：{group.Destination}");
-                foreach (var assetPath in group.Assets)
-                {
-                    SyncPanel.AddPlanText($"  - {assetPath}");
-                }
+                SyncPanel.AddDiffRow(
+                    GetUnrealSyncDestinationDisplayName(group.Destination),
+                    $"清理多余素材 {group.Assets.Count} 个",
+                    group.Destination);
             }
 
             if (changePlan.StoryTables.Count > 0)
             {
-                SyncPanel.AddPlanHeading($"更新剧情表（{changePlan.StoryTables.Count} 张）", topMargin: 12);
-                SyncPanel.AddPlanText($"目标位置：{GetUnrealAssetFolderPath(changePlan.StoryTables[0].TableAsset)}");
-                foreach (var entry in changePlan.StoryTables)
-                {
-                    SyncPanel.AddPlanText($"  - {Path.GetFileName(entry.CsvPath)} -> {entry.TableAsset}");
-                }
+                SyncPanel.AddDiffRow(
+                    "剧情表",
+                    $"更新 {changePlan.StoryTables.Count} 张",
+                    GetUnrealAssetFolderPath(changePlan.StoryTables[0].TableAsset));
             }
 
             if (changePlan.AssetIndexTables.Count > 0)
             {
-                SyncPanel.AddPlanHeading($"更新素材索引表（{changePlan.AssetIndexTables.Count} 张）", topMargin: 12);
-                SyncPanel.AddPlanText($"目标位置：{GetUnrealAssetFolderPath(changePlan.AssetIndexTables[0].TableAsset)}");
-                foreach (var entry in changePlan.AssetIndexTables)
-                {
-                    SyncPanel.AddPlanText($"  - {Path.GetFileName(entry.CsvPath)} -> {entry.TableAsset}");
-                }
-            }
-
-            if (changePlan.LustrationChanged)
-            {
-                SyncPanel.AddPlanHeading($"更新立绘数据（{changePlan.LustrationRows.Count} 个角色）", topMargin: 12);
-                foreach (var row in changePlan.LustrationRows)
-                {
-                    SyncPanel.AddPlanText($"  - {row.Key} / {row.Name}");
-                }
-            }
-
-            if (changePlan.PortraitsChanged)
-            {
-                SyncPanel.AddPlanHeading($"更新小预览数据（{changePlan.PortraitRows.Count} 个角色）", topMargin: 12);
-                foreach (var row in changePlan.PortraitRows)
-                {
-                    SyncPanel.AddPlanText($"  - {row.Key} / {row.Name}");
-                }
+                SyncPanel.AddDiffRow(
+                    "特殊音效索引表",
+                    $"更新 {changePlan.AssetIndexTables.Count} 张",
+                    GetUnrealAssetFolderPath(changePlan.AssetIndexTables[0].TableAsset));
             }
 
             if (changePlan.StoryBranchesChanged)
             {
-                SyncPanel.AddPlanHeading($"更新剧情选项分支（{changePlan.StoryBranches.Sum(source => source.Routes.Count)} 条）", topMargin: 12);
-                SyncPanel.AddPlanText($"目标表：{UnrealSyncService.StoryBranchDataTableAssetPath}");
-                foreach (var source in changePlan.StoryBranches)
-                {
-                    SyncPanel.AddPlanText($"  - {source.SourceTable}");
-                    foreach (var route in source.Routes)
-                    {
-                        SyncPanel.AddPlanText($"      选项 {route.OptionKey}：{route.OptionText} -> {route.TargetTable}");
-                    }
-                }
+                SyncPanel.AddDiffRow(
+                    "剧情选项分支",
+                    $"更新 {changePlan.StoryBranches.Sum(source => source.Routes.Count)} 条",
+                    UnrealSyncService.StoryBranchDataTableAssetPath);
             }
 
             if (changePlan.VoiceMapsChanged)
             {
-                SyncPanel.AddPlanHeading($"更新剧情语音映射（{changePlan.VoiceMaps.Sum(entry => entry.AssignedCount)} 条）", topMargin: 12);
-                SyncPanel.AddPlanText($"目标蓝图：{UnrealSyncService.MusicPlayerBlueprintAssetPath}");
-                foreach (var entry in changePlan.VoiceMaps)
-                {
-                    SyncPanel.AddPlanText($"  - {entry.TableAsset}：{entry.AssignedCount} 条语音 / {entry.Waves.Count} 个索引槽位");
-                }
+                SyncPanel.AddDiffRow(
+                    "剧情语音映射",
+                    $"写入 {changePlan.VoiceMaps.Sum(entry => entry.AssignedCount)} 条",
+                    UnrealSyncService.MusicPlayerBlueprintAssetPath);
             }
+
+            if (changePlan.LustrationChanged)
+            {
+                SyncPanel.AddDiffRow(
+                    "立绘信息表",
+                    $"更新 {changePlan.LustrationRows.Count} 个角色",
+                    UnrealSyncPathPolicy.LustrationInfoAsset);
+            }
+
+            if (changePlan.PortraitsChanged)
+            {
+                SyncPanel.AddDiffRow(
+                    "小预览数据",
+                    $"更新 {changePlan.PortraitRows.Count} 个角色",
+                    UnrealSyncPathPolicy.PortraitsInfoAsset);
+            }
+
+            // 变量列表：几条请求，每条都是整个数组重写（不是增量）。
+            if (changePlan.VariablePlan.Requests.Count > 0)
+            {
+                SyncPanel.AddDiffRow(
+                    "变量列表",
+                    $"写入 {changePlan.VariablePlan.Requests.Count} 组",
+                    string.Join("、", changePlan.VariablePlan.Requests.Select(request => request.VariableName)));
+            }
+
+            SyncPanel.SummaryText = changePlan.Summary;
         }
 
+        /// <summary>
+        /// 目标目录 → 给人看的类别名。
+        ///
+        /// 这里必须跟着 <see cref="UnrealSyncPathPolicy"/> 的落点走：落点换了而这里没换，
+        /// 对比表里就会出现一串 /Game/... 路径当"类别名"。
+        /// （2026-10-12 之前这里判的还是 /BackGround、/BGM、/Lustration 那套旧布局。）
+        /// </summary>
         private static string GetUnrealSyncDestinationDisplayName(string destination)
         {
             var normalized = destination.Replace('\\', '/').TrimEnd('/');
-            if (normalized.EndsWith("/BackGround", StringComparison.OrdinalIgnoreCase))
+
+            if (normalized.StartsWith(UnrealSyncPathPolicy.BackgroundFolder, StringComparison.OrdinalIgnoreCase))
             {
                 return "背景图";
             }
-            if (normalized.EndsWith("/BGM", StringComparison.OrdinalIgnoreCase))
+            if (normalized.StartsWith(UnrealSyncPathPolicy.BgmFolder, StringComparison.OrdinalIgnoreCase))
             {
                 return "BGM";
             }
-            if (normalized.EndsWith("/Scene_Effect", StringComparison.OrdinalIgnoreCase))
+            if (normalized.StartsWith(UnrealSyncPathPolicy.SceneEffectFolder, StringComparison.OrdinalIgnoreCase))
             {
                 return "环境音与特殊音效";
             }
-
-            var voiceMarker = "/Voice/";
-            var voiceIndex = normalized.IndexOf(voiceMarker, StringComparison.OrdinalIgnoreCase);
-            if (voiceIndex >= 0)
+            if (normalized.StartsWith(UnrealSyncPathPolicy.LustrationPreviewRoot, StringComparison.OrdinalIgnoreCase))
             {
-                return $"章节语音：{normalized[(voiceIndex + voiceMarker.Length)..]}";
+                return "小预览";
             }
-            if (normalized.EndsWith("/Voice", StringComparison.OrdinalIgnoreCase))
-            {
-                return "语音";
-            }
-            if (normalized.Contains("/Lustration", StringComparison.OrdinalIgnoreCase))
+            if (normalized.StartsWith(UnrealSyncPathPolicy.LustrationRoot, StringComparison.OrdinalIgnoreCase))
             {
                 return "立绘素材";
+            }
+            if (normalized.StartsWith(UnrealSyncPathPolicy.ExcelTextsRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return "剧情表";
+            }
+            if (normalized.StartsWith(UnrealSyncPathPolicy.VoiceFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                var chapter = normalized[UnrealSyncPathPolicy.VoiceFolder.Length..].Trim('/');
+                return string.IsNullOrEmpty(chapter) ? "语音" : $"章节语音：{chapter}";
             }
 
             var separatorIndex = normalized.LastIndexOf('/');

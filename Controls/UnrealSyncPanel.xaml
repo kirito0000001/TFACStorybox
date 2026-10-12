@@ -35,7 +35,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <StackPanel Spacing="6">
@@ -159,19 +158,40 @@
                         原来那个 x:Name="UnrealSyncProgressPanel" 的进度条已删：
                         它恒为 Collapsed，真正的进度走全局浮层（SetUnrealSyncProgress 里）。
                     -->
+                    <!--
+                        变更对比。
+                        这里原来是"把每个文件名都列出来"（27 个背景 + 18 个 BGM + 138 个立绘……几百行），
+                        没人看得下去。现在只报**每个类别变了多少**；要看具体是哪些文件，
+                        去 Unreal 内容浏览器里看更直接。
+                        排在按钮上面：先看清要改什么，再决定点不点。
+                    -->
                     <Grid Grid.Row="2" RowSpacing="8">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <TextBlock x:Name="UnrealSyncSummaryText" Style="{StaticResource SubtleTextStyle}" />
+
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="150" />
+                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="类别" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+                            <TextBlock Grid.Column="1" Text="变更" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+                            <TextBlock Grid.Column="2" Text="说明" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
+                        </Grid>
+
                         <ScrollViewer
                             Grid.Row="1"
-                            MaxHeight="260"
+                            MaxHeight="300"
                             HorizontalScrollBarVisibility="Disabled"
                             VerticalScrollBarVisibility="Auto">
-                            <ItemsControl x:Name="UnrealSyncPlanItemsControl" />
+                            <ItemsControl x:Name="UnrealSyncDiffItemsControl" />
                         </ScrollViewer>
+
+                        <TextBlock x:Name="UnrealSyncSummaryText" Grid.Row="2" Style="{StaticResource SubtleTextStyle}" />
                     </Grid>
 
                     <Button
@@ -185,8 +205,6 @@
                         Click="RunUnrealSyncButton_Click" />
                 </Grid>
             </Border>
-
-            <controls:UnrealSyncRulesPanel Grid.Row="5" />
         </Grid>
     </ScrollViewer>
 </UserControl>

@@ -37,7 +37,6 @@ internal sealed class UnrealSyncViewModel : ObservableObject
     private bool _isLoadingProjects;
     private bool _hidePassedChecks;
     private bool _isChecking;
-    private bool _isCheckPanelExpanded = true;
     private IReadOnlyList<UnrealSyncCheckRow> _visibleCheckRows = [];
     private string _checkSummaryText = "尚未检测。点「开始检测」会检查引擎、工程、落点目录与目标资产。";
     private bool _canSync;
@@ -100,12 +99,6 @@ internal sealed class UnrealSyncViewModel : ObservableObject
                 RefreshVisibleCheckRows();
             }
         }
-    }
-
-    public bool IsCheckPanelExpanded
-    {
-        get => _isCheckPanelExpanded;
-        set => SetProperty(ref _isCheckPanelExpanded, value);
     }
 
     /// <summary>检测区标题，例如「同步前检测 · 合规 12 / 14」。</summary>

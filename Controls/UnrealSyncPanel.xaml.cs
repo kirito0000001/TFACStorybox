@@ -25,6 +25,10 @@ namespace GalExcleTools.Controls;
 /// </summary>
 public sealed partial class UnrealSyncPanel : UserControl
 {
+    /// <summary>变更对比表的列宽。改这里要同时改 XAML 里那行表头的列宽。</summary>
+    private const double DiffCategoryWidth = 150;
+    private const double DiffChangeWidth = 220;
+
     public UnrealSyncPanel()
     {
         InitializeComponent();
@@ -109,31 +113,46 @@ public sealed partial class UnrealSyncPanel : UserControl
         UnrealSyncStatusInfoBar.Message = message;
     }
 
-    // ── 窗口 → 面板：变更清单 ──────────────────────────────────────
+    // ── 窗口 → 面板：变更对比表 ────────────────────────────────────
     //
-    // 两个样式原样从窗口搬过来（标题 SemiBold + 主色 + 5px 下边距；正文次色 + 4px），
-    // 正文就是原文、不加项目符号 —— 缩进层级靠调用方给的 topMargin 表达。
+    // 一行 = 一个类别变了多少。列宽**必须和 XAML 里那行表头一致**，
+    // 否则表头和内容会错位 —— 这也是原来那版"一坨文字"的问题之一。
 
-    public void ClearPlanItems() => UnrealSyncPlanItemsControl.Items.Clear();
+    public void ClearDiffRows() => UnrealSyncDiffItemsControl.Items.Clear();
 
-    public void AddPlanHeading(string text, double topMargin = 0) =>
-        UnrealSyncPlanItemsControl.Items.Add(new TextBlock
+    public void AddDiffRow(string category, string change, string note)
+    {
+        var row = new Grid { ColumnSpacing = 12, Padding = new Thickness(0, 6, 0, 6) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DiffCategoryWidth) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DiffChangeWidth) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        row.Children.Add(BuildDiffCell(category, 0, primary: true));
+        row.Children.Add(BuildDiffCell(change, 1, primary: false));
+        row.Children.Add(BuildDiffCell(note, 2, primary: false));
+
+        UnrealSyncDiffItemsControl.Items.Add(new Border
         {
-            Text = text,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, topMargin, 0, 5),
-            FontWeight = FontWeights.SemiBold,
-            Foreground = Application.Current.Resources["TextFillColorPrimaryBrush"] as Brush
+            BorderBrush = Application.Current.Resources["DividerStrokeColorDefaultBrush"] as Brush,
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Child = row
         });
+    }
 
-    public void AddPlanText(string text, double topMargin = 0) =>
-        UnrealSyncPlanItemsControl.Items.Add(new TextBlock
+    private static TextBlock BuildDiffCell(string? text, int column, bool primary)
+    {
+        var cell = new TextBlock
         {
-            Text = text,
+            Text = text ?? string.Empty,
             TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, topMargin, 0, 4),
-            Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
-        });
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = primary ? 14 : 13,
+            Foreground = Application.Current.Resources[
+                primary ? "TextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush"] as Brush
+        };
+        Grid.SetColumn(cell, column);
+        return cell;
+    }
 
     // ── 窗口 → 面板：工作台项目 ────────────────────────────────────
     //
