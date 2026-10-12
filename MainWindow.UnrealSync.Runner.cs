@@ -197,13 +197,14 @@ namespace GalExcleTools
                 $"音乐：源文件 {musicCount} 个，引擎内已有 {existingMusicCount} 个 .uasset。",
                 $"环境音/特殊音效：源文件 {sceneCount + soundEffectCount} 个，引擎内已有 {existingSceneCount} 个 .uasset。",
                 $"文本语音：源文件 {voiceCount} 个，引擎内已有 {existingVoiceCount} 个 .uasset；同步后会按剧情行号刷新 MusicPlayer 语音映射。",
-                $"素材索引表：背景 {backgroundCount}、BGM {musicCount}、环境音 {sceneCount}、特殊音效 {soundEffectCount}，将同步到 ExcelTexts 的 4 张 DataTable。",
+                $"变量列表：背景 {backgroundCount}、BGM {musicCount}、环境音 {sceneCount} —— 直接写进 UI_Story.BGMaps 与 MusicActor 的 BGMaps / BGMapsLoopStart / SceneMaps，不再走索引表。",
+                $"特殊音效：{soundEffectCount} 个 —— 它没有目标变量，仍同步到 ExcelTexts/ExsIndexMap 这一张表。",
                 $"CSV 表格：{csvCount} 个，将导入到 ExcelTexts。",
-                $"立绘图层：{characterLayerCount} 个，将按 Lustration/角色/图层目录导入。",
+                $"立绘图层：{characterLayerCount} 个，将按 Lustration_Image/角色/图层（DN_Cloths、FC_Face、AD_Adorn）导入。",
                 assetLibrary.IsPortraitPreviewEnabled
-                    ? $"小预览：源文件 {portraitPreviewCount} 个，缺失设置 {missingPortraitPreviewCount} 个，将同步到 Lustration/角色/Log_Preview 和 DA_Portraits。"
+                    ? $"小预览：源文件 {portraitPreviewCount} 个，缺失设置 {missingPortraitPreviewCount} 个，将同步到 LustrationPreview_Image 与 DA_LustrationPreviewInfor。"
                     : "小预览：当前素材库未启用。",
-                $"立绘信息表：{lustrationRowCount} 个角色，将同步到 Lustration/DA_LustrationInfor。"
+                $"立绘信息表：{lustrationRowCount} 个角色，将同步到 Lustration_Image/DA_LustrationInfor。"
             ];
         }
 
@@ -212,7 +213,7 @@ namespace GalExcleTools
             return $"当前关联：工作台项目 {project.Name} / {project.Code}，素材库 {assetLibrary.Name}。同步不会自动触发，必须点击“确认同步”。";
         }
 
-        private UnrealSyncResult RunUnrealSync(
+        private async Task<UnrealSyncResult> RunUnrealSyncAsync(
             UnrealSyncContext context,
             UnrealSyncChangePlan changePlan,
             IProgress<UnrealSyncProgressUpdate>? progress = null,
@@ -221,7 +222,24 @@ namespace GalExcleTools
             var filters = File.Exists(GetCharacterFilterIndexPath(context.AssetLibrary))
                 ? _characterFilterService.Read(context.AssetLibrary)
                 : [];
-            return _unrealSyncService.Run(context, changePlan, filters, progress, cancellationToken);
+            // 不再包 Task.Run：进程编排本身已经是 async 的（UnrealSyncProcessRunner）。
+            return await _unrealSyncService.RunAsync(
+                context,
+                changePlan,
+                filters,
+                progress,
+                // 没匹配到在线编辑器时留一行痕。不留的话用户只会觉得"这次怎么又慢又报错" ——
+                // 离线冷启动要多等十几到 40 秒，而且离线实例读不到某些资产。
+                onUsedOffline: message => AppendLog(LogKind.Info, message),
+                onOfflineFallback: message =>
+                {
+                    AppendLog(LogKind.Warning, "在线执行不可用，已自动退回离线执行。" + message);
+                    ShowFloatingTip(
+                        InfoBarSeverity.Informational,
+                        "已退回离线执行",
+                        "打开的编辑器暂时不能接受远程任务，本次改用离线方式执行（会慢十几秒）。");
+                },
+                cancellationToken: cancellationToken);
         }
 
         private List<UnrealStoryTableSyncEntry> BuildStoryTableSyncEntries(UnrealSyncContext context)

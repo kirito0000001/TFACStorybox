@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using static GalExcleTools.Services.ColorUtility;
 using static GalExcleTools.Services.FileSystemUtility;
 using static GalExcleTools.Services.TextUtility;
@@ -31,6 +32,12 @@ internal sealed class UnrealSyncService
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly StoryCsvService _storyCsvService;
     private readonly StoryDocumentRepository _storyDocumentRepository;
+
+    /// <summary>同步一次的超时。老实现里这个 30 分钟写死在等待循环里。</summary>
+    private static readonly TimeSpan UnrealSyncTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>在线 / 离线的选路与启动构造。见 <see cref="UnrealPythonTaskExecutionService"/>。</summary>
+    private readonly UnrealPythonTaskExecutionService _taskExecutionService = new();
 
     public UnrealSyncService()
         : this(new JsonSerializerOptions { WriteIndented = true }, new StoryCsvService())
@@ -1068,11 +1075,27 @@ internal sealed class UnrealSyncService
         File.WriteAllText(scriptPath, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
-    public UnrealSyncResult Run(
+    /// <summary>
+    /// 跑一次同步。
+    ///
+    /// 【为什么改成 async】进程编排交给了 <see cref="UnrealSyncProcessRunner"/> ——
+    /// 那套修掉了老实现里的三个坑：取消时进程杀不掉（取消落在 Task.Delay 里直接掀掉循环，
+    /// 循环顶部那句 Kill 永远轮不到，编辑器成孤儿占着工程锁）、子进程输出没固定 UTF-8
+    /// （中文日志必然乱码，偏偏只在出错时被人看）、拿退出码判成败（commandlet 只要工程里
+    /// 别处有编译错误就返回非 0）。
+    ///
+    /// 【在线 / 离线】本项目选的是"**只给同步这条链路走在线**"（2026-10-12 定的选项 C）：
+    /// 编辑器开着时走 Python 远程执行、快约十倍；连不上才退回离线冷启。
+    /// 选路与回退都在 <see cref="UnrealPythonTaskExecutionService"/> 里，
+    /// 这里只把"没匹配到在线"和"在线失败退回"两种情况转成给别人看的话（两个回调）。
+    /// </summary>
+    public async Task<UnrealSyncResult> RunAsync(
         UnrealSyncContext context,
         UnrealSyncChangePlan changePlan,
         IReadOnlyList<CharacterFilterEntry> filters,
         IProgress<UnrealSyncProgressUpdate>? progress = null,
+        Action<string>? onUsedOffline = null,
+        Action<string>? onOfflineFallback = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -1082,8 +1105,11 @@ internal sealed class UnrealSyncService
         var scriptPath = Path.Combine(savedFolder, "gal_sync_import.py");
         var progressPath = Path.Combine(savedFolder, "gal-sync-progress.json");
         var resultPath = Path.Combine(savedFolder, "gal-sync-result.json");
-        File.Delete(progressPath);
-        File.Delete(resultPath);
+
+        // 上一轮的进度/结果文件先清掉。删不掉不是致命错误 —— 判成败看的是
+        // 「结果文件是不是这一轮写的」（下面 verdict 里的 IsFreshOutput），那才是兜底。
+        UnrealSyncProcessRunner.TryClearStaleFile(progressPath);
+        UnrealSyncProcessRunner.TryClearStaleFile(resultPath);
 
         progress?.Report(new UnrealSyncProgressUpdate("正在写入同步清单...", 40));
         WriteManifest(context, changePlan, filters, manifestPath, progressPath, resultPath);
@@ -1092,7 +1118,9 @@ internal sealed class UnrealSyncService
         WritePythonScript(scriptPath, manifestPath);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var processStartInfo = new ProcessStartInfo
+        // 离线的启动参数：冷启一个无头编辑器跑同一份脚本（这条路一直有，
+        // 也是唯一一条"编辑器没开"时能走的路）。
+        var offlineStartInfo = new ProcessStartInfo
         {
             FileName = context.EditorPath,
             UseShellExecute = false,
@@ -1100,47 +1128,52 @@ internal sealed class UnrealSyncService
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        processStartInfo.ArgumentList.Add(context.UnrealProjectPath);
-        processStartInfo.ArgumentList.Add($"-ExecutePythonScript={scriptPath}");
-        processStartInfo.ArgumentList.Add("-unattended");
-        processStartInfo.ArgumentList.Add("-nop4");
-        processStartInfo.ArgumentList.Add("-nosplash");
+        offlineStartInfo.ArgumentList.Add(context.UnrealProjectPath);
+        offlineStartInfo.ArgumentList.Add($"-ExecutePythonScript={scriptPath}");
+        offlineStartInfo.ArgumentList.Add("-unattended");
+        offlineStartInfo.ArgumentList.Add("-nop4");
+        offlineStartInfo.ArgumentList.Add("-nosplash");
 
-        progress?.Report(new UnrealSyncProgressUpdate("正在启动 Unreal Editor 命令进程...", 55));
-        using var process = Process.Start(processStartInfo) ?? throw new InvalidOperationException("无法启动 Unreal Editor。");
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
-        progress?.Report(new UnrealSyncProgressUpdate("Unreal 已启动，正在加载项目并执行导入脚本...", 60));
+        var launch = _taskExecutionService.BuildLaunch(
+            context.EditorPath,
+            context.UnrealProjectPath,
+            scriptPath,
+            Path.Combine(savedFolder, "gal-sync-remote-job.json"),
+            offlineStartInfo);
 
-        var waitStartedAt = DateTime.UtcNow;
-        string? lastProgressJson = null;
-        while (!process.WaitForExit(1000))
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                KillUnrealSyncProcess(process);
-                cancellationToken.ThrowIfCancellationRequested();
-            }
+        progress?.Report(new UnrealSyncProgressUpdate(
+            launch.UsesRunningEditor
+                ? "正在通过运行中的编辑器执行（在线）..."
+                : "正在启动 Unreal Editor 命令进程（离线，较慢）...",
+            55));
 
-            var elapsed = DateTime.UtcNow - waitStartedAt;
-            if (elapsed >= TimeSpan.FromMinutes(30))
-            {
-                KillUnrealSyncProcess(process);
-                throw new TimeoutException("Unreal Editor 同步超过 30 分钟，已终止进程。");
-            }
-
-            var progressUpdate = ReadProgressUpdate(progressPath, ref lastProgressJson);
-            if (progressUpdate is not null)
-            {
-                progress?.Report(progressUpdate);
-            }
-        }
+        var processResult = await UnrealPythonTaskExecutionService.RunWithOfflineFallbackAsync(
+            launch,
+            offlineStartInfo,
+            startInfo => UnrealSyncProcessRunner.RunAsync(
+                startInfo,
+                progressPath,
+                progress,
+                _jsonOptions,
+                UnrealSyncTimeout,
+                "无法启动 Unreal Editor。",
+                "Unreal Editor 同步超过 30 分钟，已终止进程。",
+                // 判成败看**结果文件是不是这一轮写的**，不看退出码：
+                // 退出码非 0 可能只是工程里别处有编译错误，与本轮成不成无关；
+                // 而脚本走到最后一定会 write_result（见脚本末尾），
+                // 所以"结果不新鲜"就等于"它没跑完"。
+                verdict: result => UnrealSyncProcessRunner.IsFreshOutput(resultPath, result.StartedAtUtc)
+                    ? null
+                    : "Unreal 没有写出这一轮的同步结果（结果文件缺失，或仍是上一轮留下的）。",
+                cancellationToken: cancellationToken),
+            onNoOnlineEditor: onUsedOffline,
+            onOfflineFallback: onOfflineFallback).ConfigureAwait(false);
 
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new UnrealSyncProgressUpdate("正在收集 Unreal 同步结果...", 95));
-        var output = outputTask.Result + errorTask.Result + ReadLatestLogSnippet(context);
+        var output = processResult.Output + ReadLatestLogSnippet(context);
         var report = ReadExecutionReport(resultPath);
-        return new UnrealSyncResult(process.ExitCode, manifestPath, scriptPath, progressPath, resultPath, output, report);
+        return new UnrealSyncResult(processResult.ExitCode, manifestPath, scriptPath, progressPath, resultPath, output, report);
     }
 
     public UnrealSyncChangePlan BuildChangePlan(

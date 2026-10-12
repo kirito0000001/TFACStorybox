@@ -377,7 +377,7 @@ namespace GalExcleTools
 
                 var progress = new Progress<UnrealSyncProgressUpdate>(update =>
                     SetUnrealSyncProgress(true, $"{update.Message} {update.Percent:0}%", false, update.Percent));
-                var result = await Task.Run(() => RunUnrealSync(validation.Context, changePlan, progress, cancellationToken), cancellationToken);
+                var result = await RunUnrealSyncAsync(validation.Context, changePlan, progress, cancellationToken);
                 var report = result.Report;
                 var reportSuccess = result.ExitCode == 0 &&
                     report is { ProtocolVersion: 1, Completed: true, Success: true } &&
