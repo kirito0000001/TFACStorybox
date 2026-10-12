@@ -454,8 +454,18 @@ namespace GalExcleTools
             _functionDialogService = new FunctionDialogService(_dialogService, _uiSoundService);
             _applicationViewModel.Settings.AuxiliaryDisplayChanged += (_, _) => UpdateAuxiliaryDisplayVisibility();
             _applicationViewModel.Settings.ThemeSettingsChanged += (_, _) => ApplyThemeSettings();
-            // 检测层自己不做检测（它要读界面上的路径、要写日志），所以发事件让窗口接过去。
-            SyncCheckPanel.CheckRequested += (_, _) => RunUnrealSyncPreflightCheck();
+            // 同步台的界面归 Controls/UnrealSyncPanel，做事留在窗口 ——
+            // 面板只发"用户点了什么"，这儿把六件事接上。
+            //
+            // 五个 async 的写成 async void 形式的 lambda：它们等价于事件处理器，
+            // 各自内部有 try/catch 收异常，不该变成"未观察的任务"。
+            // ProjectSelectionChanged 那条是同步的：它只存设置再刷一遍状态。
+            SyncPanel.EngineChooseRequested += async (_, _) => await ChooseUnrealEngineAsync();
+            SyncPanel.ProjectChooseRequested += async (_, _) => await ChooseUnrealProjectAsync();
+            SyncPanel.ProjectSelectionChanged += (_, _) => OnUnrealSyncProjectSelectionChanged();
+            SyncPanel.CheckRequested += async (_, _) => await RunUnrealSyncDetectionAsync();
+            SyncPanel.FullSyncRequested += async (_, _) => await RunUnrealSyncWithFullResyncAsync();
+            SyncPanel.SyncRequested += async (_, _) => await RunUnrealSyncFlowAsync();
             _applicationViewModel.Settings.LogSettingsChanged += (_, _) =>
             {
                 UpdateLogOptionEnabledState();
@@ -611,8 +621,7 @@ namespace GalExcleTools
                 CharacterClothGridView,
                 CharacterFaceGridView,
                 CharacterAdornGridView,
-                CharacterVfxGridView,
-                UnrealSyncProjectCardsGridView
+                CharacterVfxGridView
             ];
 
             foreach (var gridView in gridViews)

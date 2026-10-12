@@ -44,11 +44,11 @@ namespace GalExcleTools
     {
         private UnrealSyncValidation ValidateUnrealSync(bool useUiValues)
         {
-            var enginePath = useUiValues ? UnrealEnginePathTextBox.Text.Trim() : _appSettings.UnrealEnginePath ?? string.Empty;
-            var unrealProjectPath = useUiValues ? UnrealProjectPathTextBox.Text.Trim() : _appSettings.UnrealProjectPath ?? string.Empty;
-            var contentFolderPath = useUiValues ? UnrealContentFolderTextBox.Text.Trim() : _appSettings.UnrealContentFolderPath ?? string.Empty;
+            var enginePath = useUiValues ? SyncPanel.EnginePath.Trim() : _appSettings.UnrealEnginePath ?? string.Empty;
+            var unrealProjectPath = useUiValues ? SyncPanel.ProjectPath.Trim() : _appSettings.UnrealProjectPath ?? string.Empty;
+            var contentFolderPath = useUiValues ? SyncPanel.TargetFolderText.Trim() : _appSettings.UnrealContentFolderPath ?? string.Empty;
             var projectFolderName = useUiValues
-                ? (UnrealSyncProjectComboBox.SelectedItem as ComboBoxItem)?.Tag as string
+                ? SyncPanel.SelectedProjectTag
                 : _appSettings.UnrealToolProjectFolderName;
 
             var planItems = new List<string>();

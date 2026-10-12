@@ -63,7 +63,7 @@ namespace GalExcleTools
             MusicPlayerPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             RefreshProjectTextToolPage();
             PlayPageEntrance(ProjectTextToolPage);

@@ -68,7 +68,7 @@ namespace GalExcleTools
             ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Focus(FocusState.Programmatic);
             AppendLog(LogKind.User, $"打开背景图查看：{Path.GetFileName(imagePath)}");
@@ -103,7 +103,7 @@ namespace GalExcleTools
             ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Focus(FocusState.Programmatic);
             AppendLog(LogKind.User, $"打开{GetCharacterLayerDisplayName(layerKind)}查看：{Path.GetFileName(layerPath)}");
@@ -141,7 +141,7 @@ namespace GalExcleTools
             ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             BackgroundImageViewerPage.Focus(FocusState.Programmatic);
             AppendLog(LogKind.User, $"打开组合立绘查看：{_currentCharacter.Name}");
@@ -617,7 +617,7 @@ namespace GalExcleTools
             MusicPlayerPage.Visibility = Visibility.Visible;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             MusicPlayerCloseButton.Focus(FocusState.Programmatic);
             AppendLog(LogKind.User, $"打开{AudioAssetService.GetDisplayName(kind)}播放：{Path.GetFileName(musicPath)}");

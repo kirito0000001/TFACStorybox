@@ -81,7 +81,7 @@ namespace GalExcleTools
             ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             if (!ReferenceEquals(ShellNavigation.SelectedItem, WorkbenchNavItem))
             {
@@ -107,7 +107,7 @@ namespace GalExcleTools
             ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             if (!ReferenceEquals(ShellNavigation.SelectedItem, AssetLibraryNavItem))
             {
@@ -135,7 +135,7 @@ namespace GalExcleTools
             ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             if (!ReferenceEquals(ShellNavigation.SelectedItem, AssetLibraryNavItem))
             {
@@ -167,7 +167,7 @@ namespace GalExcleTools
             ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Visible;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             PlayPageEntrance(CreateProjectPage);
 
@@ -190,7 +190,7 @@ namespace GalExcleTools
             ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Visible;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
             PlayPageEntrance(CreateAssetLibraryPage);
         }
@@ -212,7 +212,7 @@ namespace GalExcleTools
             ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Visible;
+            SyncPanel.Visibility = Visibility.Visible;
             SettingsPage.Visibility = Visibility.Collapsed;
             if (!ReferenceEquals(ShellNavigation.SelectedItem, UnrealSyncNavItem))
             {
@@ -220,7 +220,7 @@ namespace GalExcleTools
             }
 
             RefreshUnrealSyncStatus();
-            PlayPageEntrance(UnrealSyncPage);
+            PlayPageEntrance(SyncPanel);
         }
 
         private void ShowSettingsPage()
@@ -238,7 +238,7 @@ namespace GalExcleTools
             ProjectTextToolPage.Visibility = Visibility.Collapsed;
             CreateProjectPage.Visibility = Visibility.Collapsed;
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            UnrealSyncPage.Visibility = Visibility.Collapsed;
+            SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Visible;
             PlayPageEntrance(SettingsPage);
         }
