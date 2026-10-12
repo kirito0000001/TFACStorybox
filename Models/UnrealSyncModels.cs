@@ -12,7 +12,25 @@ internal sealed record UnrealSyncContext(
     ProjectInfo Project,
     AssetLibraryInfo AssetLibrary);
 
-internal sealed record UnrealSyncProgressUpdate(string Message, double Percent);
+internal sealed record UnrealSyncProgressUpdate(string Message, double Percent)
+{
+    /// <summary>
+    /// 脚本报的阶段名（进度 JSON 里的 <c>Stage</c>，例如 ReadManifest / UpdateVoiceMaps）。
+    ///
+    /// 原来这个字段**被丢掉了**：脚本一直在写，而 C# 这边只留 Message + Percent，
+    /// 于是界面上永远只有一句话、看不出"现在到哪一段"。
+    /// </summary>
+    public string Stage { get; init; } = string.Empty;
+
+    /// <summary>已完成项数（脚本报的 <c>Completed</c>）。</summary>
+    public int Completed { get; init; }
+
+    /// <summary>总项数（脚本报的 <c>Total</c>）；0 表示这一步没有可数的项。</summary>
+    public int Total { get; init; }
+
+    /// <summary>「3/12」这种计数文案；脚本没报总数时是空串。</summary>
+    public string CountText => Total > 0 ? $"{Completed}/{Total}" : string.Empty;
+}
 
 internal sealed record UnrealProjectBinding(string? EnginePath, string? ProjectPath, string? ContentFolderPath)
 {

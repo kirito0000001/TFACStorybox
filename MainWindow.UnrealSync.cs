@@ -309,7 +309,21 @@ namespace GalExcleTools
             }
 
             RunUnrealSyncButton.IsEnabled = false;
-            SetUnrealSyncProgress(true, "正在检测虚幻同步差异... 5%", false, 5);
+
+            // 进度条按阶段加权分配（见 UnrealSyncProgressPlan）：各段耗时差得很远
+            // —— 写清单不到一秒、Unreal 执行几十秒、同步前提交在 LFS 工程上可能几分钟 ——
+            // 平摊会让快的阶段一闪而过、慢的阶段一路龟速。
+            //
+            // 这里**先按"会关编辑器"建计划**：关编辑器那一步在下面的询问之后才知道要不要做，
+            // 而差异检测在询问之前。它权重只有 3%，选了"继续同步"就跳过那一段，
+            // 不值得为它把计划拆成两份。
+            var progressPlan = UnrealSyncProgressPlan.ForSync(includesCloseEditors: true);
+            var detectBand = progressPlan[UnrealSyncProgressPlan.Detect];
+            SetUnrealSyncProgress(
+                true,
+                progressPlan.Caption(UnrealSyncProgressPlan.Detect, "正在检测虚幻同步差异..."),
+                false,
+                detectBand.At(5));
             UnrealSyncSummaryText.Text = forceFullSync
                 ? "正在准备全量重新同步，将忽略本地同步状态。"
                 : "正在计算工具箱源文件的 SHA-256，并与上次成功同步状态比较；只有内容真正变化时才会进入同步计划。";
@@ -338,7 +352,11 @@ namespace GalExcleTools
                 return;
             }
 
-            SetUnrealSyncProgress(true, "差异检测完成，等待确认备份... 10%", false, 10);
+            SetUnrealSyncProgress(
+                true,
+                progressPlan.Caption(UnrealSyncProgressPlan.Detect, "差异检测完成，等待确认同步..."),
+                false,
+                detectBand.At(100));
             var runningUnrealChoice = await ShowRunningUnrealEditorDialogAsync(validation.Context);
             if (runningUnrealChoice is null)
             {
@@ -349,7 +367,12 @@ namespace GalExcleTools
 
             if (runningUnrealChoice == true)
             {
-                SetUnrealSyncProgress(true, "正在尝试关闭已打开的 Unreal Editor... 12%", false, 12);
+                var closeEditorsBand = progressPlan[UnrealSyncProgressPlan.CloseEditors];
+                SetUnrealSyncProgress(
+                    true,
+                    progressPlan.Caption(UnrealSyncProgressPlan.CloseEditors, "正在尝试关闭已打开的 Unreal Editor..."),
+                    false,
+                    closeEditorsBand.At(20));
                 await Task.Run(() => CloseRunningUnrealEditors(validation.Context));
                 await Task.Delay(1200);
             }
@@ -364,7 +387,12 @@ namespace GalExcleTools
                 // 口径：只提交、不推送。同步是高频动作，顺手往远端推是在替用户做他没同意的事。
                 // 没有仓库、或提交失败，都**不阻断同步** —— 那只是回退点，不是前置条件；
                 // 但必须说清楚"这次没有可回退的提交点"，用户以为有、实际没有是最坏的情况。
-                SetUnrealSyncProgress(true, "正在提交同步前的本地改动... 20%", false, 20);
+                var commitBand = progressPlan[UnrealSyncProgressPlan.LocalCommit];
+                SetUnrealSyncProgress(
+                    true,
+                    progressPlan.Caption(UnrealSyncProgressPlan.LocalCommit, "正在提交同步前的本地改动..."),
+                    false,
+                    commitBand.At(0));
                 var unrealProjectRoot = Path.GetDirectoryName(validation.Context.UnrealProjectPath) ?? string.Empty;
                 UnrealSyncGitCommitResult commitResult;
                 try
@@ -372,7 +400,20 @@ namespace GalExcleTools
                     commitResult = await UnrealSyncGitCommitService.CommitEverythingAsync(
                         unrealProjectRoot,
                         $"同步前快照：{DateTime.Now:yyyy-MM-dd HH:mm:ss}（{validation.Context.Project.Name}）",
-                        message => AppendLog(LogKind.Info, message),
+                        commitProgress =>
+                        {
+                            // 进度**既进进度条也进日志**：这一段 git add -A 在 LFS 工程上可能几分钟，
+                            // 只进日志等于进度条在这段是冻的 —— 用户看到的就是卡死。
+                            SetUnrealSyncProgress(
+                                true,
+                                progressPlan.Caption(UnrealSyncProgressPlan.LocalCommit, commitProgress.Message),
+                                false,
+                                commitBand.At(commitProgress.SubPercent));
+                            if (!commitProgress.IsTick)
+                            {
+                                AppendLog(LogKind.Info, commitProgress.Message);
+                            }
+                        },
                         cancellationToken);
                 }
                 catch (Exception commitError)
@@ -384,7 +425,11 @@ namespace GalExcleTools
                         $"同步前的本地提交失败：{commitError.Message}");
                 }
 
-                SetUnrealSyncProgress(true, "同步前提交已完成... 30%", false, 30);
+                SetUnrealSyncProgress(
+                    true,
+                    progressPlan.Caption(UnrealSyncProgressPlan.LocalCommit, "同步前的本地提交已完成"),
+                    false,
+                    commitBand.At(100));
                 if (commitResult.IsRepository)
                 {
                     AppendLog(LogKind.User, commitResult.Detail);
@@ -397,8 +442,22 @@ namespace GalExcleTools
                         commitResult.Detail + " 建议把 Unreal 工程纳入 git，或在同步前自行备份。");
                 }
 
+                // Unreal 执行这一段：脚本自己会报 0-100，还带 Stage 与"已完成/总数"。
+                // 把它**映射进"执行"那一段**，而不是直接当全局百分比用 ——
+                // 否则前面准备阶段的百分号和脚本自己的百分号会互相打架。
+                var executeBand = progressPlan[UnrealSyncProgressPlan.Execute];
                 var progress = new Progress<UnrealSyncProgressUpdate>(update =>
-                    SetUnrealSyncProgress(true, $"{update.Message} {update.Percent:0}%", false, update.Percent));
+                {
+                    // 「细节」：脚本报的项数（例如"已导入 3/12"）原来在 C# 侧被丢掉了，现在带上。
+                    var countText = string.IsNullOrWhiteSpace(update.CountText)
+                        ? string.Empty
+                        : $"（{update.CountText}）";
+                    SetUnrealSyncProgress(
+                        true,
+                        progressPlan.Caption(UnrealSyncProgressPlan.Execute, update.Message + countText),
+                        false,
+                        executeBand.At(update.Percent));
+                });
                 var result = await RunUnrealSyncAsync(validation.Context, changePlan, progress, cancellationToken);
                 var report = result.Report;
                 var reportSuccess = result.ExitCode == 0 &&
