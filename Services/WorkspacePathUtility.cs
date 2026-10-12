@@ -118,10 +118,8 @@ internal static class WorkspacePathUtility
         return Path.Combine(assetLibrary.Path, CharacterFolderName);
     }
 
-    public static string GetUnrealBackupFolder(UnrealSyncContext context)
-    {
-        return Path.Combine(context.Project.Path, ToolsFolderName, UnrealBackupsFolderName);
-    }
+    // GetUnrealBackupFolder 已删除（2026-10-12）：同步前的回退点从 zip 备份
+    // 改成了全量本地提交，UnrealBackups 这个落点不再使用。
 
     public static string GetUnrealSyncStatePath(UnrealSyncContext context)
     {

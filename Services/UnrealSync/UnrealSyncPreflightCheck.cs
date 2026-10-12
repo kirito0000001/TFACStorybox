@@ -147,7 +147,25 @@ internal static class UnrealSyncPreflightCheck
             "小预览数据资产（仅开启小预览时用）",
             UnrealSyncCheckSeverity.Warning);
 
-        // ── 5. 素材库 ────────────────────────────────────────────────
+        // ── 5. 同步前的回退点：git 仓库 ──────────────────────────────
+        // 同步前会做一次「全量本地提交」当回退点。没有仓库**不拦路**，只提醒 ——
+        // 用户可能故意不用版本控制，同步本身不该因此停下；但"这次没有可回退的提交点"
+        // 得让人看见。
+        // 这里用纯磁盘判断（找 .git），不起进程：这一步是同步的、跑在界面上。
+        // 真正的提交在 UnrealSyncGitCommitService 里用 git 自己再确认一次。
+        var projectDirectory = Path.GetDirectoryName(Path.GetFullPath(unrealProjectPath!)) ?? string.Empty;
+        var hasGitRepository = UnrealSyncGitCommitService.HasGitRepositoryOnDisk(projectDirectory);
+        items.Add(new UnrealSyncCheckItem(
+            "git 仓库（同步前的本地提交用）",
+            Path.Combine(projectDirectory, ".git"),
+            hasGitRepository ? "已找到" : string.Empty,
+            hasGitRepository,
+            UnrealSyncCheckSeverity.Warning,
+            hasGitRepository
+                ? string.Empty
+                : "这个工程不在 git 仓库里，同步前不会产生可回退的提交点。"));
+
+        // ── 6. 素材库 ────────────────────────────────────────────────
         if (!string.IsNullOrWhiteSpace(assetLibraryPath))
         {
             var hasLibrary = Directory.Exists(assetLibraryPath);

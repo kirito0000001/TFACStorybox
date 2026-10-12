@@ -354,25 +354,47 @@ namespace GalExcleTools
                 await Task.Delay(1200);
             }
 
-            var backupChoice = await ShowUnrealBackupDialogAsync(validation.Context);
-            if (backupChoice is null)
-            {
-                SetUnrealSyncProgress(false, string.Empty);
-                RunUnrealSyncButton.IsEnabled = true;
-                return;
-            }
-
             SetUnrealSyncStatus(InfoBarSeverity.Informational, "正在同步", "正在生成导入清单并调用 Unreal Editor，请等待引擎完成资源导入。");
             try
             {
                 var cancellationToken = GetGlobalProgressCancellationToken();
-                string? backupPath = null;
-                if (backupChoice == true)
+
+                // 同步前的回退点：**全量本地提交**（取代原先给 Unreal 工程打 zip）。
+                //
+                // 口径：只提交、不推送。同步是高频动作，顺手往远端推是在替用户做他没同意的事。
+                // 没有仓库、或提交失败，都**不阻断同步** —— 那只是回退点，不是前置条件；
+                // 但必须说清楚"这次没有可回退的提交点"，用户以为有、实际没有是最坏的情况。
+                SetUnrealSyncProgress(true, "正在提交同步前的本地改动... 20%", false, 20);
+                var unrealProjectRoot = Path.GetDirectoryName(validation.Context.UnrealProjectPath) ?? string.Empty;
+                UnrealSyncGitCommitResult commitResult;
+                try
                 {
-                    SetUnrealSyncProgress(true, "正在备份虚幻项目... 20%", false, 20);
-                    backupPath = await Task.Run(() => CreateUnrealSyncBackup(validation.Context, cancellationToken), cancellationToken);
-                    SetUnrealSyncProgress(true, "虚幻项目备份完成... 30%", false, 30);
-                    AppendLog(LogKind.User, $"虚幻项目备份完成：{backupPath}");
+                    commitResult = await UnrealSyncGitCommitService.CommitEverythingAsync(
+                        unrealProjectRoot,
+                        $"同步前快照：{DateTime.Now:yyyy-MM-dd HH:mm:ss}（{validation.Context.Project.Name}）",
+                        message => AppendLog(LogKind.Info, message),
+                        cancellationToken);
+                }
+                catch (Exception commitError)
+                {
+                    commitResult = new UnrealSyncGitCommitResult(
+                        false,
+                        false,
+                        string.Empty,
+                        $"同步前的本地提交失败：{commitError.Message}");
+                }
+
+                SetUnrealSyncProgress(true, "同步前提交已完成... 30%", false, 30);
+                if (commitResult.IsRepository)
+                {
+                    AppendLog(LogKind.User, commitResult.Detail);
+                }
+                else
+                {
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "没有可回退的提交点",
+                        commitResult.Detail + " 建议把 Unreal 工程纳入 git，或在同步前自行备份。");
                 }
 
                 var progress = new Progress<UnrealSyncProgressUpdate>(update =>
@@ -396,10 +418,13 @@ namespace GalExcleTools
                         : report is null
                             ? $"退出码 {result.ExitCode}，但没有收到结构化结果文件：{result.ResultPath}"
                             : string.Join(" ", report.Errors.DefaultIfEmpty($"退出码 {result.ExitCode}，部分计划项没有完成。")));
-                var backupSummary = backupPath is null ? string.Empty : $"备份：{backupPath}\n";
+                // 回退点那一行：以前是 zip 备份路径，现在是本地提交的 HEAD。
+                var commitSummary = commitResult.Committed && !string.IsNullOrWhiteSpace(commitResult.HeadSha)
+                    ? $"同步前本地提交：{commitResult.HeadSha}\n"
+                    : string.Empty;
                 UnrealSyncSummaryText.Text = result.Output.Length == 0
-                    ? $"{backupSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}"
-                    : $"{backupSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}\n{TrimLongText(result.Output, 900)}";
+                    ? $"{commitSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}"
+                    : $"{commitSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}\n{TrimLongText(result.Output, 900)}";
                 if (reportSuccess)
                 {
                     _unrealSyncService.WriteState(validation.Context, changePlan);

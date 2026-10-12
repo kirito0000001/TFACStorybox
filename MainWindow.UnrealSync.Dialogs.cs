@@ -42,22 +42,9 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private async Task<bool?> ShowUnrealBackupDialogAsync(UnrealSyncContext context)
-        {
-            var backupFolder = GetUnrealBackupFolder(context);
-            var result = await _dialogService.ShowAsync(new DialogRequest(
-                "同步前备份虚幻项目？",
-                $"建议先备份本次同步会影响的 Narrative 目录、Config 和 .uproject 文件。仅保留最近 5 份。\n默认位置：{backupFolder}",
-                "备份并同步",
-                "取消",
-                "直接同步"));
-            return result switch
-            {
-                DialogResultKind.Primary => true,
-                DialogResultKind.Secondary => false,
-                _ => null
-            };
-        }
+        // ShowUnrealBackupDialogAsync 已删除（2026-10-12）：同步前的回退点从
+        // "问要不要打 zip" 改成"直接做一次全量本地提交"，不再需要询问。
+        // 见 Services/UnrealSync/UnrealSyncGitCommitService。
 
         private async Task<bool?> ShowRunningUnrealEditorDialogAsync(UnrealSyncContext context)
         {

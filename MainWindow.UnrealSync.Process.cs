@@ -138,62 +138,9 @@ namespace GalExcleTools
             }
         }
 
-        private static string CreateUnrealSyncBackup(UnrealSyncContext context, CancellationToken cancellationToken = default)
-        {
-            var unrealProjectRoot = Path.GetDirectoryName(context.UnrealProjectPath)
-                ?? throw new InvalidOperationException("无法定位虚幻项目根目录。");
-            var backupFolder = GetUnrealBackupFolder(context);
-            Directory.CreateDirectory(backupFolder);
-
-            var projectName = Path.GetFileNameWithoutExtension(context.UnrealProjectPath);
-            var backupPath = Path.Combine(backupFolder, $"{projectName}_{DateTime.Now:yyyyMMdd_HHmmss}.zip");
-            using var archive = ZipFile.Open(backupPath, ZipArchiveMode.Create);
-            var filesToBackup = new List<string> { context.UnrealProjectPath };
-            var configFolder = Path.Combine(unrealProjectRoot, "Config");
-            if (Directory.Exists(configFolder))
-            {
-                filesToBackup.AddRange(Directory.EnumerateFiles(configFolder, "*", SearchOption.AllDirectories));
-            }
-            if (Directory.Exists(context.TargetContentFolderPath))
-            {
-                filesToBackup.AddRange(Directory.EnumerateFiles(context.TargetContentFolderPath, "*", SearchOption.AllDirectories));
-            }
-            var musicPlayerBlueprintPath = UnrealSyncService.UnrealObjectPathToContentFilePath(
-                context,
-                UnrealSyncService.MusicPlayerBlueprintAssetPath);
-            if (File.Exists(musicPlayerBlueprintPath))
-            {
-                filesToBackup.Add(musicPlayerBlueprintPath);
-            }
-            var storyBranchDataTablePath = UnrealSyncService.UnrealObjectPathToContentFilePath(
-                context,
-                UnrealSyncService.StoryBranchDataTableAssetPath);
-            if (File.Exists(storyBranchDataTablePath))
-            {
-                filesToBackup.Add(storyBranchDataTablePath);
-            }
-
-            foreach (var filePath in filesToBackup.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var relativePath = Path.GetRelativePath(unrealProjectRoot, filePath);
-                archive.CreateEntryFromFile(filePath, relativePath.Replace('\\', '/'), CompressionLevel.Optimal);
-            }
-
-            archive.Dispose();
-            var retainedBackups = Directory
-                .EnumerateFiles(backupFolder, $"{projectName}_*.zip", SearchOption.TopDirectoryOnly)
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .Take(5)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var oldBackupPath in Directory.EnumerateFiles(backupFolder, $"{projectName}_*.zip", SearchOption.TopDirectoryOnly)
-                         .Where(path => !retainedBackups.Contains(path)))
-            {
-                File.Delete(oldBackupPath);
-            }
-
-            return backupPath;
-        }
+        // CreateUnrealSyncBackup 已删除（2026-10-12）：同步前的回退点改成
+        // 「全量本地提交」，见 Services/UnrealSync/UnrealSyncGitCommitService。
+        // zip 那套的路径助手 GetUnrealBackupFolder 也一并删了。
 
     }
 }
