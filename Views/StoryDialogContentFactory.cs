@@ -107,7 +107,7 @@ internal static class StoryDialogContentFactory
             {
                 Text = $"缺少字段：{string.Join(", ", compatibility.MissingColumns)}",
                 TextWrapping = TextWrapping.Wrap,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.Firebrick)
+                Foreground = Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush
             });
         }
 
@@ -117,7 +117,7 @@ internal static class StoryDialogContentFactory
             {
                 Text = $"额外字段：{string.Join(", ", compatibility.ExtraColumns.Take(12))}{(compatibility.ExtraColumns.Count > 12 ? " ..." : string.Empty)}",
                 TextWrapping = TextWrapping.Wrap,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.DarkGoldenrod)
+                Foreground = Application.Current.Resources["SystemFillColorCautionBrush"] as Brush
             });
         }
 

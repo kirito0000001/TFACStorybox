@@ -355,7 +355,7 @@ namespace GalExcleTools
         private static UIElement CreateProjectTextTableHeader(string valueHeader, bool includeVoicePreview)
         {
             var grid = CreateProjectTextGrid(includeVoicePreview);
-            grid.Background = new SolidColorBrush(Microsoft.UI.Colors.WhiteSmoke);
+            grid.Background = Application.Current.Resources["SolidBackgroundFillColorSecondaryBrush"] as Brush;
             grid.Children.Add(CreateProjectTextCell("文本", 0, isHeader: true, hasRightBorder: true));
             grid.Children.Add(CreateProjectTextCell(valueHeader, 1, isHeader: true, hasRightBorder: includeVoicePreview));
             if (includeVoicePreview)
