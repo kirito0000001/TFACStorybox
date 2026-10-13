@@ -34,7 +34,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <StackPanel Spacing="6">
@@ -45,79 +44,36 @@
             <Border Grid.Row="1" Style="{StaticResource PanelBorderStyle}">
                 <StackPanel Padding="18" Spacing="12">
                     <TextBlock Text="选择工作台项目" Style="{StaticResource SectionTitleStyle}" />
-                    <TextBlock Text="选择项目后，下方虚幻引擎、虚幻项目和目标内容文件夹会自动读取这个项目保存的关联。" Style="{StaticResource SubtleTextStyle}" />
+                    <TextBlock Text="选项目之后，虚幻引擎与 .uproject 会自动读取这个项目保存的关联。" Style="{StaticResource SubtleTextStyle}" />
                     <GridView
                         x:Name="UnrealSyncProjectCardsGridView"
                         SelectionMode="None" />
+
+                    <!--
+                        引擎与工程**不在这里**：它们是「同步前检测」里的两项
+                        （点整张卡复制名字、点「更换」重新选文件）。
+                        同一件事只在界面上出现一次，免得两处显示同一个路径还各说各话。
+                        这里只留目标落点 —— 它是推导出来的，既不能选也没有"换一个"这回事。
+                    -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="目标落点（由 .uproject 推导，不需要手选）" />
+                        <TextBlock
+                            x:Name="UnrealContentFolderText"
+                            FontSize="13"
+                            Style="{StaticResource SubtleTextStyle}"
+                            TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+
+                    <!-- 隐藏的数据持有者：代码按它的 Tag 取当前项目目录名，卡片才是给人看的那个。 -->
+                    <ComboBox
+                        x:Name="UnrealSyncProjectComboBox"
+                        Visibility="Collapsed"
+                        SelectionChanged="UnrealSyncProjectComboBox_SelectionChanged" />
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
-                <Grid Padding="18" RowSpacing="14">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <TextBlock Text="关联设置" Style="{StaticResource SectionTitleStyle}" />
-
-                    <Grid Grid.Row="1" ColumnSpacing="10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBox
-                            x:Name="UnrealEnginePathTextBox"
-                            Header="虚幻引擎"
-                            IsReadOnly="True"
-                            PlaceholderText="选择 UnrealEditor.exe 或 UnrealEditor-Cmd.exe" />
-                        <Button
-                            Grid.Column="1"
-                            Margin="0,28,0,0"
-                            Content="选择引擎"
-                            Click="ChooseUnrealEngineButton_Click" />
-                    </Grid>
-
-                    <Grid Grid.Row="2" ColumnSpacing="10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBox
-                            x:Name="UnrealProjectPathTextBox"
-                            Header="虚幻项目"
-                            IsReadOnly="True"
-                            PlaceholderText="选择 .uproject 文件" />
-                        <Button
-                            Grid.Column="1"
-                            Margin="0,28,0,0"
-                            Content="选择项目"
-                            Click="ChooseUnrealProjectButton_Click" />
-                    </Grid>
-
-                    <Grid Grid.Row="3" ColumnSpacing="10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <ComboBox
-                            x:Name="UnrealSyncProjectComboBox"
-                            Header="工作台项目"
-                            PlaceholderText="选择要同步的工作台项目"
-                            Visibility="Collapsed"
-                            SelectionChanged="UnrealSyncProjectComboBox_SelectionChanged" />
-                        <TextBox
-                            x:Name="UnrealContentFolderTextBox"
-                            Header="目标落点（由 .uproject 推导，不需要手选）"
-                            IsReadOnly="True"
-                            PlaceholderText="选好 .uproject 之后自动确定为 内容目录/AssetMaterial" />
-                    </Grid>
-                </Grid>
-            </Border>
-
-            <controls:UnrealSyncCheckPanel x:Name="SyncCheckPanel" Grid.Row="3" />
-            <Border Grid.Row="4" Style="{StaticResource PanelBorderStyle}">
+            <controls:UnrealSyncCheckPanel x:Name="SyncCheckPanel" Grid.Row="2" />
+            <Border Grid.Row="3" Style="{StaticResource PanelBorderStyle}">
                 <Grid Padding="18" RowSpacing="12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />

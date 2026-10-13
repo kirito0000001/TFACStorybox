@@ -16,6 +16,25 @@ internal enum UnrealSyncCheckSeverity
 }
 
 /// <summary>
+/// 这一项如果"可更换"，换的是什么。
+///
+/// 引擎和工程这两项不是"去 Unreal 里建一个"能解决的 —— 它们填错了要重新选文件。
+/// 所以它们除了"点击复制"之外还要多一个「更换」入口；
+/// 其余各项（目录、资产）按零境的做法，点一下把正确名字复制走，去 Unreal 里建。
+/// </summary>
+internal enum UnrealSyncCheckReplaceTarget
+{
+    /// <summary>不可更换：只能复制名字去建。</summary>
+    None,
+
+    /// <summary>换引擎（选 UnrealEditor.exe / UnrealEditor-Cmd.exe）。</summary>
+    Engine,
+
+    /// <summary>换工程（选 .uproject）。</summary>
+    Project,
+}
+
+/// <summary>
 /// 一条检测项。
 ///
 /// 【为什么只有一条路径】
@@ -25,19 +44,21 @@ internal enum UnrealSyncCheckSeverity
 /// 所以这里合成一条；"实际值"只在**与期望不同**时才有意义，而那种情况本来就该报 Note。
 /// </summary>
 /// <param name="DisplayName">给人看的名字，例如「AssetMaterial/Sound/BGM/PlotUse」。</param>
-/// <param name="Path">这条检查针对的路径（磁盘路径，或 /Game 对象路径）。</param>
+/// <param name="Path">这条检查针对的路径（磁盘路径，或 /Game 对象路径）。**点卡片就是复制它。**</param>
 /// <param name="IsCompliant">是否合规。Error 级不合规会拦同步，Warning 级只提醒。</param>
 /// <param name="Severity">不合规时的严重程度。</param>
 /// <param name="Note">
 /// 路径下面那一行说明：合规时说**查到了什么**（「目录已经存在。」），
 /// 不合规时说**哪里不对**。界面上按合规与否染成绿 / 红。
 /// </param>
+/// <param name="ReplaceTarget">可更换时换什么；见 <see cref="UnrealSyncCheckReplaceTarget"/>。</param>
 internal sealed record UnrealSyncCheckItem(
     string DisplayName,
     string Path,
     bool IsCompliant,
     UnrealSyncCheckSeverity Severity,
-    string Note);
+    string Note,
+    UnrealSyncCheckReplaceTarget ReplaceTarget = UnrealSyncCheckReplaceTarget.None);
 
 /// <summary>
 /// 同步前检测的结果。
@@ -92,7 +113,8 @@ internal static class UnrealSyncPreflightCheck
             UnrealSyncCheckSeverity.Error,
             editorExecutable is not null
                 ? $"已找到：{editorExecutable}"
-                : "没找到可用的 UnrealEditor-Cmd.exe，检查引擎路径。"));
+                : "没找到可用的 UnrealEditor-Cmd.exe，检查引擎路径。",
+            UnrealSyncCheckReplaceTarget.Engine));
 
         // ── 2. 工程文件 ──────────────────────────────────────────────
         var hasProject = !string.IsNullOrWhiteSpace(unrealProjectPath) && File.Exists(unrealProjectPath);
@@ -101,7 +123,8 @@ internal static class UnrealSyncPreflightCheck
             unrealProjectPath ?? string.Empty,
             hasProject,
             UnrealSyncCheckSeverity.Error,
-            hasProject ? "已找到 .uproject 文件。" : "找不到 .uproject 文件，检查工程路径。"));
+            hasProject ? "已找到 .uproject 文件。" : "找不到 .uproject 文件，检查工程路径。",
+            UnrealSyncCheckReplaceTarget.Project));
 
         // 工程都没有就没必要往下查目录了 —— 硬凑出来的路径只会刷一屏假红。
         if (!hasProject)

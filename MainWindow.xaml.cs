@@ -455,17 +455,29 @@ namespace GalExcleTools
             _applicationViewModel.Settings.AuxiliaryDisplayChanged += (_, _) => UpdateAuxiliaryDisplayVisibility();
             _applicationViewModel.Settings.ThemeSettingsChanged += (_, _) => ApplyThemeSettings();
             // 同步台的界面归 Controls/UnrealSyncPanel，做事留在窗口 ——
-            // 面板只发"用户点了什么"，这儿把六件事接上。
+            // 面板只发"用户点了什么"，这儿把几件事接上。
             //
-            // 五个 async 的写成 async void 形式的 lambda：它们等价于事件处理器，
+            // async void 形式的 lambda 是刻意的：它们等价于事件处理器，
             // 各自内部有 try/catch 收异常，不该变成"未观察的任务"。
             // ProjectSelectionChanged 那条是同步的：它只存设置再刷一遍状态。
-            SyncPanel.EngineChooseRequested += async (_, _) => await ChooseUnrealEngineAsync();
-            SyncPanel.ProjectChooseRequested += async (_, _) => await ChooseUnrealProjectAsync();
             SyncPanel.ProjectSelectionChanged += (_, _) => OnUnrealSyncProjectSelectionChanged();
             SyncPanel.CheckRequested += async (_, _) => await RunUnrealSyncDetectionAsync();
             SyncPanel.FullSyncRequested += async (_, _) => await RunUnrealSyncWithFullResyncAsync();
             SyncPanel.SyncRequested += async (_, _) => await RunUnrealSyncFlowAsync();
+
+            // 引擎与工程住在检测层里（它们是检测项），所以"换一个"也从那儿发出来 ——
+            // 走的是和以前同一对方法，只是触发点在检测层那一项上。
+            SyncPanel.ReplaceCheckRequested += async (_, target) =>
+            {
+                if (target == UnrealSyncCheckReplaceTarget.Engine)
+                {
+                    await ChooseUnrealEngineAsync();
+                }
+                else if (target == UnrealSyncCheckReplaceTarget.Project)
+                {
+                    await ChooseUnrealProjectAsync();
+                }
+            };
             _applicationViewModel.Settings.LogSettingsChanged += (_, _) =>
             {
                 UpdateLogOptionEnabledState();

@@ -41,18 +41,19 @@ public sealed partial class UnrealSyncPanel : UserControl
         // 里面那个检测层自己发事件；这里原样转发出去，
         // 让窗口只订阅一个对象就够了（不必知道面板内部还有个子控件）。
         SyncCheckPanel.CheckRequested += (_, _) => CheckRequested?.Invoke(this, EventArgs.Empty);
+        SyncCheckPanel.ReplaceRequested += (_, target) => ReplaceCheckRequested?.Invoke(this, target);
     }
 
     // ── 用户动作：面板只宣告"点了什么" ──────────────────────────────
 
-    /// <summary>点了「选择引擎」。</summary>
-    public event EventHandler? EngineChooseRequested;
-
-    /// <summary>点了「选择 .uproject」。</summary>
-    public event EventHandler? ProjectChooseRequested;
-
     /// <summary>换了工作台项目。</summary>
     public event EventHandler? ProjectSelectionChanged;
+
+    /// <summary>
+    /// 点了检测层某一项的「更换」（转发上来的）；参数是换什么：引擎还是工程。
+    /// 引擎与工程现在住在检测层里，所以选择动作也从那儿发出来。
+    /// </summary>
+    public event EventHandler<UnrealSyncCheckReplaceTarget>? ReplaceCheckRequested;
 
     /// <summary>点了「开始检测」（检测层转发上来的）。</summary>
     public event EventHandler? CheckRequested;
@@ -64,24 +65,41 @@ public sealed partial class UnrealSyncPanel : UserControl
     public event EventHandler? SyncRequested;
 
     // ── 窗口 → 面板：路径 ──────────────────────────────────────────
+    //
+    // 三条都是**纯状态**，不对应任何控件：
+    // 引擎与工程显示在「同步前检测」那层（点整张卡复制、点「更换」重选），
+    // 目标落点显示在第一层的一行说明里。窗口读这三条是要拿去校验的，
+    // 所以它们必须是原始值 —— 不能混进界面上的占位句。
 
+    private string _enginePath = string.Empty;
+    private string _projectPath = string.Empty;
+    private string _targetFolderText = string.Empty;
+
+    /// <summary>虚幻引擎路径（显示与更换都在检测层）。</summary>
     public string EnginePath
     {
-        get => UnrealEnginePathTextBox.Text;
-        set => UnrealEnginePathTextBox.Text = value ?? string.Empty;
+        get => _enginePath;
+        set => _enginePath = value ?? string.Empty;
     }
 
+    /// <summary>虚幻工程 .uproject 路径（同上）。</summary>
     public string ProjectPath
     {
-        get => UnrealProjectPathTextBox.Text;
-        set => UnrealProjectPathTextBox.Text = value ?? string.Empty;
+        get => _projectPath;
+        set => _projectPath = value ?? string.Empty;
     }
 
-    /// <summary>目标落点。只读框，显示的是推理出来的路径 —— 不是让用户填的。</summary>
+    /// <summary>目标落点。由 .uproject 推导，只显示、不可选。</summary>
     public string TargetFolderText
     {
-        get => UnrealContentFolderTextBox.Text;
-        set => UnrealContentFolderTextBox.Text = value ?? string.Empty;
+        get => _targetFolderText;
+        set
+        {
+            _targetFolderText = value ?? string.Empty;
+            UnrealContentFolderText.Text = string.IsNullOrWhiteSpace(_targetFolderText)
+                ? "选好 .uproject 之后自动确定"
+                : _targetFolderText;
+        }
     }
 
     // ── 窗口 → 面板：按钮与状态 ────────────────────────────────────
@@ -220,13 +238,10 @@ public sealed partial class UnrealSyncPanel : UserControl
         set => PageScrollViewer.ChangeView(null, value, null, disableAnimation: true);
     }
 
-    // ── 六个按钮的处理函数：只转发，不做事 ────────────────────────
-
-    private void ChooseUnrealEngineButton_Click(object sender, RoutedEventArgs e) =>
-        EngineChooseRequested?.Invoke(this, EventArgs.Empty);
-
-    private void ChooseUnrealProjectButton_Click(object sender, RoutedEventArgs e) =>
-        ProjectChooseRequested?.Invoke(this, EventArgs.Empty);
+    // ── 按钮的处理函数：只转发，不做事 ────────────────────────────
+    //
+    // 引擎 / 工程那两个"选择"处理函数已经不在这里了 ——
+    // 它们跟着那两块一起搬进了检测层（检测层发 ReplaceRequested，这里再转发出去）。
 
     private void UnrealSyncProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         ProjectSelectionChanged?.Invoke(this, EventArgs.Empty);

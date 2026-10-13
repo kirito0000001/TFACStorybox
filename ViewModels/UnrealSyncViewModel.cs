@@ -20,9 +20,17 @@ internal sealed record UnrealSyncCheckRow(
     string Path,
     bool IsCompliant,
     string StatusText,
-    string StatusGlyph,
     Brush? StatusBrush,
-    string Note);
+    string Note,
+    UnrealSyncCheckReplaceTarget ReplaceTarget)
+{
+    /// <summary>
+    /// 只有引擎和工程这两项需要「更换」入口 —— 它们填错了不是"去 Unreal 里建一个"能解决的，
+    /// 得重新选文件。其余各项点一下把名字复制走就够了。
+    /// </summary>
+    public Visibility ReplaceVisibility =>
+        ReplaceTarget == UnrealSyncCheckReplaceTarget.None ? Visibility.Collapsed : Visibility.Visible;
+}
 
 /// <summary>
 /// 虚幻同步台的界面状态。
@@ -144,11 +152,9 @@ internal sealed class UnrealSyncViewModel : ObservableObject
                 item.Path,
                 item.IsCompliant,
                 DescribeStatus(item),
-                // ✓ / ⚠ / ✗ 三个字形（Segoe 图标字体）。Warning 用感叹号 ——
-                // 它不拦路，长得像失败会让人以为必须处理。
-                item.IsCompliant ? "\uE73E" : item.Severity == UnrealSyncCheckSeverity.Warning ? "\uE7BA" : "\uE711",
                 ResolveStatusBrush(item),
-                item.Note));
+                item.Note,
+                item.ReplaceTarget));
         }
 
         CheckSummaryText = result.SummaryText;
