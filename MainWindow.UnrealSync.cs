@@ -401,27 +401,54 @@ namespace GalExcleTools
                         $"同步前快照：{DateTime.Now:yyyy-MM-dd HH:mm:ss}（{validation.Context.Project.Name}）",
                         commitProgress =>
                         {
-                            // 进度**既进进度条也进日志**：这一段 git add -A 在 LFS 工程上可能几分钟，
-                            // 只进日志等于进度条在这段是冻的 —— 用户看到的就是卡死。
-                            SetUnrealSyncProgress(
-                                true,
-                                progressPlan.Caption(UnrealSyncProgressPlan.LocalCommit, commitProgress.Message),
-                                false,
-                                commitBand.At(commitProgress.SubPercent));
-                            if (!commitProgress.IsTick)
+                            // ⚠️ **必须 marshal 回 UI 线程**。
+                            // 这个回调是从 UnrealSyncProcessRunner 的轮询循环里发出来的，
+                            // 而那个循环在线程池线程上（它内部用了 ConfigureAwait(false)）——
+                            // 直接在回调里动界面是跨线程访问 UI，轻则 COM 异常、重则界面状态乱掉。
+                            // （同步那条路没这个问题：它用的是 Progress<T>，那个自己会 marshal；
+                            //   而这里传的是裸 Action<string>，没有任何 marshalling。2026-10-13 实测踩到。）
+                            if (!DispatcherQueue.HasThreadAccess)
                             {
-                                AppendLog(LogKind.Info, $"[Sync Commit] {commitProgress.Message}");
+                                DispatcherQueue.TryEnqueue(() => ApplyCommitProgress(commitProgress));
+                                return;
                             }
+
+                            ApplyCommitProgress(commitProgress);
                         },
                         cancellationToken);
                 }
                 catch (Exception commitError)
                 {
+                    // 异常信息可能是空的（某些 COM 异常就是没有 Message），
+                    // 那样上面那句提示就变成"失败："后面什么都没有 —— 等于没说。
+                    // 所以空的时候退成类型名，并且**把完整异常写进日志**（文件里能看堆栈）。
+                    var reason = string.IsNullOrWhiteSpace(commitError.Message)
+                        ? commitError.GetType().Name
+                        : commitError.Message;
+                    AppendLog(LogKind.Error, "同步前的本地提交失败。", commitError);
                     commitResult = new UnrealSyncGitCommitResult(
                         false,
                         false,
                         string.Empty,
-                        $"同步前的本地提交失败：{commitError.Message}");
+                        $"同步前的本地提交失败：{reason}。");
+                }
+
+                // 提交进度：既进进度条也进日志。
+                // 抽成方法是为了让上面的 marshal 能复用同一段逻辑 ——
+                // 两条路径（UI 线程直调 / 排队回来）做的事情必须一模一样。
+                void ApplyCommitProgress(UnrealSyncGitCommitProgress commitProgress)
+                {
+                    // 这一段 git add -A 在 LFS 工程上可能几分钟，
+                    // 只进日志等于进度条在这段是冻的 —— 用户看到的就是卡死。
+                    SetUnrealSyncProgress(
+                        true,
+                        progressPlan.Caption(UnrealSyncProgressPlan.LocalCommit, commitProgress.Message),
+                        false,
+                        commitBand.At(commitProgress.SubPercent));
+                    if (!commitProgress.IsTick)
+                    {
+                        AppendLog(LogKind.Info, $"[Sync Commit] {commitProgress.Message}");
+                    }
                 }
 
                 SetUnrealSyncProgress(

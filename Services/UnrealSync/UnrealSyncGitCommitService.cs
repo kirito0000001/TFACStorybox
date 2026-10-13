@@ -128,7 +128,7 @@ internal static class UnrealSyncGitCommitService
         var isRepository = await TryRunGitAsync(
             workspaceDirectory,
             ["rev-parse", "--is-inside-work-tree"],
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         if (isRepository is null || isRepository.ExitCode != 0 ||
             !isRepository.Output.Trim().Equals("true", StringComparison.OrdinalIgnoreCase))
         {
@@ -149,28 +149,28 @@ internal static class UnrealSyncGitCommitService
             elapsed => onProgress?.Invoke(new UnrealSyncGitCommitProgress(
                 $"正在暂存全部改动... 已用时 {FormatElapsed(elapsed)}",
                 CreepTo(6, 45, elapsed, StageAddReference),
-                IsTick: true))).ConfigureAwait(false);
+                IsTick: true)));
 
         onProgress?.Invoke(new UnrealSyncGitCommitProgress("正在查看有没有可提交的改动...", 50));
         var status = await RunGitAsync(
             workspaceDirectory,
             ["status", "--porcelain"],
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         if (string.IsNullOrWhiteSpace(status.Output))
         {
             onProgress?.Invoke(new UnrealSyncGitCommitProgress("工作区本来就干净", 100));
             return new UnrealSyncGitCommitResult(
                 true,
                 false,
-                await TryReadHeadShaAsync(workspaceDirectory, cancellationToken).ConfigureAwait(false),
+                await TryReadHeadShaAsync(workspaceDirectory, cancellationToken),
                 "工作区本来就干净，没有产生新提交。");
         }
 
         onProgress?.Invoke(new UnrealSyncGitCommitProgress("正在提交本地改动（git commit）...", 65));
-        await RunGitAsync(workspaceDirectory, ["commit", "-m", commitMessage], cancellationToken).ConfigureAwait(false);
+        await RunGitAsync(workspaceDirectory, ["commit", "-m", commitMessage], cancellationToken);
 
         onProgress?.Invoke(new UnrealSyncGitCommitProgress("正在读取提交号...", 90));
-        var head = await TryReadHeadShaAsync(workspaceDirectory, cancellationToken).ConfigureAwait(false);
+        var head = await TryReadHeadShaAsync(workspaceDirectory, cancellationToken);
         onProgress?.Invoke(new UnrealSyncGitCommitProgress("同步前的本地提交已完成", 100));
         return new UnrealSyncGitCommitResult(
             true,
@@ -206,7 +206,7 @@ internal static class UnrealSyncGitCommitService
         var result = await TryRunGitAsync(
             workspaceDirectory,
             ["rev-parse", "--short", "HEAD"],
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         return result is not null && result.ExitCode == 0 ? result.Output.Trim() : string.Empty;
     }
 
@@ -216,7 +216,7 @@ internal static class UnrealSyncGitCommitService
         CancellationToken cancellationToken,
         Action<TimeSpan>? onPoll = null)
     {
-        var result = await TryRunGitAsync(workspaceDirectory, arguments, cancellationToken, onPoll).ConfigureAwait(false);
+        var result = await TryRunGitAsync(workspaceDirectory, arguments, cancellationToken, onPoll);
         if (result is null)
         {
             throw new InvalidOperationException("无法启动 git。请确认已安装 Git 并且在 PATH 里。");
@@ -262,7 +262,7 @@ internal static class UnrealSyncGitCommitService
                 "无法启动 git。",
                 "git 超过 10 分钟没有结束，已终止进程。",
                 onPoll: onPoll,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken);
         }
         catch (Win32Exception)
         {

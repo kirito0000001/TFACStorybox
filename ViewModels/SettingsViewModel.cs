@@ -397,9 +397,19 @@ internal sealed class SettingsViewModel : ObservableObject
 
         return kind switch
         {
+            // ⚠️ 错误和警告**永远写**，不受开关影响。
+            //
+            // 原来它们各自有一个开关，而用户那边正好关着 ——
+            // 于是同步报错时面板上一条都没有，只剩一句「第 4 步 · 失败」，
+            // 看不出到底为什么失败。2026-10-12 实测就是这个后果：
+            // 「报错没有接入 log 日志，我没办法把报错给你」。
+            //
+            // 把错误藏起来是**最糟的默认值**，那两个开关就不该存在。
+            // （日志文件那边更彻底：连 LogEnabled 都不看，全量写 ——
+            //   所以就算这里关着，%LOCALAPPDATA% 里的 runtime.log 也有。）
+            LogKind.Error => true,
+            LogKind.Warning => true,
             LogKind.User => LogUserOperations,
-            LogKind.Warning => LogWarnings,
-            LogKind.Error => LogErrors,
             _ => true
         };
     }
