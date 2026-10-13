@@ -75,13 +75,20 @@ internal static class UnrealSyncPreflightCheck
         }
 
         // ── 3. 要写进去的目标资产：连类型一起查 ──────────────────────
+        //
+        // 类型**优先问清单**（同步脚本在 Unreal 里写的那份，权威），
+        // 没有清单才退回落文件头扫（粗，但不用跑引擎）。
+        // 这跟零境一样：它的 assetClass 也是读清单读来的，不是猜的。
+        var assetTypes = UnrealAssetTypeManifest.Read(unrealProjectPath!);
         items.Add(CheckAsset(
             contentPath,
+            assetTypes,
             UnrealSyncPathPolicy.StoryWidgetAsset,
             "剧情 UI 蓝图（背景图列表的落点）",
             "WidgetBlueprint"));
         items.Add(CheckAsset(
             contentPath,
+            assetTypes,
             UnrealSyncPathPolicy.MusicPlayerAsset,
             "MusicActor 蓝图（BGM / 环境音 / 语音的落点）",
             "Blueprint"));
@@ -93,22 +100,26 @@ internal static class UnrealSyncPreflightCheck
         // 那是**假红**，比不查更糟。
         items.Add(CheckAsset(
             contentPath,
+            assetTypes,
             UnrealSyncPathPolicy.LustrationInfoAsset,
             "立绘信息数据资产（蓝图化，所以类名是 Blueprint）",
             "Blueprint"));
         items.Add(CheckAsset(
             contentPath,
+            assetTypes,
             UnrealSyncPathPolicy.PortraitsInfoAsset,
             "小预览数据资产（蓝图化，所以类名是 Blueprint）",
             "Blueprint",
             UnrealSyncCheckSeverity.Warning));
         items.Add(CheckAsset(
             contentPath,
+            assetTypes,
             UnrealSyncPathPolicy.EffectIndexTableAsset,
             "特殊音效索引表",
             "DataTable"));
         items.Add(CheckAsset(
             contentPath,
+            assetTypes,
             UnrealSyncPathPolicy.StoryBranchTableAsset,
             "剧情选项分支表",
             "DataTable",
@@ -189,10 +200,16 @@ internal static class UnrealSyncPreflightCheck
     /// <summary>
     /// 查一个资产：在不在 + **类型对不对**。
     ///
+    /// 类型从哪来，按可信度排：
+    /// 1. **清单**（同步脚本在 Unreal 里问出来的，权威）—— 有就用它；
+    /// 2. 清单里没有，就**扫文件头**（<see cref="UnrealAssetTypeProbe"/>，粗但不用跑引擎）；
+    /// 3. 两条都拿不到 → 空串 → <see cref="UnrealAssetTypeProbe.Matches"/> 当"不判"。
+    ///
     /// 类型对不上才算错；**读不到类型当"不判"**（见类注释里那条"读不到 ≠ 不对"）。
     /// </summary>
     private static UnrealSyncCheckItem CheckAsset(
         string contentPath,
+        IReadOnlyDictionary<string, string> assetTypes,
         string assetObjectPath,
         string displayName,
         string expectedType,
@@ -200,7 +217,7 @@ internal static class UnrealSyncPreflightCheck
     {
         var diskPath = ResolveAssetDiskPath(contentPath, assetObjectPath);
         var exists = File.Exists(diskPath);
-        var actualType = exists ? UnrealAssetTypeProbe.Detect(diskPath) : string.Empty;
+        var actualType = ResolveActualType(assetTypes, assetObjectPath, diskPath, exists);
         var typeMatches = UnrealAssetTypeProbe.Matches(expectedType, actualType);
         var compliant = exists && typeMatches;
 
@@ -221,6 +238,21 @@ internal static class UnrealSyncPreflightCheck
             severity,
             UnrealSyncCheckReplaceTarget.None,
             UnrealSyncCheckKind.Asset);
+    }
+
+    private static string ResolveActualType(
+        IReadOnlyDictionary<string, string> assetTypes,
+        string assetObjectPath,
+        string diskPath,
+        bool exists)
+    {
+        if (assetTypes.TryGetValue(assetObjectPath, out var fromManifest) &&
+            !string.IsNullOrWhiteSpace(fromManifest))
+        {
+            return fromManifest;
+        }
+
+        return exists ? UnrealAssetTypeProbe.Detect(diskPath) : string.Empty;
     }
 
     private static UnrealSyncCheckItem CheckGitRepository(string unrealProjectPath)

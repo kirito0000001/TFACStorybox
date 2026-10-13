@@ -259,6 +259,12 @@ internal sealed class UnrealSyncService
             ProtocolVersion = 1,
             ProgressPath = progressPath,
             ResultPath = resultPath,
+            // 资产类型清单的落点：和进度 / 结果那几个文件同一个目录（Saved/GalExcleTools）。
+            // 脚本会把这次涉及到的资产**当时的类名**写进去，给"同步前检测"用 ——
+            // 类型必须是问 Unreal 要来的，不是从文件里猜的（零境也是这个路子）。
+            AssetTypesPath = Path.Combine(
+                Path.GetDirectoryName(resultPath) ?? string.Empty,
+                UnrealAssetTypeManifest.FileName),
             GeneratedAt = DateTimeOffset.Now,
             ToolProject = new
             {
@@ -337,6 +343,7 @@ internal sealed class UnrealSyncService
             protocol_version = int(manifest.get("ProtocolVersion", 1))
             progress_path = manifest.get("ProgressPath")
             result_path = manifest.get("ResultPath")
+            asset_types_path = manifest.get("AssetTypesPath")
             target_root = manifest.get("TargetRoot", "/Game")
             imports = manifest.get("Imports", [])
             deletes = manifest.get("Deletes", [])
@@ -1066,6 +1073,64 @@ internal sealed class UnrealSyncService
                 if delete_asset_if_exists(asset_path):
                     deleted_count += 1
                 write_progress("DeleteAssets", "正在清理虚幻中的多余素材", 96 + (3.0 * (delete_index + 1) / max(len(pending_deletes), 1)), delete_index + 1, len(pending_deletes))
+
+            # ── 资产类型清单 ────────────────────────────────────────────
+            # 把这次涉及到的资产**当时的类名**写下来，给"同步前检测"用。
+            #
+            # 为什么非要问 Unreal：光看文件认不出蓝图化的数据资产
+            # （它们报的类名是 Blueprint，不是 DataAsset），更认不出 PaperZD 那种细类名。
+            # 检测那张表的价值全在"标红的就真要去处理"，所以类型必须是**问来的**。
+            # 这一段不额外花时间 —— 脚本本来就在 Unreal 里跑着。
+            write_progress("WriteAssetTypes", "正在记录资产类型", 98)
+            type_paths = []
+            for variable_request in manifest.get("Variables", []) or []:
+                type_paths.append(variable_request.get("TargetAssetPath") or "")
+            for section_key in ("LustrationInfo", "PortraitsInfo"):
+                type_paths.append((manifest.get(section_key) or {}).get("DataAsset") or "")
+            type_paths.append((manifest.get("VoiceMap") or {}).get("BlueprintAsset") or "")
+            type_paths.append((manifest.get("StoryBranches") or {}).get("DataTable") or "")
+            for entry in manifest.get("AssetIndexTables", []) or []:
+                type_paths.append(entry.get("TableAsset") or "")
+            for entry in manifest.get("StoryTables", []) or []:
+                type_paths.append(entry.get("TableAsset") or "")
+
+            def describe_asset_class(object_path):
+                # 返回类名（"Blueprint" / "WidgetBlueprint" / "DataTable"…）；
+                # 读不到就返回空串 —— 空串在 C# 那边一律当"不判"，绝不判失败。
+                try:
+                    asset_data = unreal.EditorAssetLibrary.find_asset_data(object_path)
+                    if not asset_data.is_valid:
+                        return ""
+                    class_path = asset_data.get_editor_property("asset_class_path")
+                    # TopLevelAssetPath 在 5.1+ 有 asset_name；老版本只能从字符串里抠。
+                    try:
+                        return str(class_path.get_editor_property("asset_name"))
+                    except Exception:
+                        text = str(class_path)
+                        marker = text.rfind('"')
+                        start = text.rfind('"', 0, marker)
+                        return text[start + 1:marker] if start >= 0 and marker > start else text
+                except Exception as exc:
+                    unreal.log_warning("GalExcleTools 读资产类型失败 {}：{}".format(object_path, exc))
+                    return ""
+
+            type_entries = []
+            seen_type_paths = set()
+            for object_path in type_paths:
+                if not object_path or object_path in seen_type_paths:
+                    continue
+                seen_type_paths.add(object_path)
+                type_entries.append({
+                    "objectPath": object_path,
+                    "assetClass": describe_asset_class(object_path)
+                })
+
+            if asset_types_path:
+                try:
+                    atomic_write_json(asset_types_path, type_entries)
+                except Exception as exc:
+                    # 写不了清单不影响同步本身 —— 检测那边会退回"不判类型"。
+                    add_warning("GalExcleTools 写资产类型清单失败：{}".format(exc))
 
             write_result(True)
             write_progress("Completed", "Unreal 同步已完成" if not errors else "Unreal 同步完成，但存在失败项", 100)
