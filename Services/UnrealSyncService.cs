@@ -583,13 +583,34 @@ internal sealed class UnrealSyncService
             write_progress("PrepareImports", "素材导入任务准备完成", 64, len(tasks), len(tasks))
             if tasks:
                 asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
+                write_progress("ImportAssets", "正在导入素材（{} 个，一次提交给引擎）".format(len(tasks)), 65, 0, len(tasks))
+
+                # ⚠️ **一次性把全部任务交给引擎**，不要一个任务调一次。
+                #
+                # import_asset_tasks 收的就是**列表**。一个任务调一次的话，Unreal 每趟都要
+                # 走一遍完整的编辑器事务 / 资产注册 / 通知流程 —— 几百个素材就是几百趟。
+                # 用户 2026-10-13 的原话：「虚幻引擎的保存都是一次就全部保存完了，
+                # 我看着像是一个一个写入，然后再一个一个保存」。
+                # 上一版只把"保存"合成了批量，导入还是一次一个 —— 那一半没改到。
+                #
+                # 逐项报错的能力没有丢：任务对象仍然是**单个**的，导入完照样能一项项
+                # 读 imported_object_paths 来核对是哪条没成 —— 只是"执行"合并成了一次。
+                #
+                # 兜底：整批失败就退回逐个。那样慢，但能指出到底是哪个文件 ——
+                # 批量导入的代价正是"一个坏文件可能带倒一整批"，所以这条退路必须留着。
+                try:
+                    asset_tools.import_asset_tasks(tasks)
+                except Exception as exc:
+                    add_warning("GalExcleTools 整批导入失败，退回逐个导入：{}".format(exc))
+                    for task in tasks:
+                        try:
+                            asset_tools.import_asset_tasks([task])
+                        except Exception as item_exc:
+                            add_error("GalExcleTools failed to import source {}: {}".format(
+                                task.get_editor_property("filename"), item_exc))
+
+                # 逐项核对：这一步只是"读结果"，不动编辑器，所以再细也不费时间。
                 for task_index, task in enumerate(tasks):
-                    try:
-                        asset_tools.import_asset_tasks([task])
-                    except Exception as exc:
-                        add_error("GalExcleTools failed to import source {}: {}".format(task.get_editor_property("filename"), exc))
-                        write_progress("ImportAssets", "正在导入并保存素材", 65 + 15.0 * (task_index + 1) / len(tasks), task_index + 1, len(tasks))
-                        continue
                     imported_paths = []
                     try:
                         imported_paths.extend(task.get_editor_property("imported_object_paths") or [])
