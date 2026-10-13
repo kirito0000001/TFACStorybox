@@ -290,6 +290,14 @@ internal sealed class UnrealSyncService
             },
             StoryTables = changePlan.StoryTables,
             AssetIndexTables = changePlan.AssetIndexTables,
+            // 素材改名：脚本会对它们做 rename（**保留引用**），而不是"删旧 + 导新"。
+            // 旧路径已经从 DeleteGroups 里摘掉了，所以不会出现"改名又删除"两条矛盾的行。
+            Renames = changePlan.Renames.Select(entry => new
+            {
+                entry.SourceObjectPath,
+                entry.TargetObjectPath,
+                entry.DisplayName
+            }),
             // 变量列表写入（背景图 / BGM / 环境音）。C# 侧只声明"写什么"，
             // 具体怎么落由脚本按每条请求的 Route 决定（见 UnrealVariableWriteRoute）。
             Variables = changePlan.VariablePlan.Requests.Select(request => new
@@ -347,6 +355,7 @@ internal sealed class UnrealSyncService
             target_root = manifest.get("TargetRoot", "/Game")
             imports = manifest.get("Imports", [])
             deletes = manifest.get("Deletes", [])
+            renames = manifest.get("Renames", []) or []
             tasks = []
             errors = []
             warnings = []
@@ -354,6 +363,8 @@ internal sealed class UnrealSyncService
             # 而 write_result 定义得比填充它的那段早（Python 里读的是调用时的值，没问题，
             # 但先声明一下更清楚）。
             verification = []
+            # 改名成功的那些（旧包路径 / 新包路径），收尾时逐条复扫。
+            renamed_packages = []
             imported_count = 0
             deleted_count = 0
             story_table_count = 0
@@ -453,6 +464,39 @@ internal sealed class UnrealSyncService
 
             sys.excepthook = sync_excepthook
             write_progress("ReadManifest", "Unreal 已读取同步清单", 60)
+
+            # ── 素材改名 ────────────────────────────────────────────────
+            # **必须排在导入之前**。导入目标就是改名目标（同一个源文件的新名字）：
+            # 先改名、再导入，等于"把旧资产挪到新路径，然后把新内容写进去"——
+            # 资产的**身份（GUID）不变**，Unreal 里引用它的地方就不受影响。
+            # 反过来先导入的话，新路径上已经有资产了，rename 会直接失败。
+            #
+            # 老做法是"删旧 + 导新"：那会新建一个资产，**引用旧资产的地方全断**。
+            # （零境那边专门有一个 OP_RENAME 处理这件事，判别靠"同一个 stableId
+            #   现在指向了不同的对象路径"；这边靠"新路径的源哈希 == 某个待删旧路径的源哈希"。）
+            if renames:
+                write_progress("RenameAssets", "正在改名（保留引用）", 61)
+            for rename_entry in renames:
+                rename_source = (rename_entry.get("SourceObjectPath") or "").split(".", 1)[0]
+                rename_target = (rename_entry.get("TargetObjectPath") or "").split(".", 1)[0]
+                rename_display = rename_entry.get("DisplayName") or rename_source
+                if not rename_source or not rename_target:
+                    continue
+                try:
+                    if not unreal.EditorAssetLibrary.does_asset_exist(rename_source):
+                        # 旧资产已经不在（比如上一轮就改过了）—— 不是错误，跳过。
+                        unreal.log("GalExcleTools rename skipped, source missing: {}".format(rename_source))
+                        continue
+                    rename_folder = rename_target.rsplit("/", 1)[0]
+                    if not unreal.EditorAssetLibrary.does_directory_exist(rename_folder):
+                        unreal.EditorAssetLibrary.make_directory(rename_folder)
+                    if not unreal.EditorAssetLibrary.rename_asset(rename_source, rename_target):
+                        add_error("GalExcleTools 改名失败：{} -> {}".format(rename_source, rename_target))
+                        continue
+                    renamed_packages.append((rename_display, rename_source, rename_target))
+                    unreal.log("GalExcleTools renamed: {} -> {}".format(rename_source, rename_target))
+                except Exception as rename_error:
+                    add_error("GalExcleTools 改名失败 {} -> {}：{}".format(rename_source, rename_target, rename_error))
 
             def delete_asset_if_exists(asset_path):
                 if not asset_path:
@@ -1189,6 +1233,22 @@ internal sealed class UnrealSyncService
                 if still_there:
                     add_error("GalExcleTools 复扫验证未通过：{} 删除后仍然存在".format(asset_path))
 
+            # 改名：旧路径必须没了、新路径必须在了 —— 两条都要查，
+            # 只查一条的话"改到一半"（旧没了新也没有）会被当成功。
+            for rename_display, rename_source, rename_target in renamed_packages:
+                source_still_there = bool(unreal.EditorAssetLibrary.does_asset_exist(rename_source))
+                target_present = bool(unreal.EditorAssetLibrary.does_asset_exist(rename_target))
+                verification.append({
+                    "DisplayName": "改名 {}".format(rename_display),
+                    "ObjectPath": rename_target,
+                    "ExpectPresent": True,
+                    "Present": target_present and not source_still_there,
+                    "Ok": target_present and not source_still_there
+                })
+                if not (target_present and not source_still_there):
+                    add_error("GalExcleTools 复扫验证未通过：改名 {} 之后旧路径 {} 或新路径 {} 不对".format(
+                        rename_display, rename_source, rename_target))
+
             failed_verifications = [item for item in verification if not item["Ok"]]
             unreal.log("GalExcleTools verification: {} item(s), {} failed".format(
                 len(verification), len(failed_verifications)))
@@ -1352,6 +1412,30 @@ internal sealed class UnrealSyncService
             voicePaths,
             allStoryTables,
             getPortraitPreviewPathsByLayerFileName);
+
+        // ── 素材改名：能改名就不要"删旧 + 导新" ──────────────────────
+        //
+        // 源文件改了名，老做法是"旧资产进删除组被删掉 + 新资产再导入一遍"——
+        // 那会把 Unreal 里**所有引用旧资产的地方全部打断**。
+        // 改名的正确做法是保留引用（零境那边专门有一个 OP_RENAME 干这个）。
+        //
+        // ⚠️ 顺序很关键：**先认出改名，再把它从删除组里摘掉**。
+        // 不摘的话，计划表上会同时出现"改名"和"删除同一个旧路径"两条互相矛盾的行 ——
+        // 虽然实际执行时旧路径已经不存在、删除是空操作，但看的人会以为工具在乱来。
+        var renames = BuildUnrealSyncRenameEntries(context, allImportGroups, deleteGroups, sourceHashes, syncState);
+        if (renames.Count > 0)
+        {
+            var renamedSourcePaths = renames
+                .Select(entry => entry.SourceObjectPath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            deleteGroups = deleteGroups
+                .Select(group => group with
+                {
+                    Assets = group.Assets.Where(asset => !renamedSourcePaths.Contains(asset)).ToList()
+                })
+                .Where(group => group.Assets.Count > 0)
+                .ToList();
+        }
 
         var storyTables = forceFullSync || requiresVerifiedTableSync
             ? allStoryTables.ToList()
@@ -1517,6 +1601,7 @@ internal sealed class UnrealSyncService
             deleteGroups,
             storyTables,
             assetIndexTables,
+            renames,
             variablePlan,
             storyBranchesChanged,
             storyBranches,
@@ -2018,6 +2103,103 @@ internal sealed class UnrealSyncService
         {
             AddImportGroup(groups, group.Key, group.ToList());
         }
+    }
+
+    /// <summary>
+    /// 找出"其实是同一个素材改了名"的项 —— 新目标路径的源哈希，等于某个待删旧路径的源哈希。
+    ///
+    /// 【判据的两个前提】
+    /// 1. **文件改名内容不变**，所以哈希相同；内容改过的话哈希不同，就不算改名
+    ///    （那种本该导新删旧，是对的）。
+    /// 2. **目标路径上还没有资产** —— 已经有的那是"覆盖"，不是"改名"。
+    ///    改名的前提是旧资产还在（下面查了磁盘），两者不会同时成立。
+    ///
+    /// 【为什么不新增状态字段】
+    /// <c>state.SourceHashes</c> 已经是"目标对象路径 → 源文件内容哈希"，
+    /// 而这一轮的 <paramref name="sourceHashes"/> 是同一个口径的新值 —— 两下一比就够了。
+    /// 多存一份"源文件 → 目标路径"的映射当然更直接，但那要改状态文件结构、
+    /// 还得处理老状态没有那个字段的情况；用哈希比是零成本的。
+    /// </summary>
+    private List<UnrealSyncRenameEntry> BuildUnrealSyncRenameEntries(
+        UnrealSyncContext context,
+        IReadOnlyList<UnrealSyncImportGroup> allImportGroups,
+        IReadOnlyList<UnrealSyncDeleteGroup> deleteGroups,
+        IReadOnlyDictionary<string, string> sourceHashes,
+        UnrealSyncState syncState)
+    {
+        if (syncState.SourceHashes.Count == 0 || deleteGroups.Count == 0)
+        {
+            return [];
+        }
+
+        // 待删的旧路径 → 它当初的源哈希。只有"磁盘上确实还有这个 .uasset"的才是候选 ——
+        // 已经没了的没什么可改名的。
+        var deleteCandidates = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in deleteGroups)
+        {
+            foreach (var assetPath in group.Assets)
+            {
+                if (string.IsNullOrWhiteSpace(assetPath) ||
+                    !syncState.SourceHashes.TryGetValue(assetPath, out var oldHash) ||
+                    string.IsNullOrWhiteSpace(oldHash))
+                {
+                    continue;
+                }
+
+                if (File.Exists(AssetObjectPathToFilePath(context, assetPath)))
+                {
+                    deleteCandidates[assetPath] = oldHash;
+                }
+            }
+        }
+
+        if (deleteCandidates.Count == 0)
+        {
+            return [];
+        }
+
+        var renames = new List<UnrealSyncRenameEntry>();
+        var claimedOldPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in allImportGroups)
+        {
+            foreach (var filePath in group.Files)
+            {
+                var targetObjectPath = BuildAssetObjectPath(group.Destination, filePath);
+
+                // 目标已经有了 → 那是覆盖，不是改名。
+                if (File.Exists(AssetObjectPathToFilePath(context, targetObjectPath)))
+                {
+                    continue;
+                }
+
+                if (!sourceHashes.TryGetValue(targetObjectPath, out var newHash) ||
+                    string.IsNullOrWhiteSpace(newHash))
+                {
+                    continue;
+                }
+
+                // 一对一：一个旧路径只能被认领一次（两个源文件内容碰巧一样时，
+                // 不限制就会让第二个也去改同一个旧资产）。
+                var oldPath = deleteCandidates
+                    .Where(pair => !claimedOldPaths.Contains(pair.Key) &&
+                                   string.Equals(pair.Value, newHash, StringComparison.OrdinalIgnoreCase))
+                    .Select(pair => pair.Key)
+                    .FirstOrDefault();
+                if (string.IsNullOrWhiteSpace(oldPath))
+                {
+                    continue;
+                }
+
+                claimedOldPaths.Add(oldPath);
+                var oldName = Path.GetFileName(oldPath).Split('.')[0];
+                renames.Add(new UnrealSyncRenameEntry(
+                    oldPath,
+                    targetObjectPath,
+                    $"{oldName} → {Path.GetFileNameWithoutExtension(filePath)}"));
+            }
+        }
+
+        return renames;
     }
 
     private List<UnrealSyncDeleteGroup> BuildDeleteGroups(

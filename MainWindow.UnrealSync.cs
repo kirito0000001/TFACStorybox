@@ -473,7 +473,8 @@ namespace GalExcleTools
                 // 导入了 27 个文件、但不是那 27 个，计数照样对得上。
                 var expectedVerificationCount =
                     changePlan.ImportGroups.Sum(group => group.Files.Count) +
-                    changePlan.DeleteGroups.Sum(group => group.Assets.Count);
+                    changePlan.DeleteGroups.Sum(group => group.Assets.Count) +
+                    changePlan.Renames.Count;
                 var failedVerifications = report?.Verification
                     .Where(entry => !entry.Ok)
                     .Select(entry => entry.DisplayName)
@@ -771,6 +772,17 @@ namespace GalExcleTools
                 SyncPanel.AddDiffRow("（无变化）", "当前内容与虚幻项目一致", "不会启动 Unreal，也不会做本地提交。");
                 SyncPanel.SummaryText = changePlan.Summary;
                 return;
+            }
+
+            // 改名排在素材前面：它先发生，而且它和"删除"是相反的事（一个保引用、一个断引用），
+            // 摆在最前面看的人才知道工具没在乱来。
+            if (changePlan.Renames.Count > 0)
+            {
+                SyncPanel.AddDiffRow(
+                    "素材改名",
+                    $"改名 {changePlan.Renames.Count} 个（保留引用）",
+                    string.Join("；", changePlan.Renames.Take(4).Select(entry => entry.DisplayName))
+                        + (changePlan.Renames.Count > 4 ? " 等" : string.Empty));
             }
 
             foreach (var group in changePlan.ImportGroups)

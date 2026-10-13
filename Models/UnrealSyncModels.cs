@@ -45,6 +45,11 @@ internal sealed record UnrealSyncChangePlan(
     List<UnrealSyncDeleteGroup> DeleteGroups,
     List<UnrealStoryTableSyncEntry> StoryTables,
     List<UnrealAssetIndexTableSyncEntry> AssetIndexTables,
+    /// <summary>
+    /// "其实是同一个素材改了名"的那些项。脚本会对它们做 rename（保留引用），
+    /// 而这些**旧路径已经从删除组里摘掉了** —— 不然会被"删掉旧的"那一步清掉。
+    /// </summary>
+    List<UnrealSyncRenameEntry> Renames,
     UnrealSyncVariablePlan VariablePlan,
     bool StoryBranchesChanged,
     List<UnrealStoryBranchSourceSyncEntry> StoryBranches,
@@ -70,6 +75,27 @@ internal sealed record UnrealSyncChangePlan(
 }
 
 internal sealed record UnrealSyncImportGroup(string Destination, List<string> Files);
+
+/// <summary>
+/// 一条"其实是同一个素材改了名"的项。
+///
+/// 【为什么需要它】
+/// 源文件改了名，老做法是"旧资产进删除组被删掉 + 新资产再导入一遍"——
+/// 那会把 Unreal 里**所有引用旧资产的地方全部打断**。
+/// 改名的正确做法是保留引用（零境那边专门有一个 OP_RENAME 干这个）。
+///
+/// 【怎么判出来的】
+/// 不用新状态字段：state.SourceHashes 是"目标对象路径 → 源文件内容哈希"，
+/// 而**文件改名内容不变**，所以新目标路径的哈希会等于某个"即将被删的旧路径"的哈希。
+/// 内容改过的话哈希不同，就不算改名 —— 那种本该导新删旧，是对的。
+/// </summary>
+/// <param name="SourceObjectPath">旧的对象路径（<c>/Game/…/旧名.旧名</c>）。</param>
+/// <param name="TargetObjectPath">新的对象路径。</param>
+/// <param name="DisplayName">给人看的名字，进日志与对比表。</param>
+internal sealed record UnrealSyncRenameEntry(
+    string SourceObjectPath,
+    string TargetObjectPath,
+    string DisplayName);
 
 internal sealed record UnrealSyncDeleteGroup(string Destination, List<string> Assets);
 
