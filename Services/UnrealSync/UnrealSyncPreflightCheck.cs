@@ -151,12 +151,10 @@ internal static class UnrealSyncPreflightCheck
             Kind: UnrealSyncCheckKind.File,
             DetailOverride: remoteExecutionEnabled
                 ? "已开启，编辑器开着时走在线执行。"
-                  + "（⚠️ 这个设置是**编辑器启动时读一次**的 —— 刚改过的话，"
-                  + "正在跑的那个编辑器还没拿到，要重启它才生效。）"
                 : "没开 —— 在 Unreal 里 Project Settings > Plugins > Python > Python Remote Execution 打勾，"
                   + "或在工程 Config/DefaultEngine.ini 的 "
-                  + "[/Script/PythonScriptPlugin.PythonScriptPluginSettings] 段写 bRemoteExecution=True，"
-                  + "然后重启编辑器。"));
+                  + "[/Script/PythonScriptPlugin.PythonScriptPluginSettings] 段写 bRemoteExecution=True。"
+                  + "改完**立刻生效**，不用重启编辑器（2026-10-13 实测）。"));
 
         // ── 6. 素材库（从项目推导出来的那个）─────────────────────────
         if (!string.IsNullOrWhiteSpace(assetLibraryPath))
