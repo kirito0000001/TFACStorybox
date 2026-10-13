@@ -73,6 +73,12 @@ internal enum UnrealSyncCheckKind
 /// <param name="Severity">不合规时算拦路还是提醒。</param>
 /// <param name="ReplaceTarget">可更换时换什么；见 <see cref="UnrealSyncCheckReplaceTarget"/>。</param>
 /// <param name="Kind">查的是目录 / 资产 / 文件；见 <see cref="UnrealSyncCheckKind"/>。</param>
+/// <param name="DetailOverride">
+/// 覆盖第三行那句话。空着就走 <see cref="DetailText"/> 的默认算法 ——
+/// **只有"默认算法说不出那件事"的时候才用它**。
+/// （第一个用它的是引擎那一项：你填 UnrealEditor.exe 时工具实际用的是同目录的
+/// UnrealEditor-Cmd.exe，这件事默认算法表达不出来。）
+/// </param>
 internal sealed record UnrealSyncCheckItem(
     string DisplayName,
     string ExpectedPath,
@@ -83,7 +89,8 @@ internal sealed record UnrealSyncCheckItem(
     string ActualType = "",
     UnrealSyncCheckSeverity Severity = UnrealSyncCheckSeverity.Error,
     UnrealSyncCheckReplaceTarget ReplaceTarget = UnrealSyncCheckReplaceTarget.None,
-    UnrealSyncCheckKind Kind = UnrealSyncCheckKind.Directory)
+    UnrealSyncCheckKind Kind = UnrealSyncCheckKind.Directory,
+    string DetailOverride = "")
 {
     /// <summary>右侧那两个字。不合规时直接显示原因，比"不合规"三个字有用。</summary>
     public string StatusText =>
@@ -183,6 +190,11 @@ internal sealed record UnrealSyncCheckItem(
     {
         get
         {
+            if (!string.IsNullOrWhiteSpace(DetailOverride))
+            {
+                return DetailOverride;
+            }
+
             if (IsCompliant)
             {
                 return Kind switch

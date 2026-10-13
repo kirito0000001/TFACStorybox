@@ -146,6 +146,12 @@ internal static class UnrealSyncPreflightCheck
     /// <c>UnrealEditor.exe</c> / <c>UnrealEditor-Cmd.exe</c> 的，填错就该报错，
     /// 而不是悄悄换一个引擎去用（那样更难查）。
     ///
+    /// ⚠️ 卡片上显示**解析出来的那个可执行文件**，不是"你填的那个"。
+    /// 你填 <c>UnrealEditor.exe</c> 时，工具会优先用同目录的
+    /// <c>UnrealEditor-Cmd.exe</c>（离线执行走的是它）—— 这一点必须看得见。
+    /// 2026-10-12：我重写成卡片时把这条信息弄丢了，界面上一直显示 .exe，
+    /// 看起来就像"没在用 cmd"。
+    ///
     /// 失败原因分三种说：还没选 / 路径不存在 / 不是那两个 exe。
     /// 原来三种共用一句"没找到 UnrealEditor-Cmd.exe"，照那句话去找会白费功夫。
     /// </summary>
@@ -163,15 +169,26 @@ internal static class UnrealSyncPreflightCheck
                     ? "这不是 UnrealEditor.exe 或 UnrealEditor-Cmd.exe"
                     : "这个路径不存在";
 
+        // 解析出来和你填的不是同一个时，说一句 —— 否则"我填的是 UnrealEditor.exe，
+        // 它却用了 UnrealEditor-Cmd.exe"这件事没人知道。
+        var note = !found
+            ? problem
+            : string.Equals(executable, configured, StringComparison.OrdinalIgnoreCase)
+                ? "已找到。"
+                : $"已找到。实际用的是同目录的 {Path.GetFileName(executable!)}（离线执行走它）。";
+
         return new UnrealSyncCheckItem(
             "Unreal 编辑器",
-            configured,
+            // 显示**解析出来的那个**（通常就是 UnrealEditor-Cmd.exe），
+            // 而不是"你填的那个" —— 工具用的是前者，界面就该说前者。
+            found ? executable! : configured,
             found ? executable! : string.Empty,
             found,
-            problem,
+            found ? string.Empty : problem,
             Severity: UnrealSyncCheckSeverity.Error,
             ReplaceTarget: UnrealSyncCheckReplaceTarget.Engine,
-            Kind: UnrealSyncCheckKind.File);
+            Kind: UnrealSyncCheckKind.File,
+            DetailOverride: note);
     }
 
     private static UnrealSyncCheckItem CheckProjectFile(string? unrealProjectPath)
