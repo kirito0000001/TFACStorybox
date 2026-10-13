@@ -2303,12 +2303,13 @@ internal sealed class UnrealSyncService
             });
         AddDeleteGroupByExpectedAssets(groups, context, UnrealSyncPathPolicy.ExcelTextsRoot, expectedExcelTextAssets, recursive: true);
 
+        // ⚠️ 这里原来用的名字是 **DA_Portraits** —— 那是旧布局的叫法。
+        // 新布局里立绘信息就是 DA_LustrationInfor 一个，预览那个叫
+        // DA_LustrationPreviewInfor 且**不在这个目录**（它在 LustrationPreview_Image）。
+        // 所以这个"期望集合"里只该有 DA_LustrationInfor；
+        // 挂着个不存在的旧名字看着无害，其实是在掩盖"这里没跟上落点变化"这件事。
+        // 2026-10-13 对的这一遍。
         var expectedLustrationRootAssets = new[] { "DA_LustrationInfor" };
-        if (context.AssetLibrary.IsPortraitPreviewEnabled)
-        {
-            expectedLustrationRootAssets = expectedLustrationRootAssets.Append("DA_Portraits").ToArray();
-        }
-
         AddDeleteGroup(groups, context, $"{UnrealSyncPathPolicy.LustrationRoot}", expectedLustrationRootAssets);
         AddLustrationLayerDeleteGroups(groups, context, characters);
         if (context.AssetLibrary.IsPortraitPreviewEnabled)
@@ -2434,13 +2435,28 @@ internal sealed class UnrealSyncService
         IReadOnlyList<CharacterInfo> characters,
         Func<CharacterInfo, IReadOnlyDictionary<string, string>> getPortraitPreviewPathsByLayerFileName)
     {
-        foreach (var character in characters)
+        // ⚠️ 预览现在是**一个平铺目录**（LustrationPreview_Image 下直接放），
+        // 不是按角色分子目录。所以这里必须**一次性**为整个目录建一个删除组，
+        // 期望集合是「所有角色的预览 + 那个数据资产」。
+        //
+        // 原来写成"按角色各建一个"，而 destination 对所有角色是同一个 ——
+        // 于是第一个角色的那一份就把别人的预览、以及数据资产
+        // DA_LustrationPreviewInfor 全当成"多余的"删掉。
+        // 2026-10-13 实测就是这么把它弄丢的（已从快照恢复）。
+        var previewAssetNames = characters
+            .SelectMany(character => getPortraitPreviewPathsByLayerFileName(character).Values)
+            .Select(GetExpectedImportedAssetName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // 数据资产跟预览图放在同一个目录里，必须一起列进期望集合 ——
+        // 不列进去，它就会被自己那个"清理多余素材"的步骤删掉。
+        previewAssetNames.Add("DA_LustrationPreviewInfor");
+        if (characters.Count > 0)
         {
-            var destination = GetPortraitPreviewDestinationPath(context, character);
-            var expectedAssetNames = getPortraitPreviewPathsByLayerFileName(character)
-                .Values
-                .Select(GetExpectedImportedAssetName);
-            AddDeleteGroup(groups, context, destination, expectedAssetNames);
+            AddDeleteGroup(
+                groups,
+                context,
+                GetPortraitPreviewDestinationPath(context, characters[0]),
+                previewAssetNames);
         }
 
         var lustrationFolderPath = AssetFolderPathToFilePath(context, $"{UnrealSyncPathPolicy.LustrationRoot}");
