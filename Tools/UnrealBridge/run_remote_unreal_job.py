@@ -25,6 +25,23 @@ def _normalized(path):
     return os.path.normcase(os.path.abspath(path or "").rstrip("\\/"))
 
 
+def _engine_identity(path):
+    """把 <UE> 和 <UE>/Engine 两种写法归一成同一个身份。
+
+    引擎根目录这个值，上报方给的是哪一种跟版本有关：编辑器节点那边可能报 <UE>，
+    而工具箱这边（从 .uproject 的 EngineAssociation 反查出来的）给的是 <UE>/Engine。
+    直接比字符串就永远对不上 —— 而**对不上的后果是静默退回离线**：
+    慢十倍、还不报错，只看现象根本想不到是这里。
+
+    2026-10-13 实测踩到：原来只试了 {engine_root, engine_root/Engine} 两种，
+    少了最关键的 <UE> 那一种。
+    """
+    normalized = _normalized(path)
+    if os.path.basename(normalized).lower() == "engine":
+        normalized = os.path.dirname(normalized)
+    return normalized
+
+
 def _load_job(path):
     with open(path, "r", encoding="utf-8") as source:
         job = json.load(source)
@@ -39,18 +56,17 @@ def _find_matching_node(remote, project_path, engine_root, timeout_seconds):
     只认进程名是不够的：开着**别的**工程时也会连上，然后在执行阶段整个失败。
     所以这里要求 project_root 与 engine_root 同时匹配。
 
-    engine_root 有两种写法（`<UE>/Engine` 与 `<UE>`），两种都接受 ——
-    引擎上报的是哪一种跟版本有关，不该由这条判断去赌。
+    引擎根目录按**身份**比（[`_engine_identity`](run_remote_unreal_job.py)），
+    而不是比字符串 —— 上报方给 <UE> 还是 <UE>/Engine 跟版本有关，
+    不该由这条判断去赌。
     """
     expected_project_root = _normalized(os.path.dirname(project_path))
-    expected_engine_root = _normalized(engine_root)
-    expected_engine_roots = {expected_engine_root, _normalized(os.path.join(engine_root, "Engine"))}
+    expected_engine_identity = _engine_identity(engine_root)
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         for node in remote.remote_nodes:
-            node_engine_root = _normalized(node.get("engine_root"))
             if (_normalized(node.get("project_root")) == expected_project_root and
-                    node_engine_root in expected_engine_roots):
+                    _engine_identity(node.get("engine_root")) == expected_engine_identity):
                 return node
         time.sleep(0.2)
     return None

@@ -1333,10 +1333,20 @@ internal sealed class UnrealSyncService
             CreateNoWindow = true
         };
         offlineStartInfo.ArgumentList.Add(context.UnrealProjectPath);
-        offlineStartInfo.ArgumentList.Add($"-ExecutePythonScript={scriptPath}");
+        // ⚠️ 用 `-run=pythonscript -script=<路径>`，**不是** `-ExecutePythonScript=<路径>`。
+        //
+        // 后者是"编辑器启动选项"，在 UnrealEditor-Cmd 这条无头路径下不一定被处理 ——
+        // 表现就是"进程跑完了、脚本根本没执行、所以没写结果文件"，
+        // 然后被"结果文件新鲜度"那条判成败的规则判成失败。现象绕得很，不好往回推。
+        //
+        // 2026-10-13 实测撞上，去零境那边对了一眼才发现命令形式不同
+        // （它一直是 `-run=pythonscript -script=...`，还多一个 `-nosound`）。
+        offlineStartInfo.ArgumentList.Add("-run=pythonscript");
+        offlineStartInfo.ArgumentList.Add($"-script={scriptPath}");
         offlineStartInfo.ArgumentList.Add("-unattended");
-        offlineStartInfo.ArgumentList.Add("-nop4");
         offlineStartInfo.ArgumentList.Add("-nosplash");
+        offlineStartInfo.ArgumentList.Add("-nosound");
+        offlineStartInfo.ArgumentList.Add("-nop4");
 
         var launch = _taskExecutionService.BuildLaunch(
             context.EditorPath,
