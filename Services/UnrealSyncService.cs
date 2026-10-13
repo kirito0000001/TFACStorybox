@@ -1275,6 +1275,24 @@ internal sealed class UnrealSyncService
     /// 选路与回退都在 <see cref="UnrealPythonTaskExecutionService"/> 里，
     /// 这里只把"没匹配到在线"和"在线失败退回"两种情况转成给别人看的话（两个回调）。
     /// </summary>
+    /// <summary>
+    /// 进程输出只留末尾这一段。
+    ///
+    /// 留**末尾**而不是开头：报错时要的是"最后发生了什么"（脚本抛的异常、编辑器崩在哪），
+    /// 开头那几十行都是插件加载、日志初始化之类，对定位没多大用。
+    /// </summary>
+    private static string TrimProcessOutput(string? output, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return "（进程没有任何输出 —— 这一条本身就是线索：它可能根本没启动起来）";
+        }
+
+        return output.Length <= maxLength
+            ? output
+            : $"…（前文已省略 {output.Length - maxLength} 个字符）…{Environment.NewLine}{output[^maxLength..]}";
+    }
+
     public async Task<UnrealSyncResult> RunAsync(
         UnrealSyncContext context,
         UnrealSyncChangePlan changePlan,
@@ -1348,9 +1366,17 @@ internal sealed class UnrealSyncService
                 // 退出码非 0 可能只是工程里别处有编译错误，与本轮成不成无关；
                 // 而脚本走到最后一定会 write_result（见脚本末尾），
                 // 所以"结果不新鲜"就等于"它没跑完"。
+                //
+                // ⚠️ 失败时**必须把进程输出一起带上**。
+                // 2026-10-13 实测：这里只报了一句"没有写出结果"，而唯一能说明
+                // "编辑器为什么没跑起来"的就是那段 stdout/stderr —— 结果它被扔了，
+                // 于是只能靠猜。verdict 拿得到 result，就没有理由不带。
                 verdict: result => UnrealSyncProcessRunner.IsFreshOutput(resultPath, result.StartedAtUtc)
                     ? null
-                    : "Unreal 没有写出这一轮的同步结果（结果文件缺失，或仍是上一轮留下的）。",
+                    : $"Unreal 没有写出这一轮的同步结果（结果文件缺失，或仍是上一轮留下的）。"
+                      + $"\r\n退出码：{result.ExitCode}；用时：{(result.StartedAtUtc == default ? "未知" : (DateTime.UtcNow - result.StartedAtUtc).ToString(@"mm\:ss"))}"
+                      + $"\r\n结果文件：{resultPath}"
+                      + $"\r\n—— Unreal 进程输出 ——\r\n{TrimProcessOutput(result.Output, 3000)}",
                 cancellationToken: cancellationToken),
             onNoOnlineEditor: onUsedOffline,
             onOfflineFallback: onOfflineFallback).ConfigureAwait(false);
