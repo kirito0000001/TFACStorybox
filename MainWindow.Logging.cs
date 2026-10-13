@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using GalExcleTools.Services;
@@ -111,14 +113,81 @@ namespace GalExcleTools
             SetLogStep(0);
         }
 
-        private void AppendLog(LogKind kind, string message, Exception? exception = null)
+        /// <summary>
+        /// 日志文件路径（<c>runtime.log</c>，和零境同名便于对照）。
+        ///
+        /// 放在 LocalApplicationData 而不是 exe 旁边：exe 可能被安装到只读位置，
+        /// 而日志是"出了事必须写得进去"的东西。
+        /// </summary>
+        private static readonly string LogFilePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "GalExcleTools",
+            "Logs",
+            RuntimeLogFile.FileName);
+
+        private bool _logFilePrepared;
+
+        /// <summary>
+        /// 这一次会话第一次写日志之前，先按零境的规则轮转一次
+        /// （超过 8MB 或跨天就把旧的归档成 runtime-YYYYMMDD.log，只留 5 份）。
+        /// 放在"第一次写"而不是构造函数里：构造函数里做的事越少越好，
+        /// 而且那时候可能还没到该轮转的时候。
+        /// </summary>
+        private void PrepareLogFileOnce()
         {
-            if (!ShouldWriteLog(kind))
+            if (_logFilePrepared)
             {
                 return;
             }
 
+            _logFilePrepared = true;
+            try
+            {
+                RuntimeLogFile.RotateIfNeeded(LogFilePath, DateTimeOffset.Now);
+            }
+            catch (Exception)
+            {
+                // 轮转失败不该挡住写日志 —— 大不了这份文件继续变大。
+            }
+        }
+
+        /// <summary>打开日志文件夹。出问题时把那个 runtime.log 发出去就够定位了。</summary>
+        private void OpenLogFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            var directory = Path.GetDirectoryName(LogFilePath);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(directory);
+                Process.Start(new ProcessStartInfo { FileName = directory, UseShellExecute = true });
+                AppendLog(LogKind.User, $"已打开日志文件夹：{directory}");
+            }
+            catch (Exception ex)
+            {
+                AppendLog(LogKind.Error, "打开日志文件夹失败。", ex);
+                ShowFloatingTip(InfoBarSeverity.Error, "打开日志文件夹失败", ex.Message, ex);
+            }
+        }
+
+        private void AppendLog(LogKind kind, string message, Exception? exception = null)
+        {
             var (displayText, copyText) = CreateLogText(kind, message, exception, DateTimeOffset.Now);
+
+            // ⚠️ 顺序很要紧：**先写文件，再看面板开关**。
+            // 文件写的是全量 —— 面板按等级过滤是"给人看的取舍"，
+            // 文件是"出了事能查的证据"。被过滤掉的那条在文件里必须还在，
+            // 否则"提示一闪没看清、回头也查不到"那个毛病就还在（2026-10-12 就是这个）。
+            PrepareLogFileOnce();
+            RuntimeLogFile.AppendLine(LogFilePath, copyText);
+
+            if (!ShouldWriteLog(kind))
+            {
+                return;
+            }
 
             _logLines.Enqueue((kind, displayText, copyText));
 

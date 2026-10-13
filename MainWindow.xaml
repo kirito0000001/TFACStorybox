@@ -2030,6 +2030,12 @@
                                 Spacing="6">
                                 <Button Click="ScrollLogToBottomButton_Click" Content="滚动到底部" />
                                 <Button Click="CopyAllLogButton_Click" Content="复制全部" />
+                                <!--
+                                    「打开日志文件夹」：日志**每条都会落到文件**（全量，
+                                    不受上面那些过滤开关影响），所以出了事可以直接把文件发出去 ——
+                                    比"提示一闪没看清、回头也查不到"靠谱得多。
+                                -->
+                                <Button Click="OpenLogFolderButton_Click" Content="打开日志文件夹" />
                                 <Button Click="ClearLogButton_Click" Content="清空" />
                             </StackPanel>
                         </Grid>

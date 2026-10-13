@@ -410,7 +410,7 @@ namespace GalExcleTools
                                 commitBand.At(commitProgress.SubPercent));
                             if (!commitProgress.IsTick)
                             {
-                                AppendLog(LogKind.Info, commitProgress.Message);
+                                AppendLog(LogKind.Info, $"[Sync Commit] {commitProgress.Message}");
                             }
                         },
                         cancellationToken);
@@ -468,7 +468,13 @@ namespace GalExcleTools
                         !string.Equals(update.Stage, lastLoggedUnrealStage, StringComparison.Ordinal))
                     {
                         lastLoggedUnrealStage = update.Stage;
-                        AppendLog(LogKind.User, $"Unreal 执行 · {update.Message}{countText}");
+                        // 英文方括号标签 + key=value —— 照零境的写法（它的是
+                        // `[Backup] character=... path=...`、`[Step5 Detection Summary] added=1 ...`）。
+                        // 这样是**机器可读**的：出问题时一眼看得出在哪个阶段、第几项，
+                        // 也方便事后按 stage= 去搜。界面上给人看的话在状态条那边，不冲突。
+                        AppendLog(
+                            LogKind.Info,
+                            $"[Sync Execute] stage={update.Stage} completed={update.Completed} total={update.Total} message={update.Message}");
                     }
                 });
                 var result = await RunUnrealSyncAsync(validation.Context, changePlan, progress, cancellationToken);
