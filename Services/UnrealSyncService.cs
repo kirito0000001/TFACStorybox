@@ -874,7 +874,18 @@ internal sealed class UnrealSyncService
                 if isinstance(value, str):
                     texts.append(value)
                 elif isinstance(value, dict):
-                    for item in value.values():
+                    for key, item in value.items():
+                        # ⚠️ **键也要收** —— 这一次就是漏在这儿。
+                        #
+                        # 复扫要数的 "TargetStory" 是 JSON 里的**键名**，不是值：
+                        #     {"TargetStory": "...", "Judjes": [...], "CompleteType": ...}
+                        # 只收值的话它永远不会出现在文本里，于是永远数出 0 ——
+                        # 明明数据写进去了，却报"expected=3 actual=0"。
+                        #
+                        # 2026-10-13 实测的实际值长这样（键一个都没有）：
+                        #     /Script/Engine.DataTable'.../WHK-M2-01.WHK-M2-01' StoryJudge Equal A All 0
+                        # 值全在，就是没有 TargetStory —— 一眼就能看出是"收漏了键"。
+                        texts.append(str(key))
                         texts.extend(collect_route_texts(item))
                 elif isinstance(value, (list, tuple)):
                     for item in value:
