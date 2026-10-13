@@ -76,46 +76,6 @@ internal static class UnrealProjectEngineResolver
             : null;
     }
 
-    /// <summary>
-    /// 这次到底用哪个编辑器可执行文件。
-    ///
-    /// 顺序：
-    /// 1. **配置里那个路径** —— 用户显式选过就以它为准（那是"覆盖"，不是"猜"）；
-    /// 2. 不行就**按工程的 EngineAssociation 找它自己的引擎**，用那边的
-    ///    <c>UnrealEditor-Cmd.exe</c>。
-    ///
-    /// 第 2 步是关键：引擎路径这个设置**本来就不该由人维护** ——
-    /// 工程自己就记着它用的是哪个引擎（.uproject 的 EngineAssociation），
-    /// 而那个才是权威。2026-10-12：用户那边的设置指向一个早就不存在的引擎目录，
-    /// 于是每次同步都得先"手动修一遍设置"才能用 —— 那是不该有的负担。
-    /// </summary>
-    public static string? ResolveEditorExecutable(string? configuredEnginePath, string? unrealProjectPath)
-    {
-        var fromConfigured = UnrealSyncService.ResolveEditorExecutable(configuredEnginePath ?? string.Empty);
-        if (!string.IsNullOrWhiteSpace(fromConfigured))
-        {
-            return fromConfigured;
-        }
-
-        var projectEngineRoot = ResolveEngineRoot(unrealProjectPath);
-        if (string.IsNullOrWhiteSpace(projectEngineRoot))
-        {
-            return null;
-        }
-
-        // 工程给的是引擎根目录（<UE>）；可执行文件在 Engine/Binaries/Win64 下。
-        // 先找 Cmd 版 —— 离线执行走的就是它。
-        var binaries = Path.Combine(projectEngineRoot, "Engine", "Binaries", "Win64");
-        var commandlet = Path.Combine(binaries, "UnrealEditor-Cmd.exe");
-        if (File.Exists(commandlet))
-        {
-            return commandlet;
-        }
-
-        var editor = Path.Combine(binaries, "UnrealEditor.exe");
-        return File.Exists(editor) ? editor : null;
-    }
-
     private static bool LooksLikeGuid(string value) =>
         Guid.TryParse(value.Trim('{', '}'), out _);
 

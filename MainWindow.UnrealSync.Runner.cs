@@ -55,14 +55,13 @@ namespace GalExcleTools
             var warnings = new List<string>();
             var errors = new List<string>();
 
-            // 编辑器可执行文件：**配置优先，配置不行就按工程自己的引擎找**。
-            // 引擎路径这个设置不该由人维护 —— 工程自己就记着它用的是哪个引擎
-            // （.uproject 的 EngineAssociation）。2026-10-12：设置指向一个早已不存在的
-            // 引擎目录，用户每次同步都得先手动修一遍设置，那是白加的负担。
-            var editorPath = UnrealProjectEngineResolver.ResolveEditorExecutable(enginePath, unrealProjectPath);
+            // 编辑器可执行文件就是**配置里那个路径**说了算。
+            // 曾经想加"配置不行就按工程引擎兜底"，但那会让"填错了"变成
+            // "悄悄用了别的引擎" —— 更难查，不划算。这一行本来就是让人填 cmd 的。
+            var editorPath = UnrealSyncService.ResolveEditorExecutable(enginePath);
             if (editorPath is null)
             {
-                errors.Add("请选择有效的 UnrealEditor-Cmd.exe（或 .uproject 指向的那个引擎里没有它）。");
+                errors.Add("请选择有效的 UnrealEditor.exe 或 UnrealEditor-Cmd.exe。");
             }
             else
             {
