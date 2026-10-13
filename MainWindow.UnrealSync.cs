@@ -821,6 +821,21 @@ namespace GalExcleTools
                 return;
             }
 
+            // ⚠️ 先问一句"这套通知 API 在这个部署形态下到底能不能用"。
+            //
+            // 未打包（没走 MSIX）时它用不了：会去加载
+            // Microsoft.WindowsAppRuntime.Insights.Resource.dll，而那个东西只在
+            // 打包部署里才有 —— 于是每次同步完都记一条
+            // 「找不到指定的模块」的 Warning。
+            //
+            // 那是**环境限制**，不是故障，更不是用户做错了什么。
+            // 每次都报只会训练人忽略日志 —— 而那正是我们最不想要的（今天已经吃过一次亏：
+            // 一堆假红里夹着一条真红）。所以问一句，不支持就静默跳过。
+            if (!AppNotificationManager.IsSupported())
+            {
+                return;
+            }
+
             try
             {
                 var manager = AppNotificationManager.Default;
@@ -839,7 +854,9 @@ namespace GalExcleTools
             }
             catch (Exception ex)
             {
-                AppendLog(LogKind.Warning, $"虚幻同步完成通知发送失败：{ex.Message}");
+                // 走到这里才是真的出了意外（支持、但发不出去）。
+                // 记 Info 不记 Warning：它不影响同步结果，不该在日志里摆出"有问题"的样子。
+                AppendLog(LogKind.Info, $"虚幻同步完成通知发送失败（不影响同步结果）：{ex.Message}");
             }
         }
 

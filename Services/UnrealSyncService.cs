@@ -257,6 +257,22 @@ internal sealed class UnrealSyncService
         var manifest = new
         {
             ProtocolVersion = 1,
+            // 资产名里**会被 Unreal 换成下划线**的那些字符。
+            //
+            // 为什么要把这条规则带进清单：脚本要按它算"这个素材该落到哪个包"，
+            // 而 Unreal 的导入器也按它清洗文件名 —— 两边必须**同一条规则**，
+            // 否则"我算的期望路径"和"它实际建出来的资产"对不上，
+            // 复扫就会把成功的导入报成失败（假红）。
+            //
+            // 2026-10-13 实测：源文件名叫 Vo-012-.不要.wav，Unreal 把那个点换成了下划线
+            // （Vo-012-_不要），而脚本没换 —— 55 项语音全部"验证没通过"，
+            // 于是整次同步被判成"未完整完成"，连同步状态都不写，
+            // 下一次检测又是"全部都有差异"。一环扣一环，起点就是这一个点。
+            //
+            // 规则**只在这边维护一份**（旧版就是这么做的：C# 算好名字放进清单，
+            // 脚本直接照用）。这里选择把字符集带过去，而不是把成品名字一个个塞进清单，
+            // 是因为清单里的结构（每组一个目录 + 一串文件）更紧凑，不值得为它改结构。
+            ImportNameInvalidChars = InvalidUnrealObjectNameCharacters,
             ProgressPath = progressPath,
             ResultPath = resultPath,
             // 资产类型清单的落点：和进度 / 结果那几个文件同一个目录（Saved/GalExcleTools）。
@@ -514,6 +530,19 @@ internal sealed class UnrealSyncService
 
             write_progress("PrepareImports", "正在准备素材导入任务", 62)
             task_targets = []
+
+            # 资产名的清洗规则，从清单里带过来（见 C# 那边 ImportNameInvalidChars 的注释）。
+            # **这边不自己维护一份** —— 两份就会走岔，走岔就是假红。
+            # 那个 join：清单给的是字符串，join 字符串正好原样返回；
+            # 万一将来改成数组也照样能用。两种形态都收下。
+            import_name_invalid_chars = "".join(manifest.get("ImportNameInvalidChars") or "")
+
+            def sanitize_asset_name(value):
+                normalized = "".join(
+                    "_" if (character.isspace() or character in import_name_invalid_chars) else character
+                    for character in value)
+                return normalized or "Asset"
+
             for group in imports:
                 destination = group.get("Destination")
                 files = group.get("Files", [])
@@ -524,7 +553,7 @@ internal sealed class UnrealSyncService
                     if not filename or not os.path.exists(filename):
                         add_error("GalExcleTools missing source file: {}".format(filename))
                         continue
-                    asset_name = os.path.splitext(os.path.basename(filename))[0]
+                    asset_name = sanitize_asset_name(os.path.splitext(os.path.basename(filename))[0])
                     task = unreal.AssetImportTask()
                     task.set_editor_property("filename", filename)
                     task.set_editor_property("destination_path", destination)
