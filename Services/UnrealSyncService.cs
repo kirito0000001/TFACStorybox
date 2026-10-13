@@ -2296,9 +2296,9 @@ internal sealed class UnrealSyncService
                 UnrealSyncPathPolicy.EffectIndexTableAsset,
                 // ⚠️ 剧情选项分支表**必须列进来**：这个删除组是 recursive 的，
                 // 凡是 ExcelTexts 下不在期望集合里的资产都会被删。
-                // 而 WHK 里 AllRoad.uasset 恰好就放在 ExcelTexts 下
-                // （工具箱的常量指向 AssetMaterial/AllRoad —— 两处路径目前对不上，
-                //  这一条是保底，避免同步顺手把它删掉）。
+                // （2026-10-13：常量与落点已经对齐 —— StoryBranchDataTableAssetPath
+                //   现在就是 ExcelTexts/AllRoad。这条保留是**结构上的保底**：
+                //   以后常量万一再和落点走岔，至少不会顺手把它删掉。）
                 StoryBranchDataTableAssetPath
             });
         AddDeleteGroupByExpectedAssets(groups, context, UnrealSyncPathPolicy.ExcelTextsRoot, expectedExcelTextAssets, recursive: true);
