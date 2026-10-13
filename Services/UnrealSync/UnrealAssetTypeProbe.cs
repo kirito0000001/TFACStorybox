@@ -105,16 +105,29 @@ internal static class UnrealAssetTypeProbe
     /// 【读不到 → true（当"不判"）】
     /// 把读不到当成不对，就会出现零境注释里那种假红。
     ///
-    /// 【这里没有"兼容对"】
-    /// 我一度加过一条「DataAsset 接受 Blueprint」的放宽，用来盖住
-    /// DA_LustrationInfor 那两项的误报。那是**盖症状**：
-    /// 真正的问题是**期望值写错了** —— 蓝图化的数据资产在 Unreal 那边的类名就是
-    /// Blueprint（零境的 assetClass 读的是同一个口径）。期望值改对之后，
-    /// 那条放宽就成了死代码，所以删掉。
-    /// 教训：期望值和探测器必须用同一个口径，否则放宽只会越加越多。
+    /// 【蓝图的生成类名也算 Blueprint】
+    /// 蓝图化的数据资产（DA_LustrationInfor 之类），它的 <c>UClass</c> 就是那个
+    /// 生成类 —— 不管问 <c>asset_class</c> 还是 <c>asset_class_path</c>，
+    /// Unreal 报的都是 <c>PDA_LustrationData_C</c> 这种名字，**不会**报 "Blueprint"。
+    /// 期望值写 Blueprint 却拿生成类名去比，那颗红点每次都会亮 —— 那是**假红**，
+    /// 比不查更糟（会让人不再信这张表）。所以 <c>*_C</c> 一律当 Blueprint 收下。
+    ///
+    /// 真正要拦的是"这里本该是个蓝图，结果放了个 DataTable" 那类错 ——
+    /// 那种 actualType 会是 <c>DataTable</c>，下面照样对不上，拦得住。
     /// </summary>
-    public static bool Matches(string expectedType, string actualType) =>
-        string.IsNullOrWhiteSpace(expectedType) ||
-        string.IsNullOrWhiteSpace(actualType) ||
-        string.Equals(expectedType, actualType, StringComparison.OrdinalIgnoreCase);
+    public static bool Matches(string expectedType, string actualType)
+    {
+        if (string.IsNullOrWhiteSpace(expectedType) || string.IsNullOrWhiteSpace(actualType))
+        {
+            return true;
+        }
+
+        if (string.Equals(expectedType, actualType, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return expectedType.Equals("Blueprint", StringComparison.OrdinalIgnoreCase) &&
+               actualType.EndsWith("_C", StringComparison.OrdinalIgnoreCase);
+    }
 }

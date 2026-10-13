@@ -1196,12 +1196,18 @@ internal sealed class UnrealSyncService
                     class_path = asset_data.get_editor_property("asset_class_path")
                     # TopLevelAssetPath 在 5.1+ 有 asset_name；老版本只能从字符串里抠。
                     try:
-                        return str(class_path.get_editor_property("asset_name"))
+                        value = class_path.get_editor_property("asset_name")
                     except Exception:
                         text = str(class_path)
                         marker = text.rfind('"')
                         start = text.rfind('"', 0, marker)
-                        return text[start + 1:marker] if start >= 0 and marker > start else text
+                        value = text[start + 1:marker] if start >= 0 and marker > start else text
+                    # ⚠️ 必须把字面量 "None" 干掉。Python 里 get_editor_property 拿不到
+                    # 某个字段时返回的是 None，而 str(None) 是 "None" —— 那个字符串
+                    # 到了 C# 那边会被当成一个真实的类名，于是判成"类型不对"（假红）。
+                    if value is None or str(value) in ("", "None"):
+                        return ""
+                    return str(value)
                 except Exception as exc:
                     unreal.log_warning("GalExcleTools 读资产类型失败 {}：{}".format(object_path, exc))
                     return ""
