@@ -130,7 +130,35 @@ internal static class UnrealSyncPreflightCheck
         // 但"这次没有可回退的提交点"得让人看见。
         items.Add(CheckGitRepository(unrealProjectPath!));
 
-        // ── 5. 素材库（从项目推导出来的那个）─────────────────────────
+        // ── 5. Python 远程执行（在线执行要用）────────────────────────
+        // 不开的话**在线那条路永远连不上**，每次同步都退回离线：慢十倍，
+        // 而且从现象上完全看不出来 —— 2026-10-13 就是被这个坑掉一整轮：
+        // 报的是"没有写出同步结果"，真因却藏在这一层设置后面。
+        //
+        // **不拦路**（Warning）：离线照样能同步，只是慢。但必须说出来，
+        // 否则"为什么总是这么慢"永远没有答案。
+        var remoteExecutionEnabled = UnrealRemoteExecutionSetting.IsEnabled(unrealProjectPath);
+        items.Add(new UnrealSyncCheckItem(
+            "Python 远程执行（在线执行要用）",
+            Path.Combine(
+                Path.GetDirectoryName(Path.GetFullPath(unrealProjectPath!)) ?? string.Empty,
+                "Config",
+                "DefaultEngine.ini"),
+            remoteExecutionEnabled ? "bRemoteExecution=True" : string.Empty,
+            remoteExecutionEnabled,
+            remoteExecutionEnabled ? string.Empty : "没开，同步会退回离线（慢十倍）",
+            Severity: UnrealSyncCheckSeverity.Warning,
+            Kind: UnrealSyncCheckKind.File,
+            DetailOverride: remoteExecutionEnabled
+                ? "已开启，编辑器开着时走在线执行。"
+                  + "（⚠️ 这个设置是**编辑器启动时读一次**的 —— 刚改过的话，"
+                  + "正在跑的那个编辑器还没拿到，要重启它才生效。）"
+                : "没开 —— 在 Unreal 里 Project Settings > Plugins > Python > Python Remote Execution 打勾，"
+                  + "或在工程 Config/DefaultEngine.ini 的 "
+                  + "[/Script/PythonScriptPlugin.PythonScriptPluginSettings] 段写 bRemoteExecution=True，"
+                  + "然后重启编辑器。"));
+
+        // ── 6. 素材库（从项目推导出来的那个）─────────────────────────
         if (!string.IsNullOrWhiteSpace(assetLibraryPath))
         {
             items.Add(CheckAssetLibrary(assetLibraryPath));
