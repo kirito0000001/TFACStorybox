@@ -43,9 +43,6 @@ internal sealed class UnrealSyncProgressPlan
     /// <summary>差异检测：读全部素材 + 逐文件算哈希。</summary>
     public const string Detect = "detect";
 
-    /// <summary>关闭已打开的编辑器（只有用户选了"关闭后同步"才有这一段）。</summary>
-    public const string CloseEditors = "close-editors";
-
     /// <summary>同步前的全量本地提交。**耗时最不可控的一段**（LFS 工程上 add -A 可能几分钟）。</summary>
     public const string LocalCommit = "local-commit";
 
@@ -97,11 +94,13 @@ internal sealed class UnrealSyncProgressPlan
     /// 一次完整同步的阶段与权重（估算，跑过几次后按实测调）。
     ///
     /// 生成剧情 CSV ≈15s（逐章导出 + 读回校验）、差异检测 ≈10s（读完素材并逐个算哈希）、
-    /// 关闭编辑器 ≈3s、同步前本地提交 ≈25s（首次在 LFS 工程上会更久）、
-    /// 写清单与脚本 ≈2s、Unreal 执行 ≈60s（离线冷启；在线通常只要几秒到十几秒）。
+    /// 同步前本地提交 ≈25s（首次在 LFS 工程上会更久）、写清单与脚本 ≈2s、
+    /// Unreal 执行 ≈60s（离线冷启；在线通常只要几秒到十几秒）。
+    ///
+    /// 注：原来还有一段「关闭已打开的编辑器」，随那个对话框一起删了 ——
+    /// 在线执行上线之后，编辑器开着才是我们要的，没有"要关掉它"这回事了。
     /// </summary>
-    public static UnrealSyncProgressPlan ForSync(bool includesCloseEditors) =>
-        new(BuildPhases(includesCloseEditors));
+    public static UnrealSyncProgressPlan ForSync() => new(BuildPhases());
 
     /// <summary>
     /// 只做差异检测（「重新检测」按钮那条路）：**也是先导出剧情 CSV，再全量扫描比较**。
@@ -110,17 +109,12 @@ internal sealed class UnrealSyncProgressPlan
     public static UnrealSyncProgressPlan ForDetection() =>
         new([(StoryCsvExport, 15d), (Detect, 10d)]);
 
-    private static List<(string, double)> BuildPhases(bool includesCloseEditors)
-    {
-        var phases = new List<(string, double)> { (StoryCsvExport, 15d), (Detect, 10d) };
-        if (includesCloseEditors)
-        {
-            phases.Add((CloseEditors, 3d));
-        }
-
-        phases.Add((LocalCommit, 25d));
-        phases.Add((Prepare, 2d));
-        phases.Add((Execute, 60d));
-        return phases;
-    }
+    private static List<(string, double)> BuildPhases() =>
+    [
+        (StoryCsvExport, 15d),
+        (Detect, 10d),
+        (LocalCommit, 25d),
+        (Prepare, 2d),
+        (Execute, 60d),
+    ];
 }

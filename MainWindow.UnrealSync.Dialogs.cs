@@ -46,28 +46,11 @@ namespace GalExcleTools
         // "问要不要打 zip" 改成"直接做一次全量本地提交"，不再需要询问。
         // 见 Services/UnrealSync/UnrealSyncGitCommitService。
 
-        private async Task<bool?> ShowRunningUnrealEditorDialogAsync(UnrealSyncContext context)
-        {
-            var runningEditors = GetRunningUnrealEditorProcesses(context);
-            if (runningEditors.Count == 0)
-            {
-                return false;
-            }
-
-            var processText = string.Join("\n", runningEditors.Select(process => $"{process.ProcessName}  PID {process.Id}"));
-            var result = await _dialogService.ShowAsync(new DialogRequest(
-                "检测到当前项目正在 Unreal Editor 中运行",
-                $"建议先关闭当前绑定项目的虚幻编辑器，再执行同步。其他 Unreal 项目不会被关闭。否则已加载的资产可能不会刷新，后续保存还可能覆盖同步结果。\n\n{processText}",
-                "关闭后同步",
-                "取消",
-                "继续同步"));
-            return result switch
-            {
-                DialogResultKind.Primary => true,
-                DialogResultKind.Secondary => false,
-                _ => null
-            };
-        }
+        // ShowRunningUnrealEditorDialogAsync 已删除（2026-10-12）：
+        // 它建议"先关闭正在运行的编辑器"，而在线执行上线之后那条建议正好是反的 ——
+        // 编辑器开着才是我们要的（在线走的就是它，快约十倍）。
+        // 真连不上时 RunWithOfflineFallbackAsync 自己会退回离线并留痕，不需要问用户。
+        // 配套的 CloseRunningUnrealEditors 也一起删了 —— 它的唯一调用点就在那段里。
 
         private async Task ShowUnrealSyncFinishedDialogAsync(
             UnrealSyncContext context,

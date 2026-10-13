@@ -302,11 +302,7 @@ namespace GalExcleTools
             // 进度条按阶段加权分配（见 UnrealSyncProgressPlan）：各段耗时差得很远
             // —— 写清单不到一秒、Unreal 执行几十秒、同步前提交在 LFS 工程上可能几分钟 ——
             // 平摊会让快的阶段一闪而过、慢的阶段一路龟速。
-            //
-            // 这里**先按"会关编辑器"建计划**：关编辑器那一步在下面的询问之后才知道要不要做，
-            // 而差异检测在询问之前。它权重只有 3%，选了"继续同步"就跳过那一段，
-            // 不值得为它把计划拆成两份。
-            var progressPlan = UnrealSyncProgressPlan.ForSync(includesCloseEditors: true);
+            var progressPlan = UnrealSyncProgressPlan.ForSync();
             var csvExportBand = progressPlan[UnrealSyncProgressPlan.StoryCsvExport];
             var detectBand = progressPlan[UnrealSyncProgressPlan.Detect];
 
@@ -355,26 +351,11 @@ namespace GalExcleTools
                 progressPlan.Caption(UnrealSyncProgressPlan.Detect, "差异检测完成，等待确认同步..."),
                 false,
                 detectBand.At(100));
-            var runningUnrealChoice = await ShowRunningUnrealEditorDialogAsync(validation.Context);
-            if (runningUnrealChoice is null)
-            {
-                SetUnrealSyncProgress(false, string.Empty);
-                SyncPanel.SyncButtonEnabled = true;
-                return;
-            }
-
-            if (runningUnrealChoice == true)
-            {
-                var closeEditorsBand = progressPlan[UnrealSyncProgressPlan.CloseEditors];
-                SetUnrealSyncProgress(
-                    true,
-                    progressPlan.Caption(UnrealSyncProgressPlan.CloseEditors, "正在尝试关闭已打开的 Unreal Editor..."),
-                    false,
-                    closeEditorsBand.At(20));
-                await Task.Run(() => CloseRunningUnrealEditors(validation.Context));
-                await Task.Delay(1200);
-            }
-
+            // ⚠️ 这里原来会弹一个「检测到编辑器正在运行，建议先关闭」的对话框，
+            // 并可选"关闭后同步"。在线执行上线之后**那条建议正好是反的**：
+            // 编辑器开着才是我们要的 —— 在线走的就是它，比冷启一个无头实例快约十倍；
+            // 真连不上，RunWithOfflineFallbackAsync 会自己退回离线并在日志里留痕。
+            // 所以那段连同 CloseRunningUnrealEditors 一起删了（2026-10-12）。
             SetUnrealSyncStatus(InfoBarSeverity.Informational, "正在同步", "正在生成导入清单并调用 Unreal Editor，请等待引擎完成资源导入。");
             try
             {

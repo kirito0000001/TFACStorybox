@@ -76,67 +76,10 @@ namespace GalExcleTools
             return editorPath;
         }
 
-        private static List<Process> GetRunningUnrealEditorProcesses(UnrealSyncContext context)
-        {
-            var result = new List<Process>();
-            var projectPath = Path.GetFullPath(context.UnrealProjectPath);
-            try
-            {
-                var locatorType = Type.GetTypeFromProgID("WbemScripting.SWbemLocator")
-                    ?? throw new InvalidOperationException("当前系统不支持 WMI 进程查询。");
-                dynamic locator = Activator.CreateInstance(locatorType)!;
-                dynamic services = locator.ConnectServer(".", "root\\cimv2");
-                dynamic processes = services.ExecQuery(
-                    "SELECT ProcessId, Name, CommandLine FROM Win32_Process " +
-                    "WHERE Name = 'UnrealEditor.exe' OR Name = 'UnrealEditor-Cmd.exe'");
-                foreach (dynamic processInfo in processes)
-                {
-                    var commandLine = Convert.ToString(processInfo.CommandLine, CultureInfo.InvariantCulture);
-                    if (string.IsNullOrWhiteSpace(commandLine) ||
-                        !commandLine.Contains(projectPath, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    try
-                    {
-                        result.Add(Process.GetProcessById(Convert.ToInt32(processInfo.ProcessId, CultureInfo.InvariantCulture)));
-                    }
-                    catch
-                    {
-                        // The process may have exited after the WMI snapshot was created.
-                    }
-                }
-            }
-            catch
-            {
-                // Failing closed prevents an unrelated Unreal project from being terminated.
-            }
-
-            return result;
-        }
-
-        private static void CloseRunningUnrealEditors(UnrealSyncContext context)
-        {
-            foreach (var process in GetRunningUnrealEditorProcesses(context))
-            {
-                try
-                {
-                    if (!process.CloseMainWindow())
-                    {
-                        process.Kill(entireProcessTree: true);
-                    }
-                    else if (!process.WaitForExit(8000))
-                    {
-                        process.Kill(entireProcessTree: true);
-                    }
-                }
-                catch
-                {
-                    // The editor may have already closed or denied access; continue with the remaining processes.
-                }
-            }
-        }
+        // GetRunningUnrealEditorProcesses / CloseRunningUnrealEditors 已删除（2026-10-12）：
+        // 它们唯一的用途是支撑那个「建议先关闭编辑器」的对话框，而在线执行上线之后
+        // 那条建议正好是反的 —— 编辑器开着才是我们要的（在线走的就是它，快约十倍）。
+        // 那段 WMI 查询本来也只是为了"别误杀别的工程"，现在连杀都不杀了。
 
         // CreateUnrealSyncBackup 已删除（2026-10-12）：同步前的回退点改成
         // 「全量本地提交」，见 Services/UnrealSync/UnrealSyncGitCommitService。

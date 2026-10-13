@@ -93,7 +93,11 @@ internal sealed class UnrealPythonTaskExecutionService
             return new UnrealPythonTaskLaunch(offlineStartInfo, UsesRunningEditor: false);
         }
 
-        var engineRoot = ResolveEngineRoot(normalizedEditorPath);
+        // 引擎根目录**优先取工程自己说的**（.uproject 的 EngineAssociation）——
+        // 配置里那个路径是会过期的，而它一过期，下面那个节点匹配就永远对不上、
+        // 每次都默默退回离线（慢十倍且不报错）。配置只当兜底。
+        var engineRoot = UnrealProjectEngineResolver.ResolveEngineRoot(normalizedProjectPath)
+            ?? ResolveEngineRoot(normalizedEditorPath);
         var pythonPath = ResolveBundledPythonPath(engineRoot);
         var runnerPath = Path.Combine(AppContext.BaseDirectory, RemoteRunnerRelativePath);
         if (!File.Exists(pythonPath))
@@ -181,36 +185,35 @@ internal sealed class UnrealPythonTaskExecutionService
     }
 
     /// <summary>
-    /// 只有「打开的正是当前选中项目、且用的是当前选中引擎」的编辑器才算在线执行目标。
+    /// 廉价的预判：**有没有 UnrealEditor 在跑** —— 有才值得去试在线那条路。
     ///
-    /// 只判断"有没有 UnrealEditor 进程"是不够的：开着**别的**工程时也会走在线路，
-    /// 然后在连接阶段整个失败 —— 而这种情况本该直接走离线。
+    /// 【为什么不在这里比对工程和引擎】
+    /// 原来这里要求"进程的 exe 路径里含**当前配置的引擎根目录**"，而那个配置是会过期的：
+    /// 2026-10-12 实测配置指向一个根本不存在的引擎目录，于是这里恒为 false、
+    /// 每次都直接走离线 —— 而真正在跑的编辑器用的是工程 EngineAssociation 指的引擎。
+    ///
+    /// 权威判断在 Python 那边（<c>run_remote_unreal_job.py</c> 的 <c>_find_matching_node</c>：
+    /// 要求节点的 project_root 与 engine_root **都对得上**）。
+    /// 这里多判一道只会多一种判错的机会，而判错的代价是"本来能在线却走了离线"——
+    /// 慢十倍，还不报错。连不上由标记 GAL_REMOTE_UNAVAILABLE 决定回退，
+    /// 那条路才是**准的**：它问的是编辑器本身，不是我猜的进程信息。
     /// </summary>
     public bool ShouldUseRunningEditor(string? editorPath, string? projectPath)
     {
-        var normalizedProjectPath = SafeFullPath(projectPath);
-        if (string.IsNullOrWhiteSpace(normalizedProjectPath))
+        // 两个参数留着：调用点已经在传，而且将来若要按工程名预筛，签名不用动。
+        _ = editorPath;
+        _ = projectPath;
+
+        try
         {
-            return false;
+            return Process.GetProcessesByName("UnrealEditor").Length > 0;
         }
-
-        var engineRoot = SafeFullPath(TryResolveEngineRoot(editorPath));
-        foreach (var descriptor in EnumerateRunningEditorDescriptors())
+        catch (Exception)
         {
-            if (!MatchesProject(descriptor, normalizedProjectPath))
-            {
-                continue;
-            }
-
-            // 引擎根目录拿不到时不再额外设限，项目匹配已经足够定位目标编辑器。
-            if (string.IsNullOrWhiteSpace(engineRoot) ||
-                descriptor.Contains(engineRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
+            // 枚举进程失败（权限之类）时**当作有** ——
+            // 宁可多花几秒试一次在线，也不要因为查不到进程就默默降级成离线。
+            return true;
         }
-
-        return false;
     }
 
     /// <summary>引擎根目录：<c>&lt;UE&gt;/Engine</c>（编辑器的上两级）。</summary>
