@@ -514,6 +514,32 @@ internal sealed class UnrealSyncService
                 except Exception as rename_error:
                     add_error("GalExcleTools 改名失败 {} -> {}：{}".format(rename_source, rename_target, rename_error))
 
+            def asset_path_to_disk_file(asset_path):
+                # /Game/A/B.C  →  <工程>/Content/A/B.uasset
+                #
+                # 为什么要落到"磁盘上的文件"这一层：删除这件事上有**三个口径**，
+                # 而它们并不一致（2026-10-13 读引擎源码 + 实地核对磁盘查清的）：
+                #   - EditorAssetLibrary.delete_asset  内部是 ObjectTools::ForceDeleteObjects，
+                #     返回值是"处理了几个对象"，**不代表文件没了**；
+                #   - EditorAssetLibrary.does_asset_exist 查的是**资产注册表**；
+                #   - 磁盘上的 .uasset 才是最终事实。
+                # 实测：动作返回 True、注册表说存在、磁盘上也确实还在。
+                # 所以删除之后要**以磁盘为准**再确认一次。
+                try:
+                    package = str(asset_path).split(".")[0]
+                    if not package.startswith("/Game/"):
+                        return ""
+                    relative = package[len("/Game/"):]
+                    return os.path.join(
+                        unreal.Paths.project_content_dir(),
+                        relative.replace("/", os.sep) + ".uasset")
+                except Exception:
+                    return ""
+
+            def asset_file_exists(asset_path):
+                disk_file = asset_path_to_disk_file(asset_path)
+                return bool(disk_file) and os.path.exists(disk_file)
+
             def delete_asset_if_exists(asset_path):
                 if not asset_path:
                     return False
@@ -524,16 +550,25 @@ internal sealed class UnrealSyncService
                         add_error("GalExcleTools failed to delete extra asset: {}".format(asset_path))
                         return False
 
-                    # ⚠️ **删完当场复核一次。**
+                    # ⚠️ **动作成功不等于文件没了** —— 以磁盘为准再确认一次。
                     #
-                    # delete_asset 返回 True **不等于**盘上真没了：它可能只把对象标记掉，
-                    # 文件还在 —— 而 does_asset_exist 查的正是盘上那个文件。
+                    # 2026-10-13 实测：45 个删除动作全部返回成功，复扫却有 38 个仍在，
+                    # 而且**磁盘上的 .uasset 也真的还在**（M1-2 的时间戳还是几小时前的）。
+                    # 三个口径不一致：动作返回"处理了几个对象"、注册表说存在、磁盘也还在。
                     #
-                    # 2026-10-13 实测：45 个删除动作全部返回成功，复扫却发现 38 个仍在。
-                    # 当场问一句，日志里就能直接分清是哪一种：
-                    #   - 这里就发现还在  → 删除动作本身没生效（API 用错 / 被引用挡住）；
-                    #   - 这里没了、复扫又冒出来 → 是"没落盘"，得在删除之后再存一次。
-                    if unreal.EditorAssetLibrary.does_asset_exist(asset_path):
+                    # 所以：动作走完之后，**文件还在就直接删文件**。
+                    # 为什么敢直接删 —— 这些路径是工具箱自己判定为多余的
+                    # （"素材文件夹里不能有别的"），而且都在工程 Content 底下，
+                    # 删掉它们是这次同步的**目的**，不是副作用。
+                    disk_file = asset_path_to_disk_file(asset_path)
+                    if disk_file and os.path.exists(disk_file):
+                        try:
+                            os.remove(disk_file)
+                        except Exception as exc:
+                            add_error("GalExcleTools 删除文件失败 {}：{}".format(disk_file, exc))
+
+                    # 最终以磁盘为准：还在才算没删掉。
+                    if asset_file_exists(asset_path):
                         still_present.append(asset_path)
                     unreal.log("GalExcleTools deleted extra asset: {}".format(asset_path))
                     return True
@@ -1337,6 +1372,38 @@ internal sealed class UnrealSyncService
                         len(errors), len(pending_deletes)))
                 pending_deletes = []
 
+            # ⚠️ **把"这次刚写进去的"从待删名单里摘掉** —— 这一步是零境那边用血的教训换来的。
+            #
+            # 它的原话（sync_character_sequences.py 的 _cleanup_old_assets）：
+            #   「比价必须忽略大小写。……逐字节比会把自己刚建好的资产判成"该清掉的旧资产"：
+            #     实测 2026-09-22，特效层新建的图集贴图 / 3 只精灵 / Flipbook 被整批 force delete」
+            # 它的做法就是先把这次的新路径归一化成小写集合，再从待删里剔掉。
+            #
+            # 这边 2026-10-13 踩的是同一个坑：Dn_* 那批立绘层贴图**这次刚导入**（18:31:27），
+            # 紧接着删除阶段就判它们是"多余" —— 名字比对差一个大小写或归一化就够了。
+            # 后果不只是白删：删完引用就断了，而复扫还会说"删除后文件仍在"
+            # （包被加载着，ForceDeleteObjects 卸载不掉，文件就留在盘上）。
+            #
+            # 判据用**这次真正导进去的包路径**（task_targets 里那一串），归一化成小写再比。
+            just_written = set()
+            for entry in task_targets:
+                package = str(entry[1] or "").split(".")[0].lower()
+                if package:
+                    just_written.add(package)
+            if just_written and pending_deletes:
+                kept = []
+                skipped_just_written = 0
+                for asset_path in pending_deletes:
+                    if str(asset_path).split(".")[0].lower() in just_written:
+                        skipped_just_written += 1
+                        continue
+                    kept.append(asset_path)
+                if skipped_just_written:
+                    add_warning(
+                        "GalExcleTools 待清理里有 {} 个是这次刚导入的，已从删除名单里摘掉"
+                        "（不然会自己删掉自己刚写的东西）。".format(skipped_just_written))
+                pending_deletes = kept
+
             write_progress("DeleteAssets", "正在清理虚幻中的多余素材", 96, 0, len(pending_deletes))
             still_present = []
             for delete_index, asset_path in enumerate(pending_deletes):
@@ -1448,7 +1515,10 @@ internal sealed class UnrealSyncService
                     add_error("GalExcleTools 复扫验证未通过：{} 不在 {}".format(display_name, package_path))
 
             for asset_path in pending_deletes:
-                still_there = bool(unreal.EditorAssetLibrary.does_asset_exist(asset_path))
+                # **以磁盘为准**：does_asset_exist 查的是资产注册表，而删除这件事上
+                # 注册表、动作返回值、磁盘三方口径并不一致（见 asset_path_to_disk_file
+                # 那段注释）。文件没了才算删掉 —— 而删文件这件事上面那一步已经做过了。
+                still_there = asset_file_exists(asset_path)
                 verification.append({
                     "DisplayName": "清理 {}".format(asset_path.rsplit("/", 1)[-1]),
                     "ObjectPath": asset_path,
@@ -1457,7 +1527,7 @@ internal sealed class UnrealSyncService
                     "Ok": not still_there
                 })
                 if still_there:
-                    add_error("GalExcleTools 复扫验证未通过：{} 删除后仍然存在".format(asset_path))
+                    add_error("GalExcleTools 复扫验证未通过：{} 删除后文件仍在磁盘上".format(asset_path))
 
             # 改名：旧路径必须没了、新路径必须在了 —— 两条都要查，
             # 只查一条的话"改到一半"（旧没了新也没有）会被当成功。
