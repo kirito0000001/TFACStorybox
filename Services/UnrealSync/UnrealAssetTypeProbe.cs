@@ -102,11 +102,33 @@ internal static class UnrealAssetTypeProbe
     /// <summary>
     /// 读到的类型与期望的是否相符。
     ///
-    /// **读不到就返回 true**（当"不判"）：这一条是刻意的 ——
+    /// 【读不到 → true（当"不判"）】
     /// 把读不到当成不对，就会出现零境注释里那种假红。
+    ///
+    /// 【兼容对：DataAsset 接受 Blueprint】
+    /// 本项目那两个数据资产（<c>DA_LustrationInfor</c> / <c>DA_LustrationPreviewInfor</c>）
+    /// 是**蓝图化的数据资产** —— 父类是 <c>PDA_LustrationData</c>（一个蓝图），
+    /// 所以包里带的是 Blueprint 的标记，不是 <c>/Script/Engine.DataAsset</c>。
+    ///
+    /// 2026-10-12 实测：这两项被判成「类型不对」，而用户的资产完全正确 ——
+    /// 那正是**假红**，比不查更糟（会让人不再信这张表）。
+    /// 所以 DataAsset 这一档放宽到接受 Blueprint；
+    /// 其余（WidgetBlueprint / DataTable / Blueprint…）仍然严格要求 ——
+    /// 那些要是建错了，是真会出问题的。
     /// </summary>
-    public static bool Matches(string expectedType, string actualType) =>
-        string.IsNullOrWhiteSpace(expectedType) ||
-        string.IsNullOrWhiteSpace(actualType) ||
-        string.Equals(expectedType, actualType, StringComparison.OrdinalIgnoreCase);
+    public static bool Matches(string expectedType, string actualType)
+    {
+        if (string.IsNullOrWhiteSpace(expectedType) || string.IsNullOrWhiteSpace(actualType))
+        {
+            return true;
+        }
+
+        if (string.Equals(expectedType, actualType, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return expectedType.Equals("DataAsset", StringComparison.OrdinalIgnoreCase) &&
+               actualType.Equals("Blueprint", StringComparison.OrdinalIgnoreCase);
+    }
 }
