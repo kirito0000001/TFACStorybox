@@ -138,7 +138,14 @@ internal sealed record UnrealSyncCheckItem(
 
             if (string.IsNullOrWhiteSpace(ActualPath))
             {
-                return "未找到对应目录或资产。";
+                // 按类别说人话：引擎那一项原来也跟着说"未找到对应目录或资产"，
+                // 可它既不是目录也不是资产，读起来很别扭。
+                return Kind switch
+                {
+                    UnrealSyncCheckKind.File => "没找到这个文件。",
+                    UnrealSyncCheckKind.Asset => "未找到对应资产。",
+                    _ => "未找到对应目录。",
+                };
             }
 
             return string.IsNullOrWhiteSpace(ActualType)

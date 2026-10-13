@@ -30,15 +30,23 @@ internal static class UnrealSyncPreflightCheck
         string? enginePath,
         string? assetLibraryPath)
     {
-        var items = new List<UnrealSyncCheckItem>
-        {
-            // ── 1. 关联：引擎与工程（这两项可「更换」）───────────────────
-            CheckEngine(enginePath),
-            CheckProjectFile(unrealProjectPath),
-        };
+        var items = new List<UnrealSyncCheckItem>();
 
-        // 工程路径都不对的话，下面按它拼出来的路径全是假的 —— 硬凑只会刷一屏假红。
-        if (items.Any(item => !item.IsCompliant))
+        // ── 1. 关联：引擎与工程（这两项可「更换」）───────────────────
+        var projectCheck = CheckProjectFile(unrealProjectPath);
+        items.Add(CheckEngine(enginePath));
+        items.Add(projectCheck);
+
+        // 只有**工程**找不到才提前收工：下面所有路径都是按 .uproject 拼出来的，
+        // 工程不对的话它们全是假的，硬凑只会刷一屏假红。
+        //
+        // ⚠️ 引擎不对**不能**提前收工。这两件事互不相干 ——
+        // 引擎选错了，照样该告诉你"目录都在、资产类型对不对"。
+        // 2026-10-12：我重写这一段时把条件写成了 items.Any(不合规)，
+        // 于是引擎一红后面十几项全不出现 —— 那个"只剩两项"的老毛病又犯了一遍。
+        // 它不是"没删干净"，是把判据写宽了：判据必须是**这一条**（工程），
+        // 而不是"有没有任何一条不合规"。
+        if (!projectCheck.IsCompliant)
         {
             return BuildResult(items);
         }
@@ -121,12 +129,24 @@ internal static class UnrealSyncPreflightCheck
         var configured = enginePath ?? string.Empty;
         var executable = UnrealSyncService.ResolveEditorExecutable(configured);
         var found = executable is not null;
+
+        // 失败原因要分清楚是哪一种。原来一律说"没找到 UnrealEditor-Cmd.exe"，
+        // 而实际最常见的情况是**这个路径整个不存在**（换过引擎、或引擎挪过位置）——
+        // 照那句提示去找 Cmd.exe 会白费功夫。
+        var problem = found
+            ? string.Empty
+            : string.IsNullOrWhiteSpace(configured)
+                ? "还没有选择引擎"
+                : File.Exists(configured) || Directory.Exists(configured)
+                    ? "这不是 UnrealEditor.exe 或 UnrealEditor-Cmd.exe"
+                    : "这个路径不存在";
+
         return new UnrealSyncCheckItem(
             "Unreal 编辑器",
             configured,
             found ? executable! : string.Empty,
             found,
-            found ? string.Empty : "没找到 UnrealEditor-Cmd.exe",
+            problem,
             Severity: UnrealSyncCheckSeverity.Error,
             ReplaceTarget: UnrealSyncCheckReplaceTarget.Engine,
             Kind: UnrealSyncCheckKind.File);
