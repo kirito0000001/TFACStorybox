@@ -635,10 +635,40 @@ namespace GalExcleTools
 
             // 目标落点不再手选：它由 .uproject 推导。这里把推导结果显示出来 ——
             // 那个框留着是为了让人**看得见会同步到哪**，而不是让人填。
-            var derivedContentFolder = validation.Context?.TargetContentFolderPath;
-            if (!string.IsNullOrWhiteSpace(derivedContentFolder))
+            //
+            // ⚠️ 不能从 validation.Context 取。那个 Context 只在**关联完整**时才建出来，
+            // 于是引擎路径一不合规（很常见：没选引擎、选错引擎），Context 就是 null，
+            // 这个框会保留项目绑定里的旧值 —— 2026-10-12 的截图里它还显示着
+            // …\AssetMaterial\Narrative，看着像"推导没生效"，其实是根本没走到推导。
+            // 所以直接从 .uproject 推，与 Context 建没建出来无关。
+            SyncPanel.TargetFolderText = TryResolveTargetFolderText();
+        }
+
+        /// <summary>
+        /// 由界面上的 .uproject 推出目标落点文本；推不出来就返回空串。
+        ///
+        /// 单独抽出来，是因为它**不能**依赖 <c>validation.Context</c> ——
+        /// 那个 Context 只在关联完整时才建，引擎路径一错它就是 null，
+        /// 于是界面上会留着旧值，看起来像推导失效。
+        /// </summary>
+        private string TryResolveTargetFolderText()
+        {
+            var unrealProjectPath = SyncPanel.ProjectPath.Trim();
+            if (string.IsNullOrWhiteSpace(unrealProjectPath))
             {
-                SyncPanel.TargetFolderText = derivedContentFolder;
+                return string.Empty;
+            }
+
+            try
+            {
+                return UnrealSyncPathPolicy.ResolveTargetContentFolderPath(unrealProjectPath);
+            }
+            catch (Exception exception)
+            {
+                // 路径不合法（比如填了个相对路径）不该把界面炸掉 —— 空着就是了，
+                // 上面那条状态条已经在说哪里不对。
+                AppendLog(LogKind.Info, $"推导目标落点失败：{exception.Message}");
+                return string.Empty;
             }
         }
 

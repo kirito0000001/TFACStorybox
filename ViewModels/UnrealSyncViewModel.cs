@@ -10,19 +10,19 @@ namespace GalExcleTools.ViewModels;
 /// <summary>
 /// 一条检测项在界面上的显示形态。
 ///
-/// 为什么不让界面直接绑 <see cref="UnrealSyncCheckItem"/>：那个是服务层的记录，
-/// 字段是给逻辑用的（Severity 是枚举、合规项没有 Problem）。
-/// 这里把它翻成"界面要显示什么" —— 包括一句合起来的问题文案、以及合规与否的文案。
+/// 【为什么是"标题 + 一条路径 + 一行说明"】
+/// 原来是五列表（检查项 / 期望 / 实际 / 状态 / 问题），而"期望"和"实际"在绝大多数情况下
+/// 是同一个值 —— 同一句话显示两遍，长路径还把行高撑得极高，一屏看不到几项。
+/// 参考项目那版是**一条一项的卡片**，读起来清楚得多，这里对齐它。
 /// </summary>
 internal sealed record UnrealSyncCheckRow(
     string DisplayName,
-    string ExpectedPath,
-    string ActualPath,
+    string Path,
     bool IsCompliant,
     string StatusText,
     string StatusGlyph,
     Brush? StatusBrush,
-    string ProblemText);
+    string Note);
 
 /// <summary>
 /// 虚幻同步台的界面状态。
@@ -141,16 +141,14 @@ internal sealed class UnrealSyncViewModel : ObservableObject
         {
             CheckRows.Add(new UnrealSyncCheckRow(
                 item.DisplayName,
-                item.ExpectedPath,
-                // 合规项不重复显示同一条路径 —— 期望和实际一样时只显示一份，界面干净得多。
-                string.Equals(item.ExpectedPath, item.ActualPath, System.StringComparison.OrdinalIgnoreCase)
-                    ? string.Empty
-                    : item.ActualPath,
+                item.Path,
                 item.IsCompliant,
                 DescribeStatus(item),
+                // ✓ / ⚠ / ✗ 三个字形（Segoe 图标字体）。Warning 用感叹号 ——
+                // 它不拦路，长得像失败会让人以为必须处理。
                 item.IsCompliant ? "\uE73E" : item.Severity == UnrealSyncCheckSeverity.Warning ? "\uE7BA" : "\uE711",
                 ResolveStatusBrush(item),
-                item.Problem));
+                item.Note));
         }
 
         CheckSummaryText = result.SummaryText;

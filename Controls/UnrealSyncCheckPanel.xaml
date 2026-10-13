@@ -2,12 +2,20 @@
 <!--
     同步台的「合规检测」层（三层里的第二层）。
 
-    形态照参考项目同步的第一步：一张 检查项 / 期望 / 实际 / 状态 / 问题 的表，
-    加一个「只看没过的」和一个「开始检测」。
+    形态照参考项目同步的第一步：**一条一项的卡片** ——
+      标题（粗体）
+      一条路径
+      一行彩色说明（合规说"查到了什么"，不合规说"哪里不对"）
+      右侧：✓ / ⚠ / ✗ + 合规 / 提醒 / 不合规
+
+    【为什么不是表格】
+    原来做成了五列表（检查项 / 期望 / 实际 / 状态 / 问题）。问题是"期望"和"实际"
+    在绝大多数情况下是**同一个值**（合规时实际就等于期望），于是同一句话显示两遍；
+    长路径在窄列里还得折行，一行能占三四行高，一屏看不到几项。
+    参考项目那版读起来清楚得多，所以对齐它。
 
     这里只做显示与绑定：检测结果在 UnrealSyncViewModel 里，
     检测本身在 Services/UnrealSync/UnrealSyncPreflightCheck（纯磁盘、不跑 Unreal）。
-    样式来自 App.xaml 的应用级字典 —— 所以这个控件放在哪儿都能解析到。
 -->
 <UserControl
     x:Class="GalExcleTools.Controls.UnrealSyncCheckPanel"
@@ -22,6 +30,7 @@
     <Border Style="{StaticResource PanelBorderStyle}">
         <StackPanel Padding="18" Spacing="12">
             <TextBlock Text="{Binding UnrealSync.CheckHeaderText}" Style="{StaticResource SectionTitleStyle}" />
+
             <!-- 汇总 + 过滤 + 触发 -->
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
@@ -41,64 +50,44 @@
                     OnContent="只看没过的"
                     IsOn="{Binding UnrealSync.HidePassedChecks, Mode=TwoWay}" />
                 <Button
-                    x:Name="RunCheckButton"
+                    x:Name="CheckUnrealSyncButton"
                     Grid.Column="2"
                     VerticalAlignment="Center"
                     Content="开始检测"
-                    Click="RunCheckButton_Click"
+                    Click="CheckUnrealSyncButton_Click"
                     IsEnabled="{Binding UnrealSync.CheckButtonEnabled}" />
             </Grid>
 
-            <!-- 表头 -->
-            <Grid ColumnSpacing="12" Visibility="{Binding UnrealSync.CheckListVisibility}">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="180" />
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="86" />
-                    <ColumnDefinition Width="3*" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="检查项" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
-                <TextBlock Grid.Column="1" Text="期望" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
-                <TextBlock Grid.Column="2" Text="实际" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
-                <TextBlock Grid.Column="3" Text="状态" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
-                <TextBlock Grid.Column="4" Text="问题" Style="{StaticResource StoryInspectorSectionTitleStyle}" />
-            </Grid>
-
-            <!-- 条目：一行一项，列宽和表头对齐（同一个星号比例） -->
             <ItemsControl ItemsSource="{Binding UnrealSync.VisibleCheckRows}" Visibility="{Binding UnrealSync.CheckListVisibility}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <Border
-                            Padding="0,6"
+                            Padding="0,10"
                             BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                             BorderThickness="0,0,0,1">
                             <Grid ColumnSpacing="12">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="180" />
-                                    <ColumnDefinition Width="2*" />
-                                    <ColumnDefinition Width="2*" />
-                                    <ColumnDefinition Width="86" />
-                                    <ColumnDefinition Width="3*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock
-                                    VerticalAlignment="Center"
-                                    Text="{Binding DisplayName}"
-                                    TextWrapping="Wrap" />
-                                <TextBlock
-                                    Grid.Column="1"
-                                    VerticalAlignment="Center"
-                                    FontSize="12"
-                                    Style="{StaticResource SubtleTextStyle}"
-                                    Text="{Binding ExpectedPath}" />
-                                <TextBlock
-                                    Grid.Column="2"
-                                    VerticalAlignment="Center"
-                                    FontSize="12"
-                                    Style="{StaticResource SubtleTextStyle}"
-                                    Text="{Binding ActualPath}" />
+                                <StackPanel Spacing="2">
+                                    <TextBlock
+                                        FontSize="15"
+                                        FontWeight="SemiBold"
+                                        Text="{Binding DisplayName}"
+                                        TextWrapping="Wrap" />
+                                    <TextBlock
+                                        FontSize="12"
+                                        Style="{StaticResource SubtleTextStyle}"
+                                        Text="{Binding Path}" />
+                                    <TextBlock
+                                        FontSize="12"
+                                        Foreground="{Binding StatusBrush}"
+                                        Text="{Binding Note}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
                                 <StackPanel
-                                    Grid.Column="3"
+                                    Grid.Column="1"
                                     Orientation="Horizontal"
                                     Spacing="6"
                                     VerticalAlignment="Center">
@@ -108,16 +97,10 @@
                                         Glyph="{Binding StatusGlyph}" />
                                     <TextBlock
                                         VerticalAlignment="Center"
-                                        FontSize="12"
+                                        FontSize="13"
                                         Foreground="{Binding StatusBrush}"
                                         Text="{Binding StatusText}" />
                                 </StackPanel>
-                                <TextBlock
-                                    Grid.Column="4"
-                                    VerticalAlignment="Center"
-                                    FontSize="12"
-                                    Style="{StaticResource SubtleTextStyle}"
-                                    Text="{Binding ProblemText}" />
                             </Grid>
                         </Border>
                     </DataTemplate>

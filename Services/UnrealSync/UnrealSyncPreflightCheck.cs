@@ -16,22 +16,28 @@ internal enum UnrealSyncCheckSeverity
 }
 
 /// <summary>
-/// 一条检测项。形态照零境第一步那张表（显示名 / 期望 / 实际 / 是否合规 / 问题），
-/// 那张表的好处是**同一套结构既能逐条显示、也能一句话汇总**。
+/// 一条检测项。
+///
+/// 【为什么只有一条路径】
+/// 原来是「期望路径 + 实际路径」两条，界面上并排两列 —— 但绝大多数情况下它们是**同一个值**
+/// （合规时实际就等于期望），于是同一句话显示两遍，还把行高撑得很高。
+/// 参考项目那版是"一条一项的卡片"：标题 + 一条路径 + 一行彩色说明，清楚得多。
+/// 所以这里合成一条；"实际值"只在**与期望不同**时才有意义，而那种情况本来就该报 Note。
 /// </summary>
-/// <param name="DisplayName">给人看的名字，例如「目标内容目录」。</param>
-/// <param name="ExpectedPath">期望的路径。磁盘路径或 <c>/Game</c> 路径都可以，写清就行。</param>
-/// <param name="ActualPath">实际找到的路径；没找到就是空串。</param>
-/// <param name="IsCompliant">合不合规。</param>
-/// <param name="Severity">不合规时算拦路还是提醒。</param>
-/// <param name="Problem">不合规的原因；合规时为空串。</param>
+/// <param name="DisplayName">给人看的名字，例如「AssetMaterial/Sound/BGM/PlotUse」。</param>
+/// <param name="Path">这条检查针对的路径（磁盘路径，或 /Game 对象路径）。</param>
+/// <param name="IsCompliant">是否合规。Error 级不合规会拦同步，Warning 级只提醒。</param>
+/// <param name="Severity">不合规时的严重程度。</param>
+/// <param name="Note">
+/// 路径下面那一行说明：合规时说**查到了什么**（「目录已经存在。」），
+/// 不合规时说**哪里不对**。界面上按合规与否染成绿 / 红。
+/// </param>
 internal sealed record UnrealSyncCheckItem(
     string DisplayName,
-    string ExpectedPath,
-    string ActualPath,
+    string Path,
     bool IsCompliant,
     UnrealSyncCheckSeverity Severity,
-    string Problem);
+    string Note);
 
 /// <summary>
 /// 同步前检测的结果。
@@ -81,21 +87,21 @@ internal static class UnrealSyncPreflightCheck
         var editorExecutable = UnrealSyncService.ResolveEditorExecutable(enginePath ?? string.Empty);
         items.Add(new UnrealSyncCheckItem(
             "Unreal 编辑器",
-            "引擎目录下的 UnrealEditor-Cmd.exe",
-            editorExecutable ?? string.Empty,
+            enginePath ?? string.Empty,
             editorExecutable is not null,
             UnrealSyncCheckSeverity.Error,
-            editorExecutable is not null ? string.Empty : "没找到可用的 UnrealEditor-Cmd.exe，检查引擎路径。"));
+            editorExecutable is not null
+                ? $"已找到：{editorExecutable}"
+                : "没找到可用的 UnrealEditor-Cmd.exe，检查引擎路径。"));
 
         // ── 2. 工程文件 ──────────────────────────────────────────────
         var hasProject = !string.IsNullOrWhiteSpace(unrealProjectPath) && File.Exists(unrealProjectPath);
         items.Add(new UnrealSyncCheckItem(
             "Unreal 工程",
             unrealProjectPath ?? string.Empty,
-            hasProject ? unrealProjectPath! : string.Empty,
             hasProject,
             UnrealSyncCheckSeverity.Error,
-            hasProject ? string.Empty : "找不到 .uproject 文件，检查工程路径。"));
+            hasProject ? "已找到 .uproject 文件。" : "找不到 .uproject 文件，检查工程路径。"));
 
         // 工程都没有就没必要往下查目录了 —— 硬凑出来的路径只会刷一屏假红。
         if (!hasProject)
@@ -108,10 +114,9 @@ internal static class UnrealSyncPreflightCheck
         items.Add(new UnrealSyncCheckItem(
             "目标内容目录",
             contentFolderPath,
-            hasContent ? contentFolderPath : string.Empty,
             hasContent,
             UnrealSyncCheckSeverity.Error,
-            hasContent ? string.Empty : "工程下没有 Content 目录（.uproject 与它同级）。"));
+            hasContent ? "Content 目录已找到。" : "工程下没有 Content 目录（.uproject 与它同级）。"));
 
         if (!hasContent)
         {
@@ -127,10 +132,9 @@ internal static class UnrealSyncPreflightCheck
             items.Add(new UnrealSyncCheckItem(
                 relative,
                 diskPath,
-                exists ? diskPath : string.Empty,
                 exists,
                 UnrealSyncCheckSeverity.Error,
-                exists ? string.Empty : "目录不存在。请在 Unreal 内容浏览器里先建好，工具不会替你创建。"));
+                exists ? "目录已经存在。" : "目录不存在。请在 Unreal 内容浏览器里先建好，工具不会替你创建。"));
         }
 
         // ── 4. 要写变量的目标资产 ────────────────────────────────────
@@ -157,12 +161,11 @@ internal static class UnrealSyncPreflightCheck
         var hasGitRepository = UnrealSyncGitCommitService.HasGitRepositoryOnDisk(projectDirectory);
         items.Add(new UnrealSyncCheckItem(
             "git 仓库（同步前的本地提交用）",
-            Path.Combine(projectDirectory, ".git"),
-            hasGitRepository ? "已找到" : string.Empty,
+            projectDirectory,
             hasGitRepository,
             UnrealSyncCheckSeverity.Warning,
             hasGitRepository
-                ? string.Empty
+                ? "已找到 .git，同步前会做一次全量本地提交当回退点。"
                 : "这个工程不在 git 仓库里，同步前不会产生可回退的提交点。"));
 
         // ── 6. 素材库 ────────────────────────────────────────────────
@@ -172,10 +175,9 @@ internal static class UnrealSyncPreflightCheck
             items.Add(new UnrealSyncCheckItem(
                 "素材库目录",
                 assetLibraryPath,
-                hasLibrary ? assetLibraryPath : string.Empty,
                 hasLibrary,
                 UnrealSyncCheckSeverity.Error,
-                hasLibrary ? string.Empty : "素材库目录不存在。"));
+                hasLibrary ? "目录已经存在。" : "素材库目录不存在。"));
         }
 
         return BuildResult(items);
@@ -199,11 +201,10 @@ internal static class UnrealSyncPreflightCheck
         items.Add(new UnrealSyncCheckItem(
             displayName,
             assetObjectPath,
-            exists ? diskPath : string.Empty,
             exists,
             severity,
             exists
-                ? string.Empty
+                ? "资产已找到。"
                 : severity == UnrealSyncCheckSeverity.Warning
                     ? "资产不存在；用到这个功能之前需要先建好。"
                     : "资产不存在。目录在但资产不在，变量会写到一个不存在的资产上。"));
