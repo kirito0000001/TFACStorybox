@@ -622,9 +622,33 @@ namespace GalExcleTools
                 }
                 else
                 {
+                    // ⚠️ **部分成功也要记，而且必须记。**
+                    //
+                    // 以前这里是"什么都不记"，后果是：只要有一项没过，下次就把**全部**
+                    // 重新导一遍 —— 用户 2026-10-13 的原话是「每次都要全量导入」，
+                    // 368 个素材每次重导几分钟，而其中绝大多数上一次就已经导好了。
+                    //
+                    // 现在把这次**确实成功了的**记下来：
+                    // 失败的下次还会来（不会漏），成功的下次不再重做（不再全量）。
+                    var failedImportPaths = report?.Verification
+                        .Where(entry => !entry.Ok)
+                        .Select(entry => entry.ObjectPath)
+                        .ToList();
+                    var tablesComplete = report is not null &&
+                        report.StoryTableCount == changePlan.StoryTables.Count;
+                    _unrealSyncService.WriteState(
+                        validation.Context,
+                        changePlan,
+                        failedImportPaths,
+                        tablesComplete: tablesComplete,
+                        wholeRunSucceeded: false);
+
+                    var totalImports = changePlan.ImportGroups.Sum(group => group.Files.Count);
+                    var recorded = Math.Max(totalImports - (failedImportPaths?.Count ?? 0), 0);
                     CompleteGlobalProgress("虚幻同步未完整完成", report is null
-                        ? "Unreal 未返回结构化结果，本次不会记录为已同步。"
-                        : string.Join("；", report.Errors.DefaultIfEmpty("部分计划项没有完成，本次不会记录为已同步。")));
+                        ? "Unreal 未返回结构化结果，本次没有可记录的成功项。"
+                        : $"已记下成功的 {recorded} 项，下次只会补做没成的那些。 "
+                          + string.Join("；", report.Errors.DefaultIfEmpty("部分计划项没有完成。")));
                 }
 
                 AppendLog(result.ExitCode == 0 ? LogKind.User : LogKind.Warning, $"虚幻同步结束，退出码：{result.ExitCode}");

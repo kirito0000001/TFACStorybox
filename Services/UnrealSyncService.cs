@@ -2286,23 +2286,78 @@ internal sealed class UnrealSyncService
         }
     }
 
-    public void WriteState(UnrealSyncContext context, UnrealSyncChangePlan changePlan)
+    /// <summary>
+    /// 记下"同步到哪了"。
+    ///
+    /// ⚠️ **部分成功也要记** —— 这是这份状态最要紧的一条语义。
+    ///
+    /// 以前只有整次全部成功才写（看调用点那个 if），而那意味着：只要有一项没过，
+    /// 下次就把**全部**重新导一遍。用户 2026-10-13 的原话是「每次都要全量导入」——
+    /// 368 个素材每次重导几分钟，而其中绝大多数上一次就已经导好了。
+    ///
+    /// 所以现在按「这次确实成功了的」来记：
+    /// - **导入**：只记复扫里 Ok 的那些，failedImportObjectPaths 里的排除掉；
+    /// - **数据表**：只有本次表数量对得上时才记（tablesComplete），否则保留旧值下次重来；
+    /// - **那几个整段哈希**（立绘 / 预览 / 索引表 / 语音映射 / 剧情分支）：
+    ///   只有整次成功才更新 —— 它们对应的是"改一处、整段重写"的操作，
+    ///   做一半就记下来会让失败的那段**永远补不上**。
+    ///
+    /// 一句话：**成功的别重做，失败的别漏掉。**
+    /// </summary>
+    public void WriteState(
+        UnrealSyncContext context,
+        UnrealSyncChangePlan changePlan,
+        IReadOnlyCollection<string>? failedImportObjectPaths = null,
+        bool tablesComplete = true,
+        bool wholeRunSucceeded = true)
     {
         var statePath = GetUnrealSyncStatePath(context);
         Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
         var state = ReadState(context);
         state.StateVersion = CurrentUnrealSyncStateVersion;
         state.LastSyncedAt = DateTimeOffset.Now;
-        state.LustrationHash = changePlan.LustrationHash;
-        state.PortraitsHash = changePlan.PortraitsHash;
-        state.AssetIndexTablesHash = changePlan.AssetIndexTablesHash;
-        state.VoiceMapsHash = changePlan.VoiceMapsHash;
-        state.StoryBranchesHash = changePlan.StoryBranchesHash;
-        var storyBranchAssetPath = UnrealObjectPathToContentFilePath(context, StoryBranchDataTableAssetPath);
-        state.StoryBranchesAssetHash = File.Exists(storyBranchAssetPath)
-            ? ComputeFileHash(storyBranchAssetPath)
-            : string.Empty;
-        state.SourceHashes = new Dictionary<string, string>(changePlan.SourceHashes, StringComparer.OrdinalIgnoreCase);
+
+        if (wholeRunSucceeded)
+        {
+            state.LustrationHash = changePlan.LustrationHash;
+            state.PortraitsHash = changePlan.PortraitsHash;
+            state.AssetIndexTablesHash = changePlan.AssetIndexTablesHash;
+            state.VoiceMapsHash = changePlan.VoiceMapsHash;
+            state.StoryBranchesHash = changePlan.StoryBranchesHash;
+            var storyBranchAssetPath = UnrealObjectPathToContentFilePath(context, StoryBranchDataTableAssetPath);
+            state.StoryBranchesAssetHash = File.Exists(storyBranchAssetPath)
+                ? ComputeFileHash(storyBranchAssetPath)
+                : string.Empty;
+        }
+        // 整段哈希不更新时**保持旧值**（ReadState 已经把旧状态读回来了）——
+        // 下次检测会发现它们还是"变了"，于是那几段会重来一遍。这正是我们要的。
+
+        // 哪些不记：这次复扫明确失败了的导入。
+        var failed = failedImportObjectPaths is null || failedImportObjectPaths.Count == 0
+            ? null
+            : new HashSet<string>(failedImportObjectPaths, StringComparer.OrdinalIgnoreCase);
+
+        // 数据表没全过时，把表那几条也排除掉（它们的键就是表的资产路径）。
+        HashSet<string>? incompleteTables = null;
+        if (!tablesComplete && changePlan.StoryTables.Count > 0)
+        {
+            incompleteTables = new HashSet<string>(
+                changePlan.StoryTables.Select(table => table.TableAsset),
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        var sourceHashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (objectPath, hash) in changePlan.SourceHashes)
+        {
+            if (failed?.Contains(objectPath) == true || incompleteTables?.Contains(objectPath) == true)
+            {
+                continue;
+            }
+
+            sourceHashes[objectPath] = hash;
+        }
+
+        state.SourceHashes = sourceHashes;
         File.WriteAllText(statePath, JsonSerializer.Serialize(state, _jsonOptions), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
