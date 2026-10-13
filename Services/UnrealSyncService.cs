@@ -350,6 +350,10 @@ internal sealed class UnrealSyncService
             tasks = []
             errors = []
             warnings = []
+            # 复扫验证的逐项结果。在这里先开好，是因为 write_result 会读它 ——
+            # 而 write_result 定义得比填充它的那段早（Python 里读的是调用时的值，没问题，
+            # 但先声明一下更清楚）。
+            verification = []
             imported_count = 0
             deleted_count = 0
             story_table_count = 0
@@ -433,7 +437,10 @@ internal sealed class UnrealSyncService
                     "LustrationUpdated": lustration_updated,
                     "PortraitsUpdated": portraits_updated,
                     "Errors": errors,
-                    "Warnings": warnings
+                    "Warnings": warnings,
+                    # 执行后复扫的逐项结果。C# 那边拿它判成败 ——
+                    # 计数对得上但内容是错的，就是靠这一段拦住的。
+                    "Verification": verification
                 })
 
             def sync_excepthook(exception_type, exception_value, exception_traceback):
@@ -462,6 +469,7 @@ internal sealed class UnrealSyncService
                 return False
 
             write_progress("PrepareImports", "正在准备素材导入任务", 62)
+            task_targets = []
             for group in imports:
                 destination = group.get("Destination")
                 files = group.get("Files", [])
@@ -472,16 +480,25 @@ internal sealed class UnrealSyncService
                     if not filename or not os.path.exists(filename):
                         add_error("GalExcleTools missing source file: {}".format(filename))
                         continue
+                    asset_name = os.path.splitext(os.path.basename(filename))[0]
                     task = unreal.AssetImportTask()
                     task.set_editor_property("filename", filename)
                     task.set_editor_property("destination_path", destination)
                     task.set_editor_property("automated", True)
                     task.set_editor_property("replace_existing", True)
+                    # ⚠️ 刻意**不设** replace_existing_settings：设了它，重复导入会把资产上的
+                    # 设置重置成导入器默认值 —— 连人在 Unreal 里调过的压缩 / 采样一起抹掉。
+                    # 这是"同步"不是"重建"：源文件换了就换内容，别动人家调好的参数。
+                    # （零境那边是设了的，因为它的语义是"让 Unreal 与工具箱完全一致"；
+                    #   这边是"把素材库推过去"，取舍不同。2026-10-12 想清楚的，不是漏写。）
                     try:
                         task.set_editor_property("save", True)
                     except Exception:
                         pass
                     tasks.append(task)
+                    # 记下"它应该落到哪个包"：导入完成后要拿它复扫验证，
+                    # 而且导入不回填 imported_object_paths 时也要靠它兜底。
+                    task_targets.append(("导入 {}".format(asset_name), "{}/{}".format(destination, asset_name)))
 
             write_progress("PrepareImports", "素材导入任务准备完成", 64, len(tasks), len(tasks))
             if tasks:
@@ -499,8 +516,16 @@ internal sealed class UnrealSyncService
                     except Exception:
                         pass
                     if not imported_paths:
-                        add_error("GalExcleTools import produced no asset: {}".format(task.get_editor_property("filename")))
-                    else:
+                        # 兜底：有些导入（或某些引擎版本）不回填 imported_object_paths，
+                        # 但资产其实已经落盘了。再问一句"目标资产在不在"，
+                        # 免得把成功的导入报成失败 —— 那是假红。
+                        # （零境那边也是这么兜的：imported_paths 为空时再看 does_asset_exist。）
+                        fallback_package = task_targets[task_index][1]
+                        if unreal.EditorAssetLibrary.does_asset_exist(fallback_package):
+                            imported_paths = [fallback_package]
+                        else:
+                            add_error("GalExcleTools import produced no asset: {}".format(task.get_editor_property("filename")))
+                    if imported_paths:
                         imported_count += 1
                     for imported_path in imported_paths:
                         save_asset_path_with_retry(imported_path)
@@ -1131,6 +1156,42 @@ internal sealed class UnrealSyncService
                 except Exception as exc:
                     # 写不了清单不影响同步本身 —— 检测那边会退回"不判类型"。
                     add_warning("GalExcleTools 写资产类型清单失败：{}".format(exc))
+
+            # ── 执行后复扫验证 ──────────────────────────────────────────
+            # 光靠计数判断不了"同步成功"：计数能对上、内容却是错的完全可能
+            # （导入了 27 个文件，但不是那 27 个）。
+            # 所以执行完**再扫一遍实际状态**，逐项核对计划里的每一条 ——
+            # 该在的在不在、该没的是不是真没了。
+            # 这一层是零境那边最值得学的：它专门有个 UnrealBridgeVerificationService 干这个，
+            # 而且核对不过就**拒绝写入成功状态**（下面 errors 非空 → Success=false）。
+            write_progress("Verify", "正在复扫验证同步结果", 98)
+            for display_name, package_path in task_targets:
+                present = bool(unreal.EditorAssetLibrary.does_asset_exist(package_path))
+                verification.append({
+                    "DisplayName": display_name,
+                    "ObjectPath": package_path,
+                    "ExpectPresent": True,
+                    "Present": present,
+                    "Ok": present
+                })
+                if not present:
+                    add_error("GalExcleTools 复扫验证未通过：{} 不在 {}".format(display_name, package_path))
+
+            for asset_path in pending_deletes:
+                still_there = bool(unreal.EditorAssetLibrary.does_asset_exist(asset_path))
+                verification.append({
+                    "DisplayName": "清理 {}".format(asset_path.rsplit("/", 1)[-1]),
+                    "ObjectPath": asset_path,
+                    "ExpectPresent": False,
+                    "Present": still_there,
+                    "Ok": not still_there
+                })
+                if still_there:
+                    add_error("GalExcleTools 复扫验证未通过：{} 删除后仍然存在".format(asset_path))
+
+            failed_verifications = [item for item in verification if not item["Ok"]]
+            unreal.log("GalExcleTools verification: {} item(s), {} failed".format(
+                len(verification), len(failed_verifications)))
 
             write_result(True)
             write_progress("Completed", "Unreal 同步已完成" if not errors else "Unreal 同步完成，但存在失败项", 100)

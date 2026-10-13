@@ -458,7 +458,32 @@ namespace GalExcleTools
                 });
                 var result = await RunUnrealSyncAsync(validation.Context, changePlan, progress, cancellationToken);
                 var report = result.Report;
-                var reportSuccess = result.ExitCode == 0 &&
+                // ⚠️ 这里**不看 ExitCode**。判成败的口径是：
+                // ① 结果文件是这一轮写的（RunAsync 里的 verdict 已经把关）；
+                // ② 结果里的逐项计数对得上；
+                // ③ 复扫验证全过（下面那条）。
+                // commandlet 只要工程里别处有编译错误就会返回非 0，那跟本轮成不成无关 ——
+                // 之前这里留着 `result.ExitCode == 0`，等于同一个决定有两个判据，
+                // 结果就是"结果新鲜、内容也对，却报同步未完整完成"。
+                // 退出码仍然会显示在下面那些话里，那是给人看的参考，不是判据。
+                // **复扫验证**：脚本执行完会再扫一遍实际状态，逐项核对计划里的每一条
+                // （该导入的资产在不在、该删掉的资产是不是真没了）。
+                //
+                // 这是零境那边最该学的一层：光比计数拦不住"数对但内容是错的"——
+                // 导入了 27 个文件、但不是那 27 个，计数照样对得上。
+                var expectedVerificationCount =
+                    changePlan.ImportGroups.Sum(group => group.Files.Count) +
+                    changePlan.DeleteGroups.Sum(group => group.Assets.Count);
+                var failedVerifications = report?.Verification
+                    .Where(entry => !entry.Ok)
+                    .Select(entry => entry.DisplayName)
+                    .ToList() ?? [];
+                var verificationPassed =
+                    report is not null &&
+                    report.Verification.Count >= expectedVerificationCount &&
+                    failedVerifications.Count == 0;
+
+                var reportSuccess =
                     report is { ProtocolVersion: 1, Completed: true, Success: true } &&
                     report.ImportedCount == changePlan.ImportGroups.Sum(group => group.Files.Count) &&
                     report.StoryTableCount == changePlan.StoryTables.Count &&
@@ -466,15 +491,19 @@ namespace GalExcleTools
                     (!changePlan.StoryBranchesChanged || report.StoryBranchesUpdated) &&
                     (!changePlan.VoiceMapsChanged || report.VoiceMapsUpdated) &&
                     (!changePlan.LustrationChanged || report.LustrationUpdated) &&
-                    (!changePlan.PortraitsChanged || report.PortraitsUpdated);
+                    (!changePlan.PortraitsChanged || report.PortraitsUpdated) &&
+                    verificationPassed;
                 SetUnrealSyncStatus(
                     reportSuccess ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
                     reportSuccess ? "同步完成" : "同步未完整完成",
                     reportSuccess
-                        ? $"Unreal 已确认导入 {report!.ImportedCount} 项、更新 {report.StoryTableCount + report.AssetIndexTableCount} 张表{(report.StoryBranchesUpdated ? "，并刷新剧情选项分支" : string.Empty)}{(report.VoiceMapsUpdated ? "，并刷新剧情语音映射" : string.Empty)}。"
+                        ? $"Unreal 已确认导入 {report!.ImportedCount} 项、更新 {report.StoryTableCount + report.AssetIndexTableCount} 张表{(report.StoryBranchesUpdated ? "，并刷新剧情选项分支" : string.Empty)}{(report.VoiceMapsUpdated ? "，并刷新剧情语音映射" : string.Empty)}，复扫 {report.Verification.Count} 项全部核对通过。"
                         : report is null
                             ? $"退出码 {result.ExitCode}，但没有收到结构化结果文件：{result.ResultPath}"
-                            : string.Join(" ", report.Errors.DefaultIfEmpty($"退出码 {result.ExitCode}，部分计划项没有完成。")));
+                            : failedVerifications.Count > 0
+                                ? $"复扫验证没通过：{string.Join("；", failedVerifications.Take(6))}"
+                                  + (failedVerifications.Count > 6 ? $" 等 {failedVerifications.Count} 项" : string.Empty)
+                                : string.Join(" ", report.Errors.DefaultIfEmpty($"退出码 {result.ExitCode}，部分计划项没有完成。")));
                 // 回退点那一行：以前是 zip 备份路径，现在是本地提交的 HEAD。
                 var commitSummary = commitResult.Committed && !string.IsNullOrWhiteSpace(commitResult.HeadSha)
                     ? $"同步前本地提交：{commitResult.HeadSha}\n"

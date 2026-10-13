@@ -152,6 +152,36 @@ internal sealed class UnrealSyncExecutionReport
     public List<string> Errors { get; set; } = [];
 
     public List<string> Warnings { get; set; } = [];
+
+    /// <summary>
+    /// **执行后复扫验证**的逐项结果（脚本收尾时再扫一遍实际状态写进来的）。
+    ///
+    /// 为什么要它：光比计数判断不了"同步成功"—— 计数能对上、内容却是错的
+    /// （导入了 27 个文件，但不是那 27 个）完全可能。
+    /// 零境那边专门有一个 UnrealBridgeVerificationService 做这件事：执行完拿
+    /// **重新扫描的两侧快照**逐项核对计划，核对不过就**拒绝写入成功状态**。
+    /// 这里只做 Unreal 侧那一半（工具箱侧的文件本来就在本地，窗口自己看得见）。
+    /// </summary>
+    public List<UnrealSyncVerificationEntry> Verification { get; set; } = [];
+}
+
+/// <summary>复扫验证里的一条：计划要它变成什么样，实际扫出来是什么样。</summary>
+internal sealed class UnrealSyncVerificationEntry
+{
+    /// <summary>给人看的名字，例如「导入 bg_01」。失败时直接报这个。</summary>
+    public string DisplayName { get; set; } = string.Empty;
+
+    /// <summary>被核对的对象路径（<c>/Game/…</c>）。</summary>
+    public string ObjectPath { get; set; } = string.Empty;
+
+    /// <summary>计划期望它在（导入项）还是期望它不在（删除项）。</summary>
+    public bool ExpectPresent { get; set; }
+
+    /// <summary>复扫时实际在不在。</summary>
+    public bool Present { get; set; }
+
+    /// <summary>这一条过没过（<c>Present == ExpectPresent</c>）。</summary>
+    public bool Ok { get; set; }
 }
 
 internal sealed class UnrealSyncProgressFile
