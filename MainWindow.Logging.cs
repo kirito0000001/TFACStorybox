@@ -175,6 +175,23 @@ namespace GalExcleTools
 
         private void AppendLog(LogKind kind, string message, Exception? exception = null)
         {
+            // ⚠️ **这个方法可能从任何线程被调进来**：进程轮询循环、远程任务回调、
+            // 在线/离线选路的通知……而下面要动界面（Items.Clear / Add）。
+            //
+            // 不在这里是 UI 线程就直接排队回去 —— 否则轻则 0x8001010E（RPC_E_WRONG_THREAD）、
+            // 重则界面状态乱掉。2026-10-13 实测：`onUsedOffline` 那条回调就炸在这儿，
+            // 而它抛出来的异常 Message 是**空的**（COM 异常常常没有消息文本），
+            // 于是外层只报出一句"虚幻同步失败。"，什么都看不出来 ——
+            // 查了半天才发现是"回调跑在后台线程"。
+            //
+            // 与其在每个调用点各 marshal 一遍（漏一个就是这次这种事），
+            // 不如在这里统一兜住 —— **日志方法本来就该能从任何线程调**。
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(() => AppendLog(kind, message, exception));
+                return;
+            }
+
             var (displayText, copyText) = CreateLogText(kind, message, exception, DateTimeOffset.Now);
 
             // ⚠️ 顺序很要紧：**先写文件，再看面板开关**。

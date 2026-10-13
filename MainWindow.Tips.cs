@@ -18,6 +18,17 @@ namespace GalExcleTools
             Exception? exception = null,
             string? logMessage = null)
         {
+            // 和 AppendLog 同一个道理：提示也可能从后台线程发出来（选路回调、进程轮询……），
+            // 而它会动界面。不兜住就是 0x8001010E（RPC_E_WRONG_THREAD），
+            // 而且那种 COM 异常的 **Message 是空的** —— 外面只报一句"同步失败"，
+            // 看不出任何线索。2026-10-13 实测踩到，查了很久。
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(
+                    () => ShowFloatingTip(severity, title, message, exception, logMessage));
+                return;
+            }
+
             ShowFloatingTip(FloatingTipsPanel, severity, title, message, exception, logMessage);
         }
 
