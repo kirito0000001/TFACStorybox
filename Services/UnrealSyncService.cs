@@ -1743,19 +1743,24 @@ internal sealed class UnrealSyncService
             soundEffectPaths,
             voicePaths,
             allStoryTables,
-            getPortraitPreviewPathsByLayerFileName);
+            getPortraitPreviewPathsByLayerFileName,
+            syncState);
 
-        // 说明：删除范围是**整个目录**（"素材文件夹里不能有别的"），不是"只删工具箱写过的"。
+        // 删除范围的规矩（2026-10-13 定下来的，两句话）：
         //
-        // 我一度在这里加过一层过滤 —— 只保留 syncState.SourceHashes 里记着的那些路径。
-        // 那是**过头**了：这套设计的前提本来就是"素材目录归工具箱管，里面不能有别的"，
-        // 而且引用改过之后那些旧素材**确实用不上了**，留着才是垃圾。
-        // 用户 2026-10-13 指出后撤掉。
+        //   1. **工具箱独占的子目录** → 清空（"素材文件夹里不能有别的"）。
+        //      背景图 ImageS/Background_Image/PlotUse、BGM Sound/BGM/PlotUse、
+        //      语音 Sound/Voice/<章节>/、ExcelTexts —— 这些目录里只有工具箱的东西。
         //
-        // 真正该防的是另一件事：**引用还没改好就删**。那些素材之所以"用不上了"，
-        // 是因为前面把引用（变量列表、数据表）改指向了新的东西 —— 前提是改**成功了**。
-        // 这次写蓝图变量 BGMaps 失败，而删除照跑，于是引用全断。
-        // 那道闸门加在脚本里（删之前先看有没有失败项），不在这里。
+        //   2. **和工程共用的目录** → 只删**工具箱自己写过的那些**（名单来自同步状态）。
+        //      Sound/Scene_Effect 就是这一类：里面同时住着工程自己的
+        //      MetaScene / Scene_Class，整目录清一次就把它俩清掉了。
+        //
+        // 落点搬进 Sound/ 之后，"路径在工具箱的落点里"不再等于"这个目录归工具箱" ——
+        // 这是这次弄丢六个文件的根子。判断依据要落到"目录里除了工具箱的还有没有别人的"。
+        //
+        // 补一条相关的：**引用还没改好就删** 是另一个坑（写 BGMaps 失败、删除照跑，
+        // 于是引用全断）。那道闸门加在脚本里 —— 删之前先看有没有失败项，不在这一层。
 
         // ── 素材改名：能改名就不要"删旧 + 导新" ──────────────────────
         //
@@ -2610,12 +2615,29 @@ internal sealed class UnrealSyncService
         IReadOnlyCollection<string> soundEffectPaths,
         IReadOnlyCollection<string> voicePaths,
         IReadOnlyList<UnrealStoryTableSyncEntry> storyTables,
-        Func<CharacterInfo, IReadOnlyDictionary<string, string>> getPortraitPreviewPathsByLayerFileName)
+        Func<CharacterInfo, IReadOnlyDictionary<string, string>> getPortraitPreviewPathsByLayerFileName,
+        UnrealSyncState syncState)
     {
         var groups = new List<UnrealSyncDeleteGroup>();
+        // 「上一次同步时工具箱写下去的那些」—— 给和工程共用的目录当白名单用。
+        var managedObjectPaths = syncState.SourceHashes.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         AddDeleteGroup(groups, context, UnrealSyncPathPolicy.BackgroundFolder, backgroundPaths.Select(GetExpectedImportedAssetName));
         AddDeleteGroup(groups, context, UnrealSyncPathPolicy.BgmFolder, musicPaths.Select(GetExpectedImportedAssetName));
-        AddDeleteGroup(groups, context, UnrealSyncPathPolicy.SceneEffectFolder, ambientPaths.Concat(soundEffectPaths).Select(GetExpectedImportedAssetName));
+
+        // ⚠️ 场景音效的目录**和工程共用**：`Sound/Scene_Effect` 里除了工具箱导进去的
+        // Sc*/SE*，还住着工程自己的 MetaScene / Scene_Class。
+        // 所以这里不能"清空不在期望集合里的"，只能删**工具箱自己写过的那些**。
+        // 2026-10-13 实测：整目录清一次就把那两个工程资产清掉了（已从提交还原）。
+        //
+        // 判断"这个目录归谁"不能只看路径 —— 落点搬进 `Sound/` 就意味着一部分目录是共用的。
+        AddDeleteGroup(
+            groups,
+            context,
+            UnrealSyncPathPolicy.SceneEffectFolder,
+            ambientPaths.Concat(soundEffectPaths).Select(GetExpectedImportedAssetName),
+            restrictToObjectPaths: managedObjectPaths);
+
         AddProjectVoiceDeleteGroups(groups, context, voicePaths);
 
         var expectedExcelTextAssets = storyTables
@@ -2656,8 +2678,40 @@ internal sealed class UnrealSyncService
     {
         var expectedAssetPaths = voicePaths
             .Where(File.Exists)
-            .Select(path => BuildAssetObjectPath(GetProjectVoiceDestinationPath(context, path), path));
-        AddDeleteGroupByExpectedAssets(groups, context, UnrealSyncPathPolicy.VoiceFolder, expectedAssetPaths, recursive: true);
+            .Select(path => BuildAssetObjectPath(GetProjectVoiceDestinationPath(context, path), path))
+            .ToList();
+
+        // ⚠️ **逐章清，不是把 Sound/Voice 整个递归清一遍。**
+        //
+        // 为什么：`Sound/Voice` 底下**同时住着工程自己的东西** ——
+        // Voice_Class / Voice_Meta / 角色1 / 角色2。整目录递归会把它们一起清掉。
+        // 2026-10-13 实测就是这么弄丢的（六个文件已从提交还原）。
+        //
+        // 而工具箱的东西都在**章节子目录**里（`Sound/Voice/WHK-M1/…`）——
+        // 扫到那一层就正好：既能把几百条历史语音清干净（用户要的就是这个），
+        // 又碰不到散在 Sound/Voice 根下的那几个。
+        //
+        // 顺带：章节改名/删除后留下的**旧章节目录**照样会被扫到（因为我们遍历的是
+        // 磁盘上的子目录，不是"这次要导的章"），所以历史残留不会越积越多。
+        var voiceFolderPath = AssetFolderPathToFilePath(context, UnrealSyncPathPolicy.VoiceFolder);
+        if (!Directory.Exists(voiceFolderPath))
+        {
+            return;
+        }
+
+        foreach (var chapterFolderPath in Directory.EnumerateDirectories(voiceFolderPath))
+        {
+            var chapterFolder = BuildAssetFolderPathFromFolder(context, chapterFolderPath);
+            if (string.IsNullOrWhiteSpace(chapterFolder))
+            {
+                continue;
+            }
+
+            var expectedInChapter = expectedAssetPaths
+                .Where(path => path.StartsWith(chapterFolder + "/", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            AddDeleteGroupByExpectedAssets(groups, context, chapterFolder, expectedInChapter, recursive: true);
+        }
     }
 
     private static string GetProjectVoiceRelativeFolder(string voiceRootPath, string voicePath)
@@ -2823,7 +2877,8 @@ internal sealed class UnrealSyncService
         UnrealSyncContext context,
         string destination,
         IEnumerable<string> expectedAssetNames,
-        bool recursive = false)
+        bool recursive = false,
+        IReadOnlySet<string>? restrictToObjectPaths = null)
     {
         var folderPath = AssetFolderPathToFilePath(context, destination);
         if (!Directory.Exists(folderPath))
@@ -2839,6 +2894,15 @@ internal sealed class UnrealSyncService
             .Where(assetPath => assetPath is not null)
             .Cast<string>()
             .Where(assetPath => !expected.Contains(GetAssetNameFromObjectPath(assetPath)))
+            // ⚠️ restrictToObjectPaths：**只有在这个名单里的才删**。
+            //
+            // 给「和工程共用」的目录用（`Sound/Scene_Effect` 里同时住着工具箱的 Sc*/SE*
+            // 和工程自己的 MetaScene / Scene_Class）。名单来自同步状态 ——
+            // 记的是**上一次同步时工具箱确实写下去的那些**。
+            //
+            // 2026-10-13 实测：整目录清一次，那两个工程资产就被清掉了（已从提交还原）。
+            // 判断"这个目录归谁"不能只看路径 —— 落点在 Sound/ 底下就意味着共用。
+            .Where(assetPath => restrictToObjectPaths is null || restrictToObjectPaths.Contains(assetPath))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
