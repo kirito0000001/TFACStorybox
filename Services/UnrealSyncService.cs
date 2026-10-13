@@ -1449,6 +1449,33 @@ internal sealed class UnrealSyncService
             allStoryTables,
             getPortraitPreviewPathsByLayerFileName);
 
+        // ⚠️⚠️ **只删工具箱自己写过的那些** —— 这是整段最要紧的一条规矩。
+        //
+        // 原来的做法是"目标目录里凡不在本次期望集合里的都删"，那是**递归清空**：
+        // 工程自己放在那些目录里的东西（MetaScene / Voice_Class / Scene_Class /
+        // 章节表 M1-1 之类）全会被当成"多余的"清掉 —— 而它们被蓝图引用着，
+        // 于是表现成"引用全丢"。2026-10-13 实测就是这么弄坏 19 个文件的，
+        // 靠同步前那个提交才恢复回来。
+        //
+        // 判据来自 syncState.SourceHashes：**它的键就是上一次同步时工具箱写下去的那些
+        // 对象路径**。只在这份名单里挑"这次不再需要"的才删；名单外的一律不碰 ——
+        // 那是工程自己的资产，工具箱没资格动。
+        //
+        // 零境也是这个口径：它的删除项来自 UnrealBridgeChangeKind.DeleteCandidate，
+        // 而那是在**基线**上算出来的，不是拿磁盘扫出来的。
+        var managedAssetPaths = new HashSet<string>(
+            syncState.SourceHashes.Keys,
+            StringComparer.OrdinalIgnoreCase);
+        var foreignAssetCount = deleteGroups.Sum(group => group.Assets.Count);
+        deleteGroups = deleteGroups
+            .Select(group => group with
+            {
+                Assets = group.Assets.Where(managedAssetPaths.Contains).ToList()
+            })
+            .Where(group => group.Assets.Count > 0)
+            .ToList();
+        foreignAssetCount -= deleteGroups.Sum(group => group.Assets.Count);
+
         // ── 素材改名：能改名就不要"删旧 + 导新" ──────────────────────
         //
         // 源文件改了名，老做法是"旧资产进删除组被删掉 + 新资产再导入一遍"——
@@ -1626,6 +1653,13 @@ internal sealed class UnrealSyncService
             : forceFullSync
                 ? $"已准备全部重新同步，共处理 {totalChanged} 项：{string.Join("；", changeItems)}。"
                 : $"本次同步将处理 {totalChanged} 项：{string.Join("；", changeItems)}。";
+
+        // 说一句"有哪些东西没动"。少了这句，用户会以为"同步=那个目录归工具箱管"，
+        // 而实际上工程自己放的东西一个都不会碰 —— 这个边界必须让人看见。
+        if (foreignAssetCount > 0)
+        {
+            summary += $"（那些目录里另有 {foreignAssetCount} 个不属于工具箱的资产，本次不会动它们。）";
+        }
 
         // 变量写入计划（背景图 / BGM / 环境音三个列表）。
         // 「要不要写」不在这里做增量判断：值一样时 GALLibrary 的写入器会直接跳过，
