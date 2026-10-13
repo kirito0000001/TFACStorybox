@@ -98,10 +98,29 @@ internal static class UnrealAssetTypeManifest
 
             foreach (var entry in entries)
             {
-                if (!string.IsNullOrWhiteSpace(entry.ObjectPath))
+                if (string.IsNullOrWhiteSpace(entry.ObjectPath))
                 {
-                    result[entry.ObjectPath] = entry.AssetClass ?? string.Empty;
+                    continue;
                 }
+
+                // ⚠️ **不信任磁盘上读来的字符串**。
+                //
+                // Python 那边 get_editor_property 拿不到字段时返回 None，而 str(None)
+                // 就是字面量 "None" —— 旧版脚本写出来的清单里留着的正是这种值。
+                // 它必须被当成**空**（= "不判"），而不是一个真实的类名；
+                // 当成类名去比对，就会判出一颗假红。
+                //
+                // 2026-10-13 实测：脚本那侧已经修好了，可**旧清单还在磁盘上**，
+                // 而检测读的就是它 —— 于是"改了两遍还是红的"。
+                // 教训：**读取侧不能假设写入侧一定规范**，尤其是这种跨语言、
+                // 跨进程、还带缓存的边界的。少信一点，少一颗假红。
+                var className = entry.AssetClass ?? string.Empty;
+                if (className.Trim() is "None" or "null" || className.Trim().Length == 0)
+                {
+                    className = string.Empty;
+                }
+
+                result[entry.ObjectPath] = className;
             }
         }
         catch (JsonException)
