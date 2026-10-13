@@ -823,15 +823,48 @@ internal sealed class UnrealSyncService
                 else:
                     try:
                         rows = json.loads(unreal.DataTableFunctionLibrary.export_data_table_to_json_string(all_road))
+
+                        # 先按 manager 行把**本次要写的来源**归好组。
+                        expected_by_manager = {}
                         for source in sources:
-                            manager_row = find_manager_row(rows, source.get("ManagerRow"))
-                            story_map = manager_row.get("StoryOnSetTables") or {}
-                            source_path = normalize_data_table_path(source.get("SourceTable"))
-                            for existing_key in list(story_map.keys()):
-                                if normalize_data_table_path(existing_key) == source_path:
-                                    del story_map[existing_key]
-                            story_map[data_table_reference(source.get("SourceTable"))] = build_story_branch_value(source.get("Routes", []))
-                            manager_row["StoryOnSetTables"] = story_map
+                            manager_name = str(source.get("ManagerRow") or "")
+                            expected_by_manager.setdefault(manager_name, []).append(source)
+
+                        # 工具箱管的章节表在这底下。只有落在这里面的旧条目才算"我的"，
+                        # 才允许被这次重建清掉 —— 见下面那段注释。
+                        managed_story_root = normalize_data_table_path(
+                            "{}/ExcelTexts/MainStory".format(target_root))
+
+                        for manager_name, manager_sources in expected_by_manager.items():
+                            manager_row = find_manager_row(rows, manager_name)
+                            existing_map = manager_row.get("StoryOnSetTables") or {}
+
+                            # ⚠️ **重建**，不是逐条替换。
+                            #
+                            # 旧写法是"把键与本次来源同路径的那条删掉，再写新的"——
+                            # 而章节表**改名过**（M1-1 → WHK-M1）之后旧键根本对不上，
+                            # 于是一条都删不掉，新章节只能追加在末尾。
+                            # 用户看到的就是：M1 那一格里有 M1-1 / M1-2 / M1-3 / WHK-M1，
+                            # **新的第一章排到了第四位**。2026-10-13 实测。
+                            #
+                            # 注意：那段旧写法在最初版里**就是这样**（00e9ed3），不是谁改坏的 ——
+                            # 它的前提是章节表名字稳定；名字一改，它就只剩追加。
+                            #
+                            # 重建的两条边界：
+                            # 1. 只清**落在工具箱的章节表目录里**的旧条目 ——
+                            #    指向别处的条目不是工具箱放的，一律原样留着；
+                            # 2. 新条目的顺序跟着本次的 sources 走，
+                            #    不再有"追加到最后"这回事。
+                            rebuilt_story_map = {
+                                key: value
+                                for key, value in existing_map.items()
+                                if not normalize_data_table_path(key).startswith(managed_story_root)
+                            }
+                            for source in manager_sources:
+                                rebuilt_story_map[data_table_reference(source.get("SourceTable"))] = \
+                                    build_story_branch_value(source.get("Routes", []))
+                            manager_row["StoryOnSetTables"] = rebuilt_story_map
+
                         updated_json = json.dumps(rows, ensure_ascii=False)
                         ok = unreal.DataTableFunctionLibrary.fill_data_table_from_json_string(all_road, updated_json)
                         if not ok:
