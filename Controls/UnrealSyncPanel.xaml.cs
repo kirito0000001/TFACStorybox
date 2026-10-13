@@ -43,6 +43,7 @@ public sealed partial class UnrealSyncPanel : UserControl
         // 让窗口只订阅一个对象就够了（不必知道面板内部还有个子控件）。
         SyncCheckPanel.CheckRequested += (_, _) => CheckRequested?.Invoke(this, EventArgs.Empty);
         SyncCheckPanel.ReplaceRequested += (_, target) => ReplaceCheckRequested?.Invoke(this, target);
+        SyncCheckPanel.CorrectNameCopied += (_, name) => CorrectNameCopied?.Invoke(this, name);
     }
 
     // ── 用户动作：面板只宣告"点了什么" ──────────────────────────────
@@ -60,6 +61,9 @@ public sealed partial class UnrealSyncPanel : UserControl
     /// 订阅方都在同一个程序集里，internal 够用。
     /// </summary>
     internal event EventHandler<UnrealSyncCheckReplaceTarget>? ReplaceCheckRequested;
+
+    /// <summary>检测层复制走了一个「正确名称」（转发上来的）；窗口拿它弹提示。</summary>
+    internal event EventHandler<string>? CorrectNameCopied;
 
     /// <summary>点了「开始检测」（检测层转发上来的）。</summary>
     public event EventHandler? CheckRequested;

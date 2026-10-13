@@ -478,6 +478,13 @@ namespace GalExcleTools
                     await ChooseUnrealProjectAsync();
                 }
             };
+            // 检测层点了整张卡 = 复制那一项的「正确名称」（叶子资产名）。
+            // 复制本身在面板里做完了，这里只负责说一声 —— 不说的话
+            // 用户点完界面上没有任何变化，不知道到底复制上没有。
+            // （零境那边也是复制完立刻弹一句「已复制正确名称」。）
+            SyncPanel.CorrectNameCopied += (_, name) =>
+                ShowFloatingTip(InfoBarSeverity.Success, "已复制正确名称", name);
+
             _applicationViewModel.Settings.LogSettingsChanged += (_, _) =>
             {
                 UpdateLogOptionEnabledState();

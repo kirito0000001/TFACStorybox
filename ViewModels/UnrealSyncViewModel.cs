@@ -8,22 +8,29 @@ using Microsoft.UI.Xaml.Media;
 namespace GalExcleTools.ViewModels;
 
 /// <summary>
-/// 一条检测项在界面上的显示形态。
+/// 界面上的一行 = 一条检测项 + 它该显示成什么颜色。
 ///
-/// 【为什么是"标题 + 一条路径 + 一行说明"】
-/// 原来是五列表（检查项 / 期望 / 实际 / 状态 / 问题），而"期望"和"实际"在绝大多数情况下
-/// 是同一个值 —— 同一句话显示两遍，长路径还把行高撑得极高，一屏看不到几项。
-/// 参考项目那版是**一条一项的卡片**，读起来清楚得多，这里对齐它。
+/// 文字全部**转发**自 <see cref="UnrealSyncCheckItem"/> —— 那边已经算好了
+/// （照零境的做法：标题 / 期望 / 说明 / 状态 / 复制什么，都写在模型里），
+/// 这里只补一样模型不该有的东西：颜色。
 /// </summary>
-internal sealed record UnrealSyncCheckRow(
-    string DisplayName,
-    string Path,
-    bool IsCompliant,
-    string StatusText,
-    Brush? StatusBrush,
-    string Note,
-    UnrealSyncCheckReplaceTarget ReplaceTarget)
+internal sealed record UnrealSyncCheckRow(UnrealSyncCheckItem Item, Brush? StatusBrush)
 {
+    public string DisplayName => Item.DisplayName;
+
+    public string ExpectedSummaryText => Item.ExpectedSummaryText;
+
+    public string DetailText => Item.DetailText;
+
+    public string StatusText => Item.StatusText;
+
+    public bool IsCompliant => Item.IsCompliant;
+
+    /// <summary>点整张卡复制的东西 —— 是**叶子资产名**，不是路径（见模型里的说明）。</summary>
+    public string CorrectName => Item.CorrectName;
+
+    public UnrealSyncCheckReplaceTarget ReplaceTarget => Item.ReplaceTarget;
+
     /// <summary>
     /// 只有引擎和工程这两项需要「更换」入口 —— 它们填错了不是"去 Unreal 里建一个"能解决的，
     /// 得重新选文件。其余各项点一下把名字复制走就够了。
@@ -147,14 +154,7 @@ internal sealed class UnrealSyncViewModel : ObservableObject
         CheckRows.Clear();
         foreach (var item in result.Items)
         {
-            CheckRows.Add(new UnrealSyncCheckRow(
-                item.DisplayName,
-                item.Path,
-                item.IsCompliant,
-                DescribeStatus(item),
-                ResolveStatusBrush(item),
-                item.Note,
-                item.ReplaceTarget));
+            CheckRows.Add(new UnrealSyncCheckRow(item, ResolveStatusBrush(item)));
         }
 
         CheckSummaryText = result.SummaryText;
@@ -183,16 +183,13 @@ internal sealed class UnrealSyncViewModel : ObservableObject
             : $"同步前检测 · 合规 {passed} / {CheckRows.Count}";
     }
 
-    private static string DescribeStatus(UnrealSyncCheckItem item) => item switch
-    {
-        { IsCompliant: true } => "合规",
-        { Severity: UnrealSyncCheckSeverity.Warning } => "提醒",
-        _ => "不合规",
-    };
-
     /// <summary>
     /// 状态那一列的颜色。用 WinUI 的语义色，深浅两套主题都自动有合适取值 ——
     /// 和业务日志那几个画刷同理（见 App.xaml 的 ThemeDictionaries）。
+    ///
+    /// 注：零境那边这一行是**固定绿色**（`TipsTextStyle`），不分合规与否。
+    /// 这里分了色，因为同步台这张表的失败项是要"照着去建"的，
+    /// 一眼能挑出来比读文字快。这是刻意的偏离，不是漏看。
     /// </summary>
     private static Brush? ResolveStatusBrush(UnrealSyncCheckItem item)
     {

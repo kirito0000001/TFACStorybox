@@ -89,12 +89,12 @@
                                         TextWrapping="Wrap" />
                                     <TextBlock
                                         Style="{StaticResource SubtleTextStyle}"
-                                        Text="{Binding Path}"
+                                        Text="{Binding ExpectedSummaryText}"
                                         TextWrapping="Wrap" />
                                     <TextBlock
                                         FontSize="12"
                                         Foreground="{Binding StatusBrush}"
-                                        Text="{Binding Note}"
+                                        Text="{Binding DetailText}"
                                         TextWrapping="Wrap" />
                                 </StackPanel>
                                 <StackPanel

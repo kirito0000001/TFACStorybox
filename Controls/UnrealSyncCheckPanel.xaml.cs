@@ -38,6 +38,15 @@ public sealed partial class UnrealSyncCheckPanel : UserControl
     /// </summary>
     internal event EventHandler<UnrealSyncCheckReplaceTarget>? ReplaceRequested;
 
+    /// <summary>
+    /// 复制完了一个「正确名称」。参数就是复制走的那串字。
+    ///
+    /// 弹提示这件事归窗口（它有浮层），面板只负责说"我复制了什么"。
+    /// 零境那边是复制完立刻弹一句「已复制正确名称」，这里保持一样 ——
+    /// 不弹的话用户不知道到底复制上没有（点了整张卡，界面上没有任何变化）。
+    /// </summary>
+    internal event EventHandler<string>? CorrectNameCopied;
+
     // 下面两个方法名必须和 XAML 里的 Click= / Tapped= 完全一致 ——
     // 生成器是按名字找的，名字不对就是 CS1061。
     // （2026-10-12 实际踩过一次：这里叫 RunCheckButton_Click，
@@ -47,22 +56,27 @@ public sealed partial class UnrealSyncCheckPanel : UserControl
         CheckRequested?.Invoke(this, EventArgs.Empty);
 
     /// <summary>
-    /// 点**整张卡** = 把这一项的路径复制走（照零境的做法：Border 上挂 Tapped）。
+    /// 点**整张卡** = 把这一项的**正确名称**复制走（照零境的做法：Border 上挂 Tapped）。
     ///
-    /// 检测报"这个目录 / 资产不存在"时，用户得拿着这个名字去 Unreal 里建 ——
-    /// 手抄一遍长路径既慢又容易错，所以整张卡都是复制热区。
+    /// ⚠️ 复制的是 <see cref="UnrealSyncCheckRow.CorrectName"/> —— **叶子资产名**
+    /// （`Misaka_AnimBP`），不是整条路径。用户拿它是去 Unreal 里**新建**资产，
+    /// 新建对话框里填的就是这个名字；粘一整条路径进去是建不出来的。
+    /// （第一版我复制的是路径，那个功能等于白做。）
     /// </summary>
     private void CheckItem_Tapped(object sender, TappedRoutedEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: UnrealSyncCheckRow row } ||
-            string.IsNullOrWhiteSpace(row.Path))
+            string.IsNullOrWhiteSpace(row.CorrectName))
         {
             return;
         }
 
         var package = new DataPackage();
-        package.SetText(row.Path);
+        package.SetText(row.CorrectName);
         Clipboard.SetContent(package);
+
+        // 复制完说一声，让窗口弹个提示 —— 不然点了整张卡界面上什么变化都没有。
+        CorrectNameCopied?.Invoke(this, row.CorrectName);
     }
 
     /// <summary>
