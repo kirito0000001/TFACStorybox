@@ -833,6 +833,35 @@ internal sealed class UnrealSyncService
                 rows.append(row)
                 return row
 
+            def collect_route_texts(value):
+                # 把一个单元格的值里所有文本抠出来，**不管它被包成什么形状**。
+                #
+                # 为什么不能直接 str(value) 再数字符串：
+                # export_data_table_to_json_string 给回来的是**结构化 JSON**，
+                # 那个结构字段在 Python 里是个 dict（或是 dict 的 list），
+                # str() 出来是 {'StoryOnSetMaps': [...]} 这种 repr ——
+                # 用的是单引号加冒号，跟写进去的 Unreal 文本格式（TargetStory="..."）
+                # **长得完全不一样**，于是数出来永远是 0。
+                #
+                # 2026-10-13 实测：AllRoad route count mismatch ... expected=3 actual=0
+                # 就是这么来的 —— 不是没写进去，是**读的方式不对**。
+                #
+                # ⚠️ 这段刻意用 # 注释而不是 Python 的文档字符串：
+                # 三引号独占一行时，会被 C# 原始字符串当成**结束标记**，
+                # 下面整段就变成 C# 代码了 —— 编译必炸。
+                texts = []
+                if isinstance(value, str):
+                    texts.append(value)
+                elif isinstance(value, dict):
+                    for item in value.values():
+                        texts.extend(collect_route_texts(item))
+                elif isinstance(value, (list, tuple)):
+                    for item in value:
+                        texts.extend(collect_route_texts(item))
+                elif value is not None:
+                    texts.append(str(value))
+                return texts
+
             def verify_story_branches(data_table, sources):
                 try:
                     rows = json.loads(unreal.DataTableFunctionLibrary.export_data_table_to_json_string(data_table))
@@ -846,25 +875,33 @@ internal sealed class UnrealSyncService
                     matched_value = None
                     for existing_key, existing_value in story_map.items():
                         if normalize_data_table_path(existing_key) == source_path:
-                            matched_value = str(existing_value)
+                            matched_value = existing_value
                             break
                     if matched_value is None:
                         add_error("GalExcleTools AllRoad verification missed source table: {}".format(source_path))
                         return False
+                    # 把值里所有文本摊平了再数。**两种形状都认**：
+                    # 结构化 JSON（dict/list）和 Unreal 文本（字符串）——
+                    # 前者是 export 给回来的真身，后者是脚本自己写进去的样子。
+                    matched_text = " ".join(collect_route_texts(matched_value))
                     routes = source.get("Routes", [])
                     expected_route_count = len(routes)
-                    actual_route_count = matched_value.count("TargetStory=")
+                    # JSON 里的键是 TargetStory，文本格式里是 TargetStory= —— 两种都数。
+                    actual_route_count = max(
+                        matched_text.count("TargetStory="),
+                        matched_text.count('"TargetStory"'))
                     if actual_route_count != expected_route_count:
-                        add_error("GalExcleTools AllRoad route count mismatch for {}: expected={} actual={}".format(
-                            source_path, expected_route_count, actual_route_count))
+                        add_error("GalExcleTools AllRoad route count mismatch for {}: expected={} actual={} 实际值：{}".format(
+                            source_path, expected_route_count, actual_route_count, matched_text[:200]))
                         return False
                     for route in routes:
                         target_path = normalize_data_table_path(route.get("TargetTable"))
                         option_key = str(route.get("OptionKey") or "")
                         has_expected_condition = (not route.get("RequiresChoiceCondition") or
-                                                  'TargetValue="{}"'.format(option_key) in matched_value)
-                        if target_path not in matched_value or not has_expected_condition:
-                            add_error("GalExcleTools AllRoad verification missed route {} -> {}".format(option_key, target_path))
+                                                  option_key in matched_text)
+                        if target_path not in matched_text or not has_expected_condition:
+                            add_error("GalExcleTools AllRoad verification missed route {} -> {} 实际值：{}".format(
+                                option_key, target_path, matched_text[:200]))
                             return False
                 return True
 
