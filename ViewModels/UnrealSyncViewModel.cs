@@ -20,6 +20,9 @@ internal sealed record UnrealSyncCheckRow(UnrealSyncCheckItem Item, Brush? Statu
 
     public string ExpectedSummaryText => Item.ExpectedSummaryText;
 
+    /// <summary>它该建在哪个文件夹 —— 弹窗里要用它单独说一句。</summary>
+    public string FolderPath => Item.FolderPath;
+
     public string DetailText => Item.DetailText;
 
     public string StatusText => Item.StatusText;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using GalExcleTools.Services;
+using GalExcleTools.ViewModels;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -43,7 +44,7 @@ public sealed partial class UnrealSyncPanel : UserControl
         // 让窗口只订阅一个对象就够了（不必知道面板内部还有个子控件）。
         SyncCheckPanel.CheckRequested += (_, _) => CheckRequested?.Invoke(this, EventArgs.Empty);
         SyncCheckPanel.ReplaceRequested += (_, target) => ReplaceCheckRequested?.Invoke(this, target);
-        SyncCheckPanel.CorrectNameCopied += (_, name) => CorrectNameCopied?.Invoke(this, name);
+        SyncCheckPanel.CheckItemActivated += (_, row) => CheckItemActivated?.Invoke(this, row);
     }
 
     // ── 用户动作：面板只宣告"点了什么" ──────────────────────────────
@@ -62,8 +63,11 @@ public sealed partial class UnrealSyncPanel : UserControl
     /// </summary>
     internal event EventHandler<UnrealSyncCheckReplaceTarget>? ReplaceCheckRequested;
 
-    /// <summary>检测层复制走了一个「正确名称」（转发上来的）；窗口拿它弹提示。</summary>
-    internal event EventHandler<string>? CorrectNameCopied;
+    /// <summary>
+    /// 检测层点了某一项（转发上来的）；参数是那一行。
+    /// 窗口拿它弹窗说清"该建在哪"，并给两个动作：建文件夹 / 复制名称。
+    /// </summary>
+    internal event EventHandler<UnrealSyncCheckRow>? CheckItemActivated;
 
     /// <summary>点了「开始检测」（检测层转发上来的）。</summary>
     public event EventHandler? CheckRequested;

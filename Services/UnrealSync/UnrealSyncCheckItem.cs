@@ -110,10 +110,67 @@ internal sealed record UnrealSyncCheckItem(
         }
     }
 
-    /// <summary>卡片第二行：期望路径，有类型就带上（「… · 类型 WidgetBlueprint」）。</summary>
-    public string ExpectedSummaryText => string.IsNullOrWhiteSpace(ExpectedType)
-        ? ExpectedPath
-        : $"{ExpectedPath} · 类型 {ExpectedType}";
+    /// <summary>
+    /// 它**建在哪个文件夹**。
+    ///
+    /// 为什么要单独拆出来：对象路径 <c>/Game/A/B/C.C</c> 里包名和资产名是重复的，
+    /// 连成一串 <c>…/ExcelTexts/ExsIndexMap.ExsIndexMap</c> 看起来就像
+    /// "ExcelTexts 下有个 ExsIndexMap 文件夹，里面装着 ExsIndexMap" —— **很容易看错**。
+    /// 2026-10-12 实测：人就是照那行理解的，结果在 ExcelTexts 下多建了一层
+    /// ExIndexMap 文件夹，然后对着"资产不存在"发愣。
+    ///
+    /// 所以界面上要把"文件夹"和"名字"分开写，而不是把对象路径原样甩出去。
+    /// 目录类没有"名字"，返回它自己的路径。
+    /// </summary>
+    public string FolderPath
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(ExpectedPath))
+            {
+                return string.Empty;
+            }
+
+            var text = ExpectedPath.Replace('\\', '/').TrimEnd('/');
+            if (Kind != UnrealSyncCheckKind.Asset)
+            {
+                return text;
+            }
+
+            // 去掉包内名那段（最后一个点之后），再去掉资产名那一段，剩下的就是文件夹。
+            var dotIndex = text.IndexOf('.', StringComparison.Ordinal);
+            if (dotIndex > 0)
+            {
+                text = text[..dotIndex];
+            }
+
+            var slashIndex = text.LastIndexOf('/');
+            return slashIndex > 0 ? text[..slashIndex] : string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// 卡片第二行。
+    ///
+    /// 资产类**必须拆成"建在 / 名称 / 类型"三段** —— 直接甩对象路径就是上面
+    /// <see cref="FolderPath"/> 说的那个坑。目录和文件照原样显示路径就够了。
+    /// </summary>
+    public string ExpectedSummaryText
+    {
+        get
+        {
+            if (Kind != UnrealSyncCheckKind.Asset)
+            {
+                return ExpectedPath;
+            }
+
+            var folder = FolderPath;
+            var type = string.IsNullOrWhiteSpace(ExpectedType) ? string.Empty : $" · 类型 {ExpectedType}";
+            return string.IsNullOrWhiteSpace(folder)
+                ? $"名称 {CorrectName}{type}"
+                : $"建在 {folder} · 名称 {CorrectName}{type}";
+        }
+    }
 
     /// <summary>
     /// 卡片第三行：**查到了什么**（合规）或**哪里不对**（不合规）。

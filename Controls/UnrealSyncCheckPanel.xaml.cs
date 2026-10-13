@@ -39,13 +39,12 @@ public sealed partial class UnrealSyncCheckPanel : UserControl
     internal event EventHandler<UnrealSyncCheckReplaceTarget>? ReplaceRequested;
 
     /// <summary>
-    /// 复制完了一个「正确名称」。参数就是复制走的那串字。
+    /// 点了整张卡（不是「更换」那个按钮）。参数是那一行。
     ///
-    /// 弹提示这件事归窗口（它有浮层），面板只负责说"我复制了什么"。
-    /// 零境那边是复制完立刻弹一句「已复制正确名称」，这里保持一样 ——
-    /// 不弹的话用户不知道到底复制上没有（点了整张卡，界面上没有任何变化）。
+    /// 弹窗归窗口 —— 面板不发对话框。窗口拿到这一行之后会说清"它应该建在哪"，
+    /// 并给两个动作：建文件夹 / 复制名称。
     /// </summary>
-    internal event EventHandler<string>? CorrectNameCopied;
+    internal event EventHandler<UnrealSyncCheckRow>? CheckItemActivated;
 
     // 下面两个方法名必须和 XAML 里的 Click= / Tapped= 完全一致 ——
     // 生成器是按名字找的，名字不对就是 CS1061。
@@ -56,27 +55,21 @@ public sealed partial class UnrealSyncCheckPanel : UserControl
         CheckRequested?.Invoke(this, EventArgs.Empty);
 
     /// <summary>
-    /// 点**整张卡** = 把这一项的**正确名称**复制走（照零境的做法：Border 上挂 Tapped）。
+    /// 点**整张卡** = 把这一行交给窗口（照零境的做法：Border 上挂 Tapped）。
     ///
-    /// ⚠️ 复制的是 <see cref="UnrealSyncCheckRow.CorrectName"/> —— **叶子资产名**
-    /// （`Misaka_AnimBP`），不是整条路径。用户拿它是去 Unreal 里**新建**资产，
-    /// 新建对话框里填的就是这个名字；粘一整条路径进去是建不出来的。
-    /// （第一版我复制的是路径，那个功能等于白做。）
+    /// ⚠️ 这里**不直接复制**。零境那边是复制完弹一句提示就完事，但它的检查项
+    /// 全是"名字"，复制名字确实够了；而这张表里最容易搞错的是**层级** ——
+    /// 2026-10-12 实际发生过：检测要的是 <c>ExcelTexts/ExsIndexMap.uasset</c>，
+    /// 人建成了 <c>ExcelTexts/ExIndexMap/ExsIndexMap.uasset</c>（多了一层文件夹），
+    /// 然后对着"资产不存在"发愣。一行路径看不出这件事。
+    /// 所以改成弹窗：把"建在哪个文件夹"单独列出来，再给两个动作。
     /// </summary>
     private void CheckItem_Tapped(object sender, TappedRoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: UnrealSyncCheckRow row } ||
-            string.IsNullOrWhiteSpace(row.CorrectName))
+        if (sender is FrameworkElement { Tag: UnrealSyncCheckRow row })
         {
-            return;
+            CheckItemActivated?.Invoke(this, row);
         }
-
-        var package = new DataPackage();
-        package.SetText(row.CorrectName);
-        Clipboard.SetContent(package);
-
-        // 复制完说一声，让窗口弹个提示 —— 不然点了整张卡界面上什么变化都没有。
-        CorrectNameCopied?.Invoke(this, row.CorrectName);
     }
 
     /// <summary>
