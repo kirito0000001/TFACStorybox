@@ -141,22 +141,33 @@ internal static class UnrealSyncPreflightCheck
 
     // ── 各类检查 ──────────────────────────────────────────────────────
 
-    private static UnrealSyncCheckItem CheckEngine(string? enginePath)
+    /// <summary>
+    /// 引擎那一项。
+    ///
+    /// 可执行文件用 <see cref="UnrealProjectEngineResolver.ResolveEditorExecutable"/> 解析 ——
+    /// **配置优先，配置不行就按工程自己的引擎找**。所以"设置里那个路径过期了"
+    /// 不再是拦路项：工程自己记着它用哪个引擎（.uproject 的 EngineAssociation）。
+    ///
+    /// 但失败原因还是要分清：没选 / 路径不存在 / 不是那两个 exe /
+    /// 工程那边也没找到 —— 原来一律说"没找到 UnrealEditor-Cmd.exe"，
+    /// 照那句话去找会白费功夫。
+    /// </summary>
+    private static UnrealSyncCheckItem CheckEngine(string? enginePath, string? unrealProjectPath)
     {
         var configured = enginePath ?? string.Empty;
-        var executable = UnrealSyncService.ResolveEditorExecutable(configured);
+        var executable = UnrealProjectEngineResolver.ResolveEditorExecutable(configured, unrealProjectPath);
         var found = executable is not null;
 
-        // 失败原因要分清楚是哪一种。原来一律说"没找到 UnrealEditor-Cmd.exe"，
-        // 而实际最常见的情况是**这个路径整个不存在**（换过引擎、或引擎挪过位置）——
-        // 照那句提示去找 Cmd.exe 会白费功夫。
+        var projectEngineRoot = UnrealProjectEngineResolver.ResolveEngineRoot(unrealProjectPath);
         var problem = found
             ? string.Empty
             : string.IsNullOrWhiteSpace(configured)
-                ? "还没有选择引擎"
+                ? "还没有选择引擎，工程那边也没查出它用哪个引擎"
                 : File.Exists(configured) || Directory.Exists(configured)
-                    ? "这不是 UnrealEditor.exe 或 UnrealEditor-Cmd.exe"
-                    : "这个路径不存在";
+                    ? "这不是 UnrealEditor.exe 或 UnrealEditor-Cmd.exe，工程那边也没找到"
+                    : string.IsNullOrWhiteSpace(projectEngineRoot)
+                        ? "这个路径不存在，工程那边也没查出它用哪个引擎"
+                        : $"这个路径不存在（工程用的是 {projectEngineRoot}，但那里没有 UnrealEditor-Cmd.exe）";
 
         return new UnrealSyncCheckItem(
             "Unreal 编辑器",
