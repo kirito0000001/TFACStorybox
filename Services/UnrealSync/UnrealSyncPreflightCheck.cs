@@ -85,16 +85,22 @@ internal static class UnrealSyncPreflightCheck
             UnrealSyncPathPolicy.MusicPlayerAsset,
             "MusicActor 蓝图（BGM / 环境音 / 语音的落点）",
             "Blueprint"));
+        // ⚠️ 期望类型写的是 **Unreal 会报的那个类名**，不是"它逻辑上是什么"。
+        // 数据资产那一项尤其容易写错：DA_LustrationInfor 是**蓝图化的数据资产**
+        // （父类 PDA_LustrationData 是个蓝图），Unreal 对它报的 asset_class 就是
+        // /Script/Engine.Blueprint —— 所以这里期望 "Blueprint" 而不是 "DataAsset"。
+        // 2026-10-12：我原来写 "DataAsset"，结果两项正确资产被判成「类型不对」——
+        // 那是**假红**，比不查更糟。
         items.Add(CheckAsset(
             contentPath,
             UnrealSyncPathPolicy.LustrationInfoAsset,
-            "立绘信息数据资产",
-            "DataAsset"));
+            "立绘信息数据资产（蓝图化，所以类名是 Blueprint）",
+            "Blueprint"));
         items.Add(CheckAsset(
             contentPath,
             UnrealSyncPathPolicy.PortraitsInfoAsset,
-            "小预览数据资产（仅开启小预览时用）",
-            "DataAsset",
+            "小预览数据资产（蓝图化，所以类名是 Blueprint）",
+            "Blueprint",
             UnrealSyncCheckSeverity.Warning));
         items.Add(CheckAsset(
             contentPath,
