@@ -1133,10 +1133,33 @@ internal sealed class UnrealSyncService
                 else:
                     add_error("GalExcleTools could not load portrait data asset: {}".format(portraits_data_asset_path))
 
+            # ── 清理多余素材（**只在前面没出错时才做**）──────────────────
+            #
+            # 这些素材之所以"用不上了"，是因为前面几步把引用（变量列表、数据表）
+            # 改指向了新的东西 —— **前提是改成功了**。
+            # 要是写变量 / 写表失败了，那些引用**还指着这些素材**，
+            # 这时候删掉就是"引用全丢"。
+            #
+            # 2026-10-13 实测：写蓝图变量 BGMaps 返回失败，而删除照跑，
+            # 于是 19 个文件被清掉、蓝图引用全断（靠同步前的提交才恢复回来）。
+            #
+            # 顺带说明：删除**范围**本身是对的 —— 素材文件夹里不能有别的，
+            # 旧素材的引用一旦改掉就是垃圾，留着才乱。要防的是"没改成就删"，
+            # 不是"删得太多"。
             pending_deletes = []
             for group in deletes:
                 pending_deletes.extend(group.get("Assets", []) or [])
             pending_deletes.extend(legacy_assets_to_delete)
+
+            if pending_deletes and errors:
+                # 有失败项就不删：宁可留一堆旧素材（下次同步会再清一遍），
+                # 也不要删掉还被引用着的东西 —— 后者不可逆。
+                add_warning(
+                    "GalExcleTools 跳过清理多余素材：本次有失败项（{} 条），"
+                    "现在删可能删掉还被引用着的资产；待清理项共 {} 个。".format(
+                        len(errors), len(pending_deletes)))
+                pending_deletes = []
+
             write_progress("DeleteAssets", "正在清理虚幻中的多余素材", 96, 0, len(pending_deletes))
             for delete_index, asset_path in enumerate(pending_deletes):
                 if delete_asset_if_exists(asset_path):
@@ -1449,32 +1472,17 @@ internal sealed class UnrealSyncService
             allStoryTables,
             getPortraitPreviewPathsByLayerFileName);
 
-        // ⚠️⚠️ **只删工具箱自己写过的那些** —— 这是整段最要紧的一条规矩。
+        // 说明：删除范围是**整个目录**（"素材文件夹里不能有别的"），不是"只删工具箱写过的"。
         //
-        // 原来的做法是"目标目录里凡不在本次期望集合里的都删"，那是**递归清空**：
-        // 工程自己放在那些目录里的东西（MetaScene / Voice_Class / Scene_Class /
-        // 章节表 M1-1 之类）全会被当成"多余的"清掉 —— 而它们被蓝图引用着，
-        // 于是表现成"引用全丢"。2026-10-13 实测就是这么弄坏 19 个文件的，
-        // 靠同步前那个提交才恢复回来。
+        // 我一度在这里加过一层过滤 —— 只保留 syncState.SourceHashes 里记着的那些路径。
+        // 那是**过头**了：这套设计的前提本来就是"素材目录归工具箱管，里面不能有别的"，
+        // 而且引用改过之后那些旧素材**确实用不上了**，留着才是垃圾。
+        // 用户 2026-10-13 指出后撤掉。
         //
-        // 判据来自 syncState.SourceHashes：**它的键就是上一次同步时工具箱写下去的那些
-        // 对象路径**。只在这份名单里挑"这次不再需要"的才删；名单外的一律不碰 ——
-        // 那是工程自己的资产，工具箱没资格动。
-        //
-        // 零境也是这个口径：它的删除项来自 UnrealBridgeChangeKind.DeleteCandidate，
-        // 而那是在**基线**上算出来的，不是拿磁盘扫出来的。
-        var managedAssetPaths = new HashSet<string>(
-            syncState.SourceHashes.Keys,
-            StringComparer.OrdinalIgnoreCase);
-        var foreignAssetCount = deleteGroups.Sum(group => group.Assets.Count);
-        deleteGroups = deleteGroups
-            .Select(group => group with
-            {
-                Assets = group.Assets.Where(managedAssetPaths.Contains).ToList()
-            })
-            .Where(group => group.Assets.Count > 0)
-            .ToList();
-        foreignAssetCount -= deleteGroups.Sum(group => group.Assets.Count);
+        // 真正该防的是另一件事：**引用还没改好就删**。那些素材之所以"用不上了"，
+        // 是因为前面把引用（变量列表、数据表）改指向了新的东西 —— 前提是改**成功了**。
+        // 这次写蓝图变量 BGMaps 失败，而删除照跑，于是引用全断。
+        // 那道闸门加在脚本里（删之前先看有没有失败项），不在这里。
 
         // ── 素材改名：能改名就不要"删旧 + 导新" ──────────────────────
         //
@@ -1653,13 +1661,6 @@ internal sealed class UnrealSyncService
             : forceFullSync
                 ? $"已准备全部重新同步，共处理 {totalChanged} 项：{string.Join("；", changeItems)}。"
                 : $"本次同步将处理 {totalChanged} 项：{string.Join("；", changeItems)}。";
-
-        // 说一句"有哪些东西没动"。少了这句，用户会以为"同步=那个目录归工具箱管"，
-        // 而实际上工程自己放的东西一个都不会碰 —— 这个边界必须让人看见。
-        if (foreignAssetCount > 0)
-        {
-            summary += $"（那些目录里另有 {foreignAssetCount} 个不属于工具箱的资产，本次不会动它们。）";
-        }
 
         // 变量写入计划（背景图 / BGM / 环境音三个列表）。
         // 「要不要写」不在这里做增量判断：值一样时 GALLibrary 的写入器会直接跳过，
