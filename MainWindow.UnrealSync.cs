@@ -430,7 +430,8 @@ namespace GalExcleTools
                         false,
                         false,
                         string.Empty,
-                        $"同步前的本地提交失败：{reason}。");
+                        $"同步前的本地提交失败：{reason}。",
+                        Failed: true);
                 }
 
                 // 提交进度：既进进度条也进日志。
@@ -456,7 +457,37 @@ namespace GalExcleTools
                     progressPlan.Caption(UnrealSyncProgressPlan.LocalCommit, "同步前的本地提交已完成"),
                     false,
                     commitBand.At(100));
-                if (commitResult.IsRepository)
+
+                if (commitResult.Failed)
+                {
+                    // **提交失败 = 没有回退点**，而下一步就要动 Unreal 工程了 ——
+                    // 万一同步把东西弄坏，回不去。所以这里必须问一次。
+                    //
+                    // 注意和下面那条区分开："不是仓库"是**预期内**的（用户可能故意不用
+                    // 版本控制），提示一句就够；而失败是**出了意外**，得让人明确决定。
+                    var proceed = await _dialogService.ShowAsync(new DialogRequest(
+                        "同步前的本地提交失败",
+                        $"{commitResult.Detail}\n\n"
+                        + "现在继续的话，这一次没有可回退的提交点 —— "
+                        + "万一同步结果不对，只能在 Unreal 里手动改回去。\n\n"
+                        + "可以先取消，把 git 那边的问题解决掉再来。常见原因是："
+                        + "git 不在 PATH 里、工程所在的盘不可写、或者有别的进程占着 .git/index.lock。",
+                        "仍然继续同步",
+                        "取消同步"));
+                    if (proceed != DialogResultKind.Primary)
+                    {
+                        SetUnrealSyncStatus(
+                            InfoBarSeverity.Warning,
+                            "已取消同步",
+                            "同步前的本地提交失败，你选择了先不同步。Unreal 工程没有被改动。");
+                        AppendLog(LogKind.User, "同步前的本地提交失败，用户选择先不同步。");
+                        EndLogStep("用户取消：本地提交失败，没有回退点");
+                        return;
+                    }
+
+                    AppendLog(LogKind.Warning, "同步前的本地提交失败，用户选择继续（本次没有回退点）。");
+                }
+                else if (commitResult.IsRepository)
                 {
                     AppendLog(LogKind.User, commitResult.Detail);
                 }

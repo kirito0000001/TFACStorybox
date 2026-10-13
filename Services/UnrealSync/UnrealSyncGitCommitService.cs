@@ -30,11 +30,19 @@ internal readonly record struct UnrealSyncGitCommitProgress(string Message, doub
 /// <param name="Committed">真的产生了一次提交。</param>
 /// <param name="HeadSha">提交后的 HEAD 短号；拿不到就是空串。</param>
 /// <param name="Detail">给人看的一句话（进日志、必要时弹提示）。</param>
+/// <param name="Failed">
+/// **提交过程出错了**（区别于"这本来就不是仓库"）。
+///
+/// 两者必须分开：不是仓库是**预期内**的（用户可能故意不用版本控制，提示一句就够），
+/// 而提交失败是**出了意外** —— 那意味着这次同步没有回退点，
+/// 得让用户明确决定要不要继续（见调用点那个确认弹窗）。2026-10-13 用户要求的。
+/// </param>
 internal sealed record UnrealSyncGitCommitResult(
     bool IsRepository,
     bool Committed,
     string HeadSha,
-    string Detail);
+    string Detail,
+    bool Failed = false);
 
 /// <summary>
 /// 同步前的**全量本地提交**。
