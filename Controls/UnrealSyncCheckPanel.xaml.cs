@@ -28,8 +28,15 @@ public sealed partial class UnrealSyncCheckPanel : UserControl
     /// <summary>点「开始检测」。没订阅就什么也不发生。</summary>
     public event EventHandler? CheckRequested;
 
-    /// <summary>点了某一项的「更换」；参数是那一项要换什么（引擎 / 工程）。</summary>
-    public event EventHandler<UnrealSyncCheckReplaceTarget>? ReplaceRequested;
+    /// <summary>
+    /// 点了某一项的「更换」；参数是那一项要换什么（引擎 / 工程）。
+    ///
+    /// 这个事件是 <c>internal</c> 而不是 public：参数类型
+    /// <see cref="UnrealSyncCheckReplaceTarget"/> 本身是 internal，
+    /// public 事件用它就是 CS7025（可访问性不一致）。
+    /// 订阅方（UnrealSyncPanel 与窗口）都在同一个程序集里，internal 够用。
+    /// </summary>
+    internal event EventHandler<UnrealSyncCheckReplaceTarget>? ReplaceRequested;
 
     // 下面两个方法名必须和 XAML 里的 Click= / Tapped= 完全一致 ——
     // 生成器是按名字找的，名字不对就是 CS1061。

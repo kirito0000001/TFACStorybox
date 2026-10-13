@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GalExcleTools.Services;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -52,8 +53,13 @@ public sealed partial class UnrealSyncPanel : UserControl
     /// <summary>
     /// 点了检测层某一项的「更换」（转发上来的）；参数是换什么：引擎还是工程。
     /// 引擎与工程现在住在检测层里，所以选择动作也从那儿发出来。
+    ///
+    /// 这个事件是 <c>internal</c> 而不是 public：参数类型
+    /// <see cref="UnrealSyncCheckReplaceTarget"/> 本身是 internal，
+    /// public 事件用它就是 CS7025（可访问性不一致）。
+    /// 订阅方都在同一个程序集里，internal 够用。
     /// </summary>
-    public event EventHandler<UnrealSyncCheckReplaceTarget>? ReplaceCheckRequested;
+    internal event EventHandler<UnrealSyncCheckReplaceTarget>? ReplaceCheckRequested;
 
     /// <summary>点了「开始检测」（检测层转发上来的）。</summary>
     public event EventHandler? CheckRequested;
