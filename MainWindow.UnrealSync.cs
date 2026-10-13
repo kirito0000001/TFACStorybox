@@ -591,6 +591,29 @@ namespace GalExcleTools
                 SyncPanel.SummaryText = result.Output.Length == 0
                     ? $"{commitSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}"
                     : $"{commitSummary}{changePlan.Summary}\n已写入导入清单：{result.ManifestPath}\n{TrimLongText(result.Output, 900)}";
+
+                // ⚠️ **错误和警告要一条不落进日志。**
+                //
+                // 以前它们只进了状态条和进度浮层 —— 而那两个都是"看过去就没了"的东西：
+                // 状态条会被下一次操作覆盖、浮层会自己消失。事后能拿来对账的只有日志，
+                // 尤其是 runtime.log 那份全量文件。
+                //
+                // 2026-10-13 用户的原话：「你的 log 甚至没有提醒写的多」——
+                // 说的就是：状态条里那一大串错误，日志里一条都找不到，
+                // 于是想把它贴出来的时候无从下手。
+                if (!reportSuccess && report is not null)
+                {
+                    foreach (var error in report.Errors)
+                    {
+                        AppendLog(LogKind.Error, error);
+                    }
+
+                    foreach (var warning in report.Warnings)
+                    {
+                        AppendLog(LogKind.Warning, warning);
+                    }
+                }
+
                 if (reportSuccess)
                 {
                     _unrealSyncService.WriteState(validation.Context, changePlan);
