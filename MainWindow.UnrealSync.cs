@@ -233,6 +233,10 @@ namespace GalExcleTools
                 return;
             }
 
+            // 「重新检测」也要有自己的批次号与步号 —— 不然它和完整同步的日志
+            // 在面板上混成一坨，报错时分不出是"检测"还是"同步"出的。
+            BeginLogRun($"重新检测同步差异 · {validation.Context.Project.Name}");
+
             // 原来是靠 sender 反推"是哪个按钮"再置灰它；现在事件里只有面板，
             // 所以走面板自己的属性 —— 也比从 sender 反推稳。
             SyncPanel.CheckButtonEnabled = false;
@@ -247,7 +251,9 @@ namespace GalExcleTools
             SyncPanel.SummaryText = "正在比较工具箱源文件与虚幻项目内的 .uasset 时间戳。";
             try
             {
+                EnterLogStep(1, "生成剧情 CSV");
                 await PrepareStoryCsvForUnrealSyncAsync(validation.Context.Project);
+                EnterLogStep(2, "扫描并比较差异");
                 SetUnrealSyncProgress(
                     true,
                     detectionPlan.Caption(UnrealSyncProgressPlan.Detect, "正在检测虚幻同步差异..."),
@@ -263,6 +269,9 @@ namespace GalExcleTools
                     changePlan.HasChanges ? "差异文件已列在下方。" : "工具箱项目、素材库和虚幻目标目录已经一致。");
                 SetUnrealSyncProgress(false, string.Empty);
                 AppendLog(LogKind.User, $"已重新检测虚幻同步差异：{changePlan.TotalChangedItems} 项。");
+                EndLogStep(changePlan.HasChanges
+                    ? $"检测到 {changePlan.TotalChangedItems} 项差异"
+                    : "没有差异");
             }
             catch (Exception ex)
             {
@@ -270,6 +279,7 @@ namespace GalExcleTools
                 SetUnrealSyncStatus(InfoBarSeverity.Error, "检测差异失败", ex.Message);
                 SyncPanel.SummaryText = $"检测差异失败：{ex.Message}";
                 AppendLog(LogKind.Error, "重新检测虚幻同步差异失败。", ex);
+                EndLogStep($"失败：{ex.Message}");
             }
             finally
             {
@@ -319,7 +329,14 @@ namespace GalExcleTools
             UnrealSyncChangePlan changePlan;
             try
             {
+                // 开一个新日志批次。之后每一行都带 run= 与 step=，
+                // 出了错一眼看得出是哪一次、哪一段（以前没有这个，翻日志分不出谁是谁）。
+                BeginLogRun($"同步到虚幻 · {validation.Context.Project.Name}");
+
+                EnterLogStep(1, "生成剧情 CSV");
                 await PrepareStoryCsvForUnrealSyncAsync(validation.Context.Project);
+
+                EnterLogStep(2, "检测虚幻同步差异");
                 SetUnrealSyncProgress(
                     true,
                     progressPlan.Caption(UnrealSyncProgressPlan.Detect, "正在检测虚幻同步差异..."),
@@ -333,6 +350,7 @@ namespace GalExcleTools
                 SetUnrealSyncStatus(InfoBarSeverity.Error, "准备剧情CSV失败", ex.Message);
                 SyncPanel.SummaryText = $"准备剧情CSV失败：{ex.Message}";
                 AppendLog(LogKind.Error, "同步前生成剧情CSV失败。", ex);
+                EndLogStep("生成剧情 CSV 失败");
                 SyncPanel.SyncButtonEnabled = true;
                 return;
             }
@@ -342,6 +360,7 @@ namespace GalExcleTools
                 SetUnrealSyncProgress(false, string.Empty);
                 SetUnrealSyncStatus(InfoBarSeverity.Informational, "无需同步", "没有检测到素材、CSV 或立绘数据资产变动，本次不会启动虚幻同步。");
                 SyncPanel.SummaryText = changePlan.Summary;
+                EndLogStep("没有检测到变化，本次不启动虚幻同步");
                 SyncPanel.SyncButtonEnabled = true;
                 return;
             }
@@ -367,6 +386,7 @@ namespace GalExcleTools
                 // 没有仓库、或提交失败，都**不阻断同步** —— 那只是回退点，不是前置条件；
                 // 但必须说清楚"这次没有可回退的提交点"，用户以为有、实际没有是最坏的情况。
                 var commitBand = progressPlan[UnrealSyncProgressPlan.LocalCommit];
+                EnterLogStep(3, "提交同步前的本地改动");
                 SetUnrealSyncProgress(
                     true,
                     progressPlan.Caption(UnrealSyncProgressPlan.LocalCommit, "正在提交同步前的本地改动..."),
@@ -425,6 +445,10 @@ namespace GalExcleTools
                 // 把它**映射进"执行"那一段**，而不是直接当全局百分比用 ——
                 // 否则前面准备阶段的百分号和脚本自己的百分号会互相打架。
                 var executeBand = progressPlan[UnrealSyncProgressPlan.Execute];
+                EnterLogStep(4, "执行 Unreal 同步（导入 / 改名 / 清理 / 写变量）");
+                // 记"上一个报过的阶段名"，只在阶段**变了**的时候写日志 ——
+                // 进度文件每几百毫秒更新一次，每次都写会把日志刷爆。
+                string? lastLoggedUnrealStage = null;
                 var progress = new Progress<UnrealSyncProgressUpdate>(update =>
                 {
                     // 「细节」：脚本报的项数（例如"已导入 3/12"）原来在 C# 侧被丢掉了，现在带上。
@@ -436,6 +460,16 @@ namespace GalExcleTools
                         progressPlan.Caption(UnrealSyncProgressPlan.Execute, update.Message + countText),
                         false,
                         executeBand.At(update.Percent));
+
+                    // 脚本每换一个阶段就记一行 —— 报错时看得出现在走到哪了。
+                    // 以前只有进度条会动、日志不跟着记，出了错看不出是在哪一段出的
+                    // （2026-10-12 就是这个问题：报错在状态条上，日志里却没有上下文）。
+                    if (!string.IsNullOrWhiteSpace(update.Stage) &&
+                        !string.Equals(update.Stage, lastLoggedUnrealStage, StringComparison.Ordinal))
+                    {
+                        lastLoggedUnrealStage = update.Stage;
+                        AppendLog(LogKind.User, $"Unreal 执行 · {update.Message}{countText}");
+                    }
                 });
                 var result = await RunUnrealSyncAsync(validation.Context, changePlan, progress, cancellationToken);
                 var report = result.Report;
@@ -507,6 +541,11 @@ namespace GalExcleTools
                 }
 
                 AppendLog(result.ExitCode == 0 ? LogKind.User : LogKind.Warning, $"虚幻同步结束，退出码：{result.ExitCode}");
+                // 给这一步收尾，并写清结论 —— 结论就是上面那条状态条上的话，
+                // 不另造一套说法（零境那边也是复用各步已有的摘要文案）。
+                EndLogStep(reportSuccess
+                    ? $"完成，导入 {report!.ImportedCount} 项、复扫 {report.Verification.Count} 项全部通过"
+                    : "未完整完成，详情见上");
                 NotifyUnrealSyncFinishedIfInactive(result, changePlan);
                 await ShowUnrealSyncFinishedDialogAsync(validation.Context, result, changePlan);
             }
@@ -515,12 +554,15 @@ namespace GalExcleTools
                 CompleteGlobalProgress("虚幻同步已取消", "已停止当前同步步骤；如果 Unreal 命令进程已经启动，工具箱会尝试一并终止。");
                 SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步已取消", "本次虚幻同步没有完成。已写入的临时清单或 Unreal 侧中途导入结果可能会保留。");
                 AppendLog(LogKind.Warning, "虚幻同步已取消。");
+                EndLogStep("已取消");
             }
             catch (Exception ex)
             {
                 CompleteGlobalProgress("虚幻同步失败", ex.Message);
                 SetUnrealSyncStatus(InfoBarSeverity.Error, "同步失败", ex.Message);
+                // 这条 Error 会带完整异常（含内部异常）—— 用户就是靠它把报错贴出来定位的。
                 AppendLog(LogKind.Error, "虚幻同步失败。", ex);
+                EndLogStep($"失败：{ex.Message}");
             }
             finally
             {

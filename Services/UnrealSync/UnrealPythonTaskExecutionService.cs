@@ -81,7 +81,8 @@ internal sealed class UnrealPythonTaskExecutionService
         string remoteJobPath,
         ProcessStartInfo offlineStartInfo,
         IReadOnlyDictionary<string, string>? environment = null,
-        bool? useRunningEditor = null)
+        bool? useRunningEditor = null,
+        Action<string>? onOnlineUnavailable = null)
     {
         ArgumentNullException.ThrowIfNull(offlineStartInfo);
 
@@ -102,12 +103,19 @@ internal sealed class UnrealPythonTaskExecutionService
         var runnerPath = Path.Combine(AppContext.BaseDirectory, RemoteRunnerRelativePath);
         if (!File.Exists(pythonPath))
         {
-            throw new FileNotFoundException("当前 Unreal 引擎没有找到远程执行所需的 Python。", pythonPath);
+            // ⚠️ **退回离线，不是抛错**。这个组件缺了只意味着"在线那条路走不了"，
+            // 离线那条照样能跑完同步 —— 抛出去会让整次同步白费。
+            // 2026-10-12 实测就是这么炸的：报"当前 Unreal 引擎没有找到远程执行所需的 Python"，
+            // 而那个 Python 明明在，只是路径按另一种 EngineRoot 写法拼错了。
+            // 教训：**组件缺失属于"这条路不可用"，不属于"这次任务失败"**。
+            onOnlineUnavailable?.Invoke($"Unreal 引擎里没找到自带 Python（{pythonPath}），改用离线执行。");
+            return new UnrealPythonTaskLaunch(offlineStartInfo, UsesRunningEditor: false);
         }
 
         if (!File.Exists(runnerPath))
         {
-            throw new FileNotFoundException("工具箱内置的 Unreal 在线执行脚本不存在。", runnerPath);
+            onOnlineUnavailable?.Invoke($"工具箱内置的在线执行脚本不存在（{runnerPath}），改用离线执行。");
+            return new UnrealPythonTaskLaunch(offlineStartInfo, UsesRunningEditor: false);
         }
 
         var job = new UnrealRemotePythonJob(
@@ -224,9 +232,34 @@ internal sealed class UnrealPythonTaskExecutionService
         return Path.GetFullPath(Path.Combine(editorDirectory, "..", ".."));
     }
 
-    /// <summary>引擎自带的 Python（不是系统 Python）。</summary>
-    public static string ResolveBundledPythonPath(string engineRoot) =>
-        Path.Combine(engineRoot, "Binaries", "ThirdParty", "Python3", "Win64", "python.exe");
+    /// <summary>
+    /// 引擎自带的 Python（不是系统 Python）。
+    ///
+    /// **两种写法都接受**：<c>&lt;UE&gt;\Engine</c> 和 <c>&lt;UE&gt;</c>。
+    /// <c>EngineRoot</c> 这个词在代码里确实有两种含义（上游的解析器各用过一种），
+    /// 与其去赌调用方传的是哪种，不如这里两种都试 —— 赌错的代价是
+    /// "在线那条路整个失败"，而那个错从现象上很难看出来。
+    /// （零境的远程脚本在这一点上也是两种都试的。）
+    /// </summary>
+    public static string ResolveBundledPythonPath(string engineRoot)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(engineRoot, "Binaries", "ThirdParty", "Python3", "Win64", "python.exe"),
+            Path.Combine(engineRoot, "Engine", "Binaries", "ThirdParty", "Python3", "Win64", "python.exe"),
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        // 都不在就返回第一种：调用方拿它做报错信息，路径要看得出来。
+        return candidates[0];
+    }
 
     private static void WriteJobFile(string remoteJobPath, UnrealRemotePythonJob job)
     {

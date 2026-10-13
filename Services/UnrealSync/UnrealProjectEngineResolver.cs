@@ -71,9 +71,33 @@ internal static class UnrealProjectEngineResolver
 
         // 注册表里指到的地方**必须真的在**：注册项本身也可能是陈的。
         // 不在就当没查到，让调用方退回去用配置 —— 那至少是用户显式选过的。
-        return !string.IsNullOrWhiteSpace(resolved) && Directory.Exists(resolved)
-            ? resolved
-            : null;
+        if (string.IsNullOrWhiteSpace(resolved) || !Directory.Exists(resolved))
+        {
+            return null;
+        }
+
+        return NormalizeEngineRoot(resolved);
+    }
+
+    /// <summary>
+    /// 把注册表给的那两种写法统一成 <c>&lt;UE&gt;\Engine</c>。
+    ///
+    /// ⚠️ 这一步是必须的：<c>EngineRoot</c> 在这个代码库里有**两种含义** ——
+    /// <see cref="UnrealPythonTaskExecutionService.ResolveEngineRoot"/> 返回
+    /// <c>&lt;UE&gt;\Engine</c>（从 <c>Binaries\Win64</c> 往上两级），
+    /// 而注册表的 <c>InstalledDirectory</c> 给的是 <c>&lt;UE&gt;</c>。
+    /// 下游（拼自带 Python 的路径、写远程任务）按前者算 ——
+    /// 拿 <c>&lt;UE&gt;</c> 直接去拼就成了 <c>&lt;UE&gt;\Binaries\...</c>，找不到东西。
+    ///
+    /// 2026-10-12 实测踩过：在线路径报"当前 Unreal 引擎没有找到远程执行所需的 Python"，
+    /// 而那个 Python 明明在 <c>&lt;UE&gt;\Engine\Binaries\ThirdParty\Python3\Win64</c>。
+    /// </summary>
+    private static string NormalizeEngineRoot(string path)
+    {
+        var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
+        return string.Equals(Path.GetFileName(full), "Engine", StringComparison.OrdinalIgnoreCase)
+            ? full
+            : Path.Combine(full, "Engine");
     }
 
     private static bool LooksLikeGuid(string value) =>

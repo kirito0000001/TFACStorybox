@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
+using GalExcleTools.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -56,6 +57,60 @@ namespace GalExcleTools
             return Settings.ShouldWriteLog(kind);
         }
 
+        /// <summary>
+        /// 当前日志范围（哪一次流程、哪一步）。
+        ///
+        /// 为什么要它：同步一跑就是几分钟、几十条日志，而没有批次号与步号的时候，
+        /// "这次报的错"和"上次留下的错"在面板上长得一样 —— 事后翻日志分不出谁是谁。
+        /// 2026-10-12 就是撞在这上面：同步报了个错，日志里那条看不出是哪一段出的。
+        /// </summary>
+        private RuntimeLogScope _logScope = RuntimeLogScope.None;
+
+        /// <summary>开一次新的日志批次，返回批次号。首行是一条显眼的批次头。</summary>
+        private string BeginLogRun(string title)
+        {
+            var runId = RuntimeLogFormat.CreateRunId(DateTimeOffset.Now);
+            _logScope = new RuntimeLogScope(runId, 0);
+            AppendLog(LogKind.User, RuntimeLogFormat.FormatRunHeader(runId, title));
+            return runId;
+        }
+
+        /// <summary>切到某一步。传 0 表示"不在任何一步里"。</summary>
+        private void SetLogStep(int step) => _logScope = _logScope with { Step = step };
+
+        /// <summary>
+        /// 记一行"进入第 N 步"。
+        /// 上一步没显式收尾的话这里替它收一下 —— 不然日志里会出现"进了第 3 步"
+        /// 却找不到"第 2 步结束"的情况，读起来像漏了东西。
+        /// </summary>
+        private void EnterLogStep(int step, string stepName)
+        {
+            if (_logScope.Step == step)
+            {
+                return;
+            }
+
+            if (_logScope.Step > 0)
+            {
+                AppendLog(LogKind.User, RuntimeLogFormat.FormatStepEnd(_logScope.Step, string.Empty));
+            }
+
+            SetLogStep(step);
+            AppendLog(LogKind.User, RuntimeLogFormat.FormatStepStart(step, stepName));
+        }
+
+        /// <summary>给当前这一步写个结论并收尾。</summary>
+        private void EndLogStep(string conclusion)
+        {
+            if (_logScope.Step <= 0)
+            {
+                return;
+            }
+
+            AppendLog(LogKind.User, RuntimeLogFormat.FormatStepEnd(_logScope.Step, conclusion));
+            SetLogStep(0);
+        }
+
         private void AppendLog(LogKind kind, string message, Exception? exception = null)
         {
             if (!ShouldWriteLog(kind))
@@ -63,7 +118,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var (displayText, copyText) = CreateLogText(kind, message, exception, DateTime.Now);
+            var (displayText, copyText) = CreateLogText(kind, message, exception, DateTimeOffset.Now);
 
             _logLines.Enqueue((kind, displayText, copyText));
 
@@ -156,21 +211,33 @@ namespace GalExcleTools
             }
         }
 
-        private static (string DisplayText, string CopyText) CreateLogText(
+        private (string DisplayText, string CopyText) CreateLogText(
             LogKind kind,
             string message,
             Exception? exception,
-            DateTime timestamp)
+            DateTimeOffset timestamp)
         {
-            var header = $"[{timestamp:HH:mm:ss}] LogTFAC: {GetLogKindLabel(kind)}: {message}";
+            // ⚠️ 面板行与复制行**必须走同一个格式函数**。
+            // 以前这两行是在这里各拼一遍的（还各自嵌了一遍时间戳），
+            // 于是改一处就会两边不一致；而且那时候**没有"哪一次、哪一步"** ——
+            // 报错之后翻日志分不出是在哪一段出的。这一段照零境那边搬。
+            var header = RuntimeLogFormat.FormatPanelLine(timestamp, _logScope, message);
+            var copyHeader = RuntimeLogFormat.FormatCopyLine(
+                timestamp,
+                _logScope,
+                GetLogKindLabel(kind),
+                message);
+
             if (exception is null)
             {
-                return (header, header);
+                return (header, copyHeader);
             }
 
+            // 面板上限制堆栈行数（太长会把日志挤爆）；复制出去的那份给足 8 行 ——
+            // 那一份是拿去定位问题的，宁可长一点。
             return (
                 $"{header}{Environment.NewLine}{FormatExceptionForLog(exception)}",
-                $"{header}{Environment.NewLine}{FormatExceptionForLog(exception, stackTraceLineLimit: 8)}");
+                $"{copyHeader}{Environment.NewLine}{FormatExceptionForLog(exception, stackTraceLineLimit: 8)}");
         }
 
         private static string GetLogKindLabel(LogKind kind)
