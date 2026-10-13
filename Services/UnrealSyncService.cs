@@ -565,7 +565,14 @@ internal sealed class UnrealSyncService
                     # （零境那边是设了的，因为它的语义是"让 Unreal 与工具箱完全一致"；
                     #   这边是"把素材库推过去"，取舍不同。2026-10-12 想清楚的，不是漏写。）
                     try:
-                        task.set_editor_property("save", True)
+                        # ⚠️ **导入阶段一个都不写盘。**
+                        #
+                        # 以前这里是 save=True，再加上每个导入完还调一次
+                        # save_asset_path_with_retry —— 等于"导一个写一次盘"。
+                        # 368 个素材就是 368 次落盘，几分钟起步，而且进度条一格一格爬。
+                        # 现在改成：全部导完之后统一存一次（见下面的"一次性保存"）。
+                        # 2026-10-13 用户要求的：「先全部写入，最后再触发保存」。
+                        task.set_editor_property("save", False)
                     except Exception:
                         pass
                     tasks.append(task)
@@ -600,9 +607,29 @@ internal sealed class UnrealSyncService
                             add_error("GalExcleTools import produced no asset: {}".format(task.get_editor_property("filename")))
                     if imported_paths:
                         imported_count += 1
-                    for imported_path in imported_paths:
-                        save_asset_path_with_retry(imported_path)
+                    # 这里以前会 for 一遍 imported_paths 逐个 save_asset_path_with_retry。
+                    # 那和任务上的 save 是重复的（两边都在写盘），已经一起去掉了 ——
+                    # 写盘统一挪到全部导入之后，只做一次。
                     write_progress("ImportAssets", "正在导入并保存素材", 65 + 15.0 * (task_index + 1) / len(tasks), task_index + 1, len(tasks))
+
+                # ── 一次性保存 ────────────────────────────────────────────────
+                # 「先全部写入，最后再触发保存」：导入阶段只往内存里放，
+                # 全部放完之后统一落盘一次。
+                #
+                # only_if_is_dirty=True 是关键：只写**脏了的**包。
+                # 于是这一步的代价跟"这次改了多少"成正比，而不是跟工程多大成正比 ——
+                # 没动过的素材一个字节都不会重写。
+                #
+                # 保存失败**必须报出来**：导入的东西这时还只在内存里，
+                # 存不下去就等于没导（关掉编辑器就没了）。
+                if tasks:
+                    save_root = manifest.get("TargetRoot") or "/Game"
+                    try:
+                        saved = unreal.EditorAssetLibrary.save_directory(save_root, only_if_is_dirty=True, recursive=True)
+                        if not saved:
+                            add_error("GalExcleTools 统一保存素材失败：{}".format(save_root))
+                    except Exception as exc:
+                        add_error("GalExcleTools 统一保存素材时出错：{} —— {}".format(save_root, exc))
             else:
                 write_progress("ImportAssets", "本次没有需要导入的素材", 80)
 
