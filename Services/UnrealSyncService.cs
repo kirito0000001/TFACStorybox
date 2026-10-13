@@ -520,10 +520,23 @@ internal sealed class UnrealSyncService
                 try:
                     if not unreal.EditorAssetLibrary.does_asset_exist(asset_path):
                         return False
-                    if unreal.EditorAssetLibrary.delete_asset(asset_path):
-                        unreal.log("GalExcleTools deleted extra asset: {}".format(asset_path))
-                        return True
-                    add_error("GalExcleTools failed to delete extra asset: {}".format(asset_path))
+                    if not unreal.EditorAssetLibrary.delete_asset(asset_path):
+                        add_error("GalExcleTools failed to delete extra asset: {}".format(asset_path))
+                        return False
+
+                    # ⚠️ **删完当场复核一次。**
+                    #
+                    # delete_asset 返回 True **不等于**盘上真没了：它可能只把对象标记掉，
+                    # 文件还在 —— 而 does_asset_exist 查的正是盘上那个文件。
+                    #
+                    # 2026-10-13 实测：45 个删除动作全部返回成功，复扫却发现 38 个仍在。
+                    # 当场问一句，日志里就能直接分清是哪一种：
+                    #   - 这里就发现还在  → 删除动作本身没生效（API 用错 / 被引用挡住）；
+                    #   - 这里没了、复扫又冒出来 → 是"没落盘"，得在删除之后再存一次。
+                    if unreal.EditorAssetLibrary.does_asset_exist(asset_path):
+                        still_present.append(asset_path)
+                    unreal.log("GalExcleTools deleted extra asset: {}".format(asset_path))
+                    return True
                 except Exception as exc:
                     add_error("GalExcleTools failed to delete extra asset {}: {}".format(asset_path, exc))
                 return False
@@ -1325,10 +1338,30 @@ internal sealed class UnrealSyncService
                 pending_deletes = []
 
             write_progress("DeleteAssets", "正在清理虚幻中的多余素材", 96, 0, len(pending_deletes))
+            still_present = []
             for delete_index, asset_path in enumerate(pending_deletes):
                 if delete_asset_if_exists(asset_path):
-                    deleted_count += 1
+                    # 只有**复核确认盘上没了**才算真删掉 —— 别把"动作返回成功"当结果。
+                    # 2026-10-13：45 个动作全返回成功，实际只删掉 7 个。
+                    if asset_path not in still_present:
+                        deleted_count += 1
                 write_progress("DeleteAssets", "正在清理虚幻中的多余素材", 96 + (3.0 * (delete_index + 1) / max(len(pending_deletes), 1)), delete_index + 1, len(pending_deletes))
+
+            # ── 删除之后**必须再存一次** ─────────────────────────────────
+            # 批量保存跑在删除**之前**，所以删除只改到了内存：
+            # 对象没了、盘上的 .uasset 一个都没少，而 does_asset_exist 查的正是文件。
+            # 2026-10-13 实测就是这么来的：45 个删除动作全部"返回成功"，复扫 38 个还在。
+            if pending_deletes:
+                delete_save_root = manifest.get("TargetRoot") or "/Game"
+                try:
+                    unreal.EditorAssetLibrary.save_directory(delete_save_root, only_if_is_dirty=True, recursive=True)
+                except Exception as exc:
+                    add_warning("GalExcleTools 删除后统一保存出错：{} —— {}".format(delete_save_root, exc))
+                if still_present:
+                    # 当场复核就已经发现还在 —— 那说明删除动作本身没生效，
+                    # 不是"没落盘"。这条要单独报，否则会被当成同一类问题反复查。
+                    add_warning("GalExcleTools 有 {} 个资产删除动作返回成功、但当场复核仍在（共 {} 个待删）：{}".format(
+                        len(still_present), len(pending_deletes), "；".join(still_present[:5])))
 
             # ── 资产类型清单 ────────────────────────────────────────────
             # 把这次涉及到的资产**当时的类名**写下来，给"同步前检测"用。
