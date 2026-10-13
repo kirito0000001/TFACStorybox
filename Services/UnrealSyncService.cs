@@ -918,10 +918,16 @@ internal sealed class UnrealSyncService
                     matched_text = " ".join(collect_route_texts(matched_value))
                     routes = source.get("Routes", [])
                     expected_route_count = len(routes)
-                    # JSON 里的键是 TargetStory，文本格式里是 TargetStory= —— 两种都数。
-                    actual_route_count = max(
-                        matched_text.count("TargetStory="),
-                        matched_text.count('"TargetStory"'))
+                    # ⚠️ 数**裸词** TargetStory —— 一种写法覆盖全部三种形状：
+                    #   JSON 的键名        → TargetStory
+                    #   Unreal 的文本格式  → TargetStory="..."
+                    #   摊平之后的拼接文本 → TargetStory（前后是空格）
+                    # 之前分别数 "TargetStory=" 和 "\"TargetStory\"" 两种，结果**都匹配不上**：
+                    # 摊平时是用空格拼的，引号和等号早在摊平那一步就没了。
+                    # 2026-10-13 实测的实际值：
+                    #     StoryOnSetMaps TargetStory /Script/.../WHK-M2-01.WHK-M2-01' Judjes PropName ...
+                    # ——TargetStory 明明白白在那儿，只是不带等号也不带引号。
+                    actual_route_count = matched_text.count("TargetStory")
                     if actual_route_count != expected_route_count:
                         add_error("GalExcleTools AllRoad route count mismatch for {}: expected={} actual={} 实际值：{}".format(
                             source_path, expected_route_count, actual_route_count, matched_text[:200]))
