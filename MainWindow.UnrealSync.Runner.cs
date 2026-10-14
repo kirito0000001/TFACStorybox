@@ -176,7 +176,7 @@ namespace GalExcleTools
 
         private List<string> CreateUnrealSyncPlanItems(ProjectInfo project, AssetLibraryInfo assetLibrary, string contentFolderPath)
         {
-            var backgroundCount = BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(assetLibrary)).Count;
+            var backgroundCount = ImageSetService.GetFilePaths(GetBackgroundFolderPath(assetLibrary)).Count;
             var musicCount = AudioAssetService.GetFilePaths(GetMusicFolderPath(assetLibrary)).Count;
             var sceneCount = AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(assetLibrary)).Count;
             var soundEffectCount = AudioAssetService.GetFilePaths(GetSoundEffectFolderPath(assetLibrary)).Count;
@@ -259,7 +259,7 @@ namespace GalExcleTools
                 context,
                 forceFullSync,
                 characters,
-                BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(context.AssetLibrary)),
+                ImageSetService.GetFilePaths(GetBackgroundFolderPath(context.AssetLibrary)),
                 AudioAssetService.GetFilePaths(GetMusicFolderPath(context.AssetLibrary)),
                 AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(context.AssetLibrary)),
                 AudioAssetService.GetFilePaths(GetSoundEffectFolderPath(context.AssetLibrary)),

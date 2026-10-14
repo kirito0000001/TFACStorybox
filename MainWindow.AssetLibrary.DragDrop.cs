@@ -58,8 +58,8 @@ namespace GalExcleTools
                 return;
             }
 
-            var indexRemap = BuildAssetIndexRemap(orderedPaths, BackgroundImageService.GetAssetIndex);
-            var assetLabels = StoryAssetIndexSyncService.BuildLabelMaps(orderedPaths, BackgroundImageService.GetAssetIndex);
+            var indexRemap = BuildAssetIndexRemap(orderedPaths, ImageSetService.GetAssetIndex);
+            var assetLabels = StoryAssetIndexSyncService.BuildLabelMaps(orderedPaths, ImageSetService.GetAssetIndex);
             _isNormalizingBackgroundImages = true;
             try
             {
@@ -552,7 +552,7 @@ namespace GalExcleTools
                 var droppedPaths = storageItems
                     .OfType<StorageFile>()
                     .Select(file => file.Path)
-                    .Where(path => BackgroundImageService.Extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+                    .Where(path => ImageSetService.Extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
                     .ToList();
 
                 var importedCount = await importAsync(droppedPaths);
@@ -865,7 +865,7 @@ namespace GalExcleTools
                 var droppedImagePaths = storageItems
                     .OfType<StorageFile>()
                     .Select(file => file.Path)
-                    .Where(BackgroundImageService.IsValidSourcePath)
+                    .Where(ImageSetService.IsValidSourcePath)
                     .ToList();
 
                 var importedCount = await ImportBackgroundImagesAsync(droppedImagePaths);

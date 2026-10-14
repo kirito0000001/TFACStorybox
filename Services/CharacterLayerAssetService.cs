@@ -618,7 +618,7 @@ internal sealed class CharacterLayerAssetService
 
         return Directory
             .EnumerateFiles(folderPath)
-            .Where(BackgroundImageService.IsSupportedExtension)
+            .Where(ImageSetService.IsSupportedExtension)
             .OrderBy(Path.GetFileName)
             .ToList();
     }
@@ -654,7 +654,7 @@ internal sealed class CharacterLayerAssetService
 
         return Directory
             .EnumerateFiles(folderPath)
-            .Where(path => layerKind == CharacterLayerKind.Vfx || BackgroundImageService.IsSupportedExtension(path))
+            .Where(path => layerKind == CharacterLayerKind.Vfx || ImageSetService.IsSupportedExtension(path))
             .OrderBy(Path.GetFileName)
             .ToList();
     }
@@ -1092,7 +1092,7 @@ internal sealed class CharacterLayerAssetService
     {
         return !string.IsNullOrWhiteSpace(path) &&
             File.Exists(path) &&
-            BackgroundImageService.IsSupportedExtension(path);
+            ImageSetService.IsSupportedExtension(path);
     }
 
     private List<CharacterLayerRename> BuildRenames(

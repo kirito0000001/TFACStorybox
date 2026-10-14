@@ -11,9 +11,40 @@ internal sealed record AssetLibraryInfo(
     bool IsPortraitPreviewEnabled,
     DateTime LastEditedAt);
 
-internal sealed record BackgroundImageEntry(string Path, string Remark);
+/// <summary>
+/// 一个"图集"条目 —— 背景图和道具图片**共用**这个类型。
+///
+/// <paramref name="Prefix"/> 是这个分类的文件名前缀：背景图 <c>BG</c>、道具图片 <c>Item</c>。
+/// 编号和备注都拼在文件名里（<c>BG00_洗澡中心.png</c>），**没有单独的索引文件** ——
+/// 所以"这个条目属于哪个分类"只能靠前缀认，它必须跟着条目走
+/// （重排逻辑就是照它生成新名字的）。默认值让老调用点一个字都不用改。
+/// </summary>
+internal sealed record ImageSetEntry(string Path, string Remark, string Prefix = ImageSetPrefix.Background);
 
-internal sealed record BackgroundImageRename(BackgroundImageEntry Entry, string TargetPath);
+internal sealed record ImageSetRename(ImageSetEntry Entry, string TargetPath);
+
+/// <summary>
+/// 各分类的**文件名前缀**。加新分类时在这里加一个常量，别处不用动。
+///
+/// ⚠️ 这些前缀会变成虚幻里的**资产名**（<c>BG00_备注.uasset</c>），
+/// 也决定本地文件怎么排序 —— 定完再改就要连带挪资产，所以定之前想清楚。
+/// </summary>
+internal static class ImageSetPrefix
+{
+    /// <summary>背景图：<c>BG00_备注.png</c>。它同时是剧情 CSV 里 <c>BGindex</c> 取值的来源。</summary>
+    public const string Background = "BG";
+
+    /// <summary>道具图片：<c>Item00_备注.png</c>（和落点目录名 ItemImage 对得上）。</summary>
+    public const string Prop = "Item";
+
+    /// <summary>
+    /// 全部前缀。给"认不出这个条目属于哪个分类"的场合按顺序试。
+    ///
+    /// 加新分类时**这里也要加一个** —— 忘了加的话，那个分类的文件会被当成
+    /// 默认分类（背景图）来解析，备注就认不出来了。
+    /// </summary>
+    public static readonly string[] All = [Background, Prop];
+}
 
 internal enum AudioAssetKind
 {

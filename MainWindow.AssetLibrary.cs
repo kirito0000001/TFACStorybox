@@ -273,7 +273,7 @@ namespace GalExcleTools
             {
                 SuggestedStartLocation = PickerLocationId.PicturesLibrary
             };
-            foreach (var extension in BackgroundImageService.Extensions)
+            foreach (var extension in ImageSetService.Extensions)
             {
                 picker.FileTypeFilter.Add(extension);
             }
@@ -319,7 +319,7 @@ namespace GalExcleTools
             var importedCount = 0;
             try
             {
-                importedCount = await _backgroundImageService.ImportFilesAsync(
+                importedCount = await _imageSetService.ImportFilesAsync(
                     backgroundFolderPath,
                     sourcePaths,
                     ImportBackgroundImageAsPngAsync);
@@ -525,7 +525,7 @@ namespace GalExcleTools
             {
                 SuggestedStartLocation = PickerLocationId.PicturesLibrary
             };
-            foreach (var extension in BackgroundImageService.Extensions)
+            foreach (var extension in ImageSetService.Extensions)
             {
                 picker.FileTypeFilter.Add(extension);
             }

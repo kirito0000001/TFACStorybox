@@ -342,7 +342,7 @@ namespace GalExcleTools
             var characters = GetCharactersForAssetLibrary(assetLibrary);
             return ChapterRepairService.BuildAssetContext(
                 characters,
-                BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(assetLibrary)).Count,
+                ImageSetService.GetFilePaths(GetBackgroundFolderPath(assetLibrary)).Count,
                 AudioAssetService.GetFilePaths(GetMusicFolderPath(assetLibrary)).Count,
                 AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(assetLibrary)).Count,
                 _characterFilterService.Read(assetLibrary).Count);

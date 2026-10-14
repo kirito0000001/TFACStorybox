@@ -110,7 +110,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var backgrounds = BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary));
+            var backgrounds = ImageSetService.GetFilePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary));
             var resolvedIndex = ResolveStoryAssetIndex(index, backgrounds.Count);
             if (resolvedIndex is null)
             {
@@ -391,7 +391,7 @@ namespace GalExcleTools
         {
             return !string.IsNullOrWhiteSpace(imagePath) &&
                 File.Exists(imagePath) &&
-                BackgroundImageService.Extensions.Contains(Path.GetExtension(imagePath), StringComparer.OrdinalIgnoreCase);
+                ImageSetService.Extensions.Contains(Path.GetExtension(imagePath), StringComparer.OrdinalIgnoreCase);
         }
 
         private static void ClipPreviewBorderToBounds(Border border)

@@ -229,7 +229,7 @@ namespace GalExcleTools
         private async Task RefreshBackgroundImageCardsAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
             var backgroundFolderPath = GetBackgroundFolderPath(assetLibrary);
-            var imagePaths = BackgroundImageService.GetFilePaths(backgroundFolderPath);
+            var imagePaths = ImageSetService.GetFilePaths(backgroundFolderPath);
 
             BackgroundImagesGridView.Items.Clear();
             BackgroundImagesExpander.Header = $"背景图 [数量：{imagePaths.Count}]";

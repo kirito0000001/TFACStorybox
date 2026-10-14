@@ -511,7 +511,7 @@ namespace GalExcleTools
                 return [];
             }
 
-            return BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary))
+            return ImageSetService.GetFilePaths(GetBackgroundFolderPath(_currentStoryAssetLibrary))
                 .Select((path, index) => new StoryAssetChoice(index, Path.GetFileNameWithoutExtension(path), path))
                 .ToList();
         }

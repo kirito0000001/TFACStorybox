@@ -465,7 +465,7 @@ namespace GalExcleTools
                 return;
             }
 
-            var orderedPaths = BackgroundImageService.GetFilePaths(GetBackgroundFolderPath(_currentAssetLibrary));
+            var orderedPaths = ImageSetService.GetFilePaths(GetBackgroundFolderPath(_currentAssetLibrary));
             var currentIndex = orderedPaths.FindIndex(path => PathsEqual(path, _viewingBackgroundImagePath));
             if (currentIndex < 0)
             {

@@ -59,7 +59,7 @@ namespace GalExcleTools
         private readonly ProjectRootMigrationService _projectRootMigrationService = new();
         private readonly AudioAssetService _audioAssetService = new();
         private readonly UpdateService _updateService = new();
-        private readonly BackgroundImageService _backgroundImageService = new();
+        private readonly ImageSetService _imageSetService = new();
         private readonly CharacterLayerAssetService _characterLayerAssetService = new();
         private readonly CharacterFilterService _characterFilterService = new();
         private readonly CharacterWorkspaceService _characterWorkspaceService;

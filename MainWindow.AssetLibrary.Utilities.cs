@@ -55,7 +55,7 @@ namespace GalExcleTools
 
         private async Task NormalizeBackgroundImagesAsync(string backgroundFolderPath, IReadOnlyList<string>? orderedPaths = null)
         {
-            var convertedCount = await _backgroundImageService.NormalizeFilesAsync(
+            var convertedCount = await _imageSetService.NormalizeFilesAsync(
                 backgroundFolderPath,
                 ConvertImageToPngAsync,
                 orderedPaths);

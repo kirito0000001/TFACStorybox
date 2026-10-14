@@ -767,7 +767,7 @@ namespace GalExcleTools
         {
             if (string.IsNullOrWhiteSpace(imagePath) ||
                 !File.Exists(imagePath) ||
-                !BackgroundImageService.Extensions.Contains(Path.GetExtension(imagePath), StringComparer.OrdinalIgnoreCase))
+                !ImageSetService.Extensions.Contains(Path.GetExtension(imagePath), StringComparer.OrdinalIgnoreCase))
             {
                 image.Source = null;
                 image.Visibility = Visibility.Collapsed;

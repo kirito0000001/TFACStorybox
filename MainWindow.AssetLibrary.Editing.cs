@@ -49,7 +49,7 @@ namespace GalExcleTools
                 return null;
             }
 
-            var parsed = BackgroundImageService.ParseFileName(imagePath);
+            var parsed = ImageSetService.ParseFileName(imagePath);
             var remarkInput = await _dialogService.PromptTextAsync(new TextInputDialogRequest(
                 "设置背景图备注",
                 "备注",
@@ -65,7 +65,7 @@ namespace GalExcleTools
             _isNormalizingBackgroundImages = true;
             try
             {
-                updatedPath = _backgroundImageService.UpdateRemark(folderPath, imagePath, remarkInput);
+                updatedPath = _imageSetService.UpdateRemark(folderPath, imagePath, remarkInput);
             }
             finally
             {
@@ -104,7 +104,7 @@ namespace GalExcleTools
             _isNormalizingBackgroundImages = true;
             try
             {
-                _backgroundImageService.DeleteAndNormalize(GetBackgroundFolderPath(_currentAssetLibrary), imagePath);
+                _imageSetService.DeleteAndNormalize(GetBackgroundFolderPath(_currentAssetLibrary), imagePath);
             }
             finally
             {
@@ -131,13 +131,13 @@ namespace GalExcleTools
 
             try
             {
-                var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+                var sourcePath = await PickReplacementFileAsync(ImageSetService.Extensions, PickerLocationId.PicturesLibrary);
                 if (sourcePath is null)
                 {
                     return false;
                 }
 
-                if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+                if (!ImageSetService.IsValidSourcePath(sourcePath))
                 {
                     ShowFloatingTip(
                         InfoBarSeverity.Warning,
@@ -568,13 +568,13 @@ namespace GalExcleTools
             var displayName = GetCharacterLayerDisplayName(layerKind);
             try
             {
-                var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+                var sourcePath = await PickReplacementFileAsync(ImageSetService.Extensions, PickerLocationId.PicturesLibrary);
                 if (sourcePath is null)
                 {
                     return false;
                 }
 
-                if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+                if (!ImageSetService.IsValidSourcePath(sourcePath))
                 {
                     ShowFloatingTip(
                         InfoBarSeverity.Warning,
@@ -633,13 +633,13 @@ namespace GalExcleTools
                 return;
             }
 
-            var sourcePath = await PickReplacementFileAsync(BackgroundImageService.Extensions, PickerLocationId.PicturesLibrary);
+            var sourcePath = await PickReplacementFileAsync(ImageSetService.Extensions, PickerLocationId.PicturesLibrary);
             if (sourcePath is null)
             {
                 return;
             }
 
-            if (!BackgroundImageService.IsValidSourcePath(sourcePath))
+            if (!ImageSetService.IsValidSourcePath(sourcePath))
             {
                 ShowFloatingTip(
                     InfoBarSeverity.Warning,
