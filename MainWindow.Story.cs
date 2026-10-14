@@ -92,6 +92,9 @@ namespace GalExcleTools
                 : $"素材库：{_currentStoryAssetLibrary.Name}";
 
             LoadStoryDocument(chapter);
+            // 换了章节 → 前缀状态表整张作废（行数多半不同，但同章重新载入时行数可能一样，
+            // 所以这里显式清一次，不靠"长度对不上"那条兜底）。
+            InvalidateStoryPersistentStateCache();
             var storyDataMigrated = NormalizeStoryCharacterCodes();
             storyDataMigrated |= SynchronizeStorySectionState();
             storyDataMigrated |= NormalizeStoryChoiceFunctionPrefixes(out var migratedChoiceNotes);

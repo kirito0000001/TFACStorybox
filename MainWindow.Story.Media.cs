@@ -278,21 +278,54 @@ namespace GalExcleTools
             _storyEditorViewModel.SetCurrentFunctionItems(functionNames);
         }
 
-        private void RebuildStoryPersistentFunctionState(int rowIndex)
+        /// <summary>
+        /// 「到第 i 句为止」的两个持久状态，按行存一份。
+        ///
+        /// 【为什么要有这张表】
+        /// 原来每换一句都从第 0 句重扫到当前句（`HasPreviousBgmStopWithoutStart` +
+        /// `GetStoryBackgroundTransitionMode` 各扫一遍，第二遍每句还要拆字符串）——
+        /// 那是 **O(n) 且同步跑在 UI 线程上**。连点 k 次就是 O(k²)：
+        /// 第 120 句时点一次要 240 次迭代 + 120 次字符串拆分，
+        /// 越点越卡，卡到界面不响应（用户报的「快速切会卡很久」就是这个）。
+        ///
+        /// 这两个值都是"从第 0 句累加到当前句"的性质，所以整表算**一次**就够，
+        /// 之后每次换句只是查一下数组 —— O(1)。
+        ///
+        /// 【什么时候失效】
+        /// 只在**用户改动**时失效，换句不失效：
+        /// - 行数变了（插入 / 删除 / 换章）→ 长度对不上，自动重建；
+        /// - 编辑了某一句 → SaveCurrentStoryRow 里显式清掉；
+        /// - 载入新章节 → LoadStoryDocument 里显式清掉。
+        /// 换句路径上一次都不清，所以连点几百次也只建过一次表。
+        /// </summary>
+        private bool[]? _storyBgmSuppressionByRow;
+
+        private int[]? _storyTransitionModeByRow;
+
+        /// <summary>文档/行被改动时调用 —— 下一次需要时会整表重建。</summary>
+        private void InvalidateStoryPersistentStateCache()
         {
-            _storyBgmPlaybackSuppressed = HasPreviousBgmStopWithoutStart(rowIndex);
-            _storyBackgroundTransitionMode = GetStoryBackgroundTransitionMode(rowIndex);
-            if (_storyBgmPlaybackSuppressed)
-            {
-                PauseStoryBgm();
-            }
+            _storyBgmSuppressionByRow = null;
+            _storyTransitionModeByRow = null;
         }
 
-        private bool HasPreviousBgmStopWithoutStart(int rowIndex)
+        /// <summary>确保前缀状态表是新的（按需整表重建，O(n) 只发生一次）。</summary>
+        private void EnsureStoryPersistentStateCache()
         {
-            var suppressed = false;
-            for (var i = 0; i <= rowIndex && i < _storyRows.Count; i++)
+            if (_storyBgmSuppressionByRow is not null &&
+                _storyTransitionModeByRow is not null &&
+                _storyBgmSuppressionByRow.Length == _storyRows.Count)
             {
+                return;
+            }
+
+            var suppression = new bool[_storyRows.Count];
+            var transitionMode = new int[_storyRows.Count];
+            var suppressed = false;
+            var mode = 0;
+            for (var i = 0; i < _storyRows.Count; i++)
+            {
+                // 一次遍历同时算两个状态 —— 原来那两遍扫描本来也是同一份数据。
                 var functionValue = _storyRows[i].Get("Custom");
                 if (StoryFunctionService.ContainsExactFunction(functionValue, "BGM_Stop"))
                 {
@@ -302,26 +335,40 @@ namespace GalExcleTools
                 {
                     suppressed = false;
                 }
-            }
 
-            return suppressed;
-        }
-
-        private int GetStoryBackgroundTransitionMode(int rowIndex)
-        {
-            var mode = 0;
-            for (var i = 0; i <= rowIndex && i < _storyRows.Count; i++)
-            {
-                foreach (var functionValue in StoryFunctionService.SplitFunctionValues(_storyRows[i].Get("Custom")))
+                foreach (var item in StoryFunctionService.SplitFunctionValues(functionValue))
                 {
-                    if (StoryFunctionService.TryParseBackgroundTransitionMode(functionValue, out var parsedMode))
+                    if (StoryFunctionService.TryParseBackgroundTransitionMode(item, out var parsedMode))
                     {
                         mode = parsedMode;
                     }
                 }
+
+                suppression[i] = suppressed;
+                transitionMode[i] = mode;
             }
 
-            return mode;
+            _storyBgmSuppressionByRow = suppression;
+            _storyTransitionModeByRow = transitionMode;
+        }
+
+        private void RebuildStoryPersistentFunctionState(int rowIndex)
+        {
+            EnsureStoryPersistentStateCache();
+            if (_storyRows.Count == 0)
+            {
+                _storyBgmPlaybackSuppressed = false;
+                _storyBackgroundTransitionMode = 0;
+                return;
+            }
+
+            var index = Math.Clamp(rowIndex, 0, _storyRows.Count - 1);
+            _storyBgmPlaybackSuppressed = _storyBgmSuppressionByRow![index];
+            _storyBackgroundTransitionMode = _storyTransitionModeByRow![index];
+            if (_storyBgmPlaybackSuppressed)
+            {
+                PauseStoryBgm();
+            }
         }
 
         private async Task PlayCurrentStoryBgmAsync()

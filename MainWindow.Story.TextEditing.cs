@@ -54,6 +54,10 @@ public sealed partial class MainWindow
         changed |= NormalizeStoryDetachedCharacterLayers(row);
         if (changed)
         {
+            // 改动了某一句 → "到每句为止的前缀状态"表作废（下一次需要时整表重建）。
+            // 这个函数是**所有编辑**的落点，而换句不经过它 ——
+            // 所以缓存只在"真的改了东西"时失效，连点几百次换句也只建过一次表。
+            InvalidateStoryPersistentStateCache();
             QueueCurrentStoryDocumentSave();
             SaveCurrentChapterProgress();
             _ = RefreshStoryPreviewAsync();
