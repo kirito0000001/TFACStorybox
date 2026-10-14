@@ -33,6 +33,22 @@ public sealed partial class MainWindow
     private bool _isStoryTodoLoaded;
 
     /// <summary>
+    /// 文本框里那份文字**属于哪一句** —— 载入时记下来，写回去只认它。
+    ///
+    /// 为什么不看 _currentStoryRowIndex：那个值在"存"和"载"之间会变。
+    /// 具体地说，LoadStoryRowIntoUi 跑的时候 _currentStoryRowIndex 已经是**新行**了，
+    /// 而文本框里还是**旧行**的内容 —— 这时候按"当前行"写，就把旧行的字写到新行上了。
+    ///
+    /// 配合"只在存的时候读（见 TextChanged 那段注释）"，两者一起才对：
+    ///   - 只在存的时候读 → 读到的不是过期的 VM 值；
+    ///   - 只认载入时记下的行 → 落点不受 _currentStoryRowIndex 影响。
+    /// 单用哪一条都不够 —— 2026-10-13 两种单用各翻过一次车。
+    /// </summary>
+    private string _storyTodoEditingChapterCode = string.Empty;
+
+    private int _storyTodoEditingRowNumber;
+
+    /// <summary>
     /// 把**当前行**的备注刷进界面。
     ///
     /// 这个函数由 <c>LoadStoryRowIntoUi</c> 调用 —— 就是那个"把当前行刷进界面"的中心入口，
@@ -60,7 +76,10 @@ public sealed partial class MainWindow
             return;
         }
 
-        SaveStoryTodosIfDirty();
+        // 注意：这里**不存**。存的那一步在 SaveCurrentStoryRow 开头 ——
+        // 这个函数跑的时候 _currentStoryRowIndex 往往已经换成新行了，
+        // 在这儿存会把旧行的文字写到新行上（TextEditing 里那套顺序是"先存旧行、
+        // 再执行换行、最后载入"，照着那个来才安全）。
         RefreshStoryTodoPanel();
     }
 
@@ -104,6 +123,10 @@ public sealed partial class MainWindow
         _storyEditorViewModel.IsLoadingTodo = true;
         try
         {
+            // 先记下"这份文字属于哪一句"，再改 TodoText —— 顺序不能反。
+            _storyTodoEditingChapterCode = _currentStoryChapter?.Code ?? string.Empty;
+            _storyTodoEditingRowNumber = _storyRows.Count == 0 ? 0 : _currentStoryRowIndex + 1;
+
             var note = FindStoryTodoForCurrentRow();
             _storyEditorViewModel.TodoText = note?.Text ?? string.Empty;
 
@@ -187,6 +210,9 @@ public sealed partial class MainWindow
         }
 
         _isStoryTodoDirty = false;
+        // **在存之前才把文本框的内容收进数据** —— 不是控件事件里读，见 TextChanged 那段注释。
+        // 走到这儿时绑定早已把最新文本推给 TodoText，读到的才是用户真正打的字。
+        ApplyStoryTodoTextToCurrentRow();
         MergeStoryTodoDoneStateFromRows();
         // **存的是 _storyTodoNotes 本身**，不是列表行的拷贝 —— 见上面那段注释。
         StoryTodoStore.Save(_currentProject?.Path, _storyTodoNotes);
@@ -206,30 +232,37 @@ public sealed partial class MainWindow
     }
 
     /// <summary>
-    /// 把文本框里的内容落到**当前句**那条备注上（没有就新建）。
+    /// 把文本框里的内容落到**它属于的那一句**上（没有就新建）。
     ///
-    /// 写成"当前句"是刻意的 —— 和剧情文本（SaveCurrentStoryRow 用 StoryText）**同一个模式**：
+    /// 两个要点，缺一不可（2026-10-13 各翻过一次车，都是只做对一半）：
     ///
-    ///   导航时先把这个"待存的"落到**旧行**（NavigateToStoryRow 开头就调 SaveStoryTodosIfDirty），
-    ///   然后把 VM 属性替换成**新行**的内容。
-    ///   于是就算 TextChanged 迟到（WinUI 推值 → TextBox 抛事件，晚于本次导航），
-    ///   它读到的 TodoText 已经是新行自己的值，写回去等于空操作 —— 自然就安全了。
+    /// 1. **只在"存"的时候调用**（SaveStoryTodosIfDirty 开头），不在控件的 TextChanged 里调。
+    ///    因为 TextChanged 比 TwoWay 绑定推值**更早**，在那里读 TodoText 拿到的是旧值 ——
+    ///    新打的字永远写不进去。剧情文本就是这么做的：TextChanged 只标脏 + 启动计时器，
+    ///    350 毫秒后才在 SaveCurrentStoryRow 里读 StoryText。
     ///
-    /// ⚠️ 不要改成"记住文本框属于哪一句"：那样迟到的那次会把**新行的文字写到旧行上**，
-    /// 比不做还糟。2026-10-13 试过一版，就是这个下场。**跟着剧情文本走就对了。**
+    /// 2. **落点只认"载入时记下的那一句"**，不看 <c>_currentStoryRowIndex</c>。
+    ///    因为 LoadStoryRowIntoUi 跑的时候下标**已经是新行**了，而文本框里还是旧行的内容 ——
+    ///    这时候按"当前行"写，就把旧行的字写到新行上去了。
+    ///
+    /// 单做第 1 条：落点会跟着下标漂（换行时写错地方）。
+    /// 单做第 2 条：读到的还是过期值（新打的字进不去）。
+    /// 两条一起才等价于剧情文本那套"VM 属性 ↔ 当前行"的稳定配对。
     /// </summary>
     private void ApplyStoryTodoTextToCurrentRow()
     {
-        if (_currentStoryChapter is null || _storyRows.Count == 0)
+        if (_storyRows.Count == 0 || string.IsNullOrEmpty(_storyTodoEditingChapterCode) ||
+            _storyTodoEditingRowNumber <= 0)
         {
             return;
         }
 
         var text = _storyEditorViewModel?.TodoText ?? string.Empty;
-        var rowNumber = _currentStoryRowIndex + 1;
+        var rowNumber = _storyTodoEditingRowNumber;
+        var chapterCode = _storyTodoEditingChapterCode;
         var index = _storyTodoNotes.FindIndex(note =>
             note.RowNumber == rowNumber &&
-            string.Equals(note.ChapterCode, _currentStoryChapter.Code, StringComparison.OrdinalIgnoreCase));
+            string.Equals(note.ChapterCode, chapterCode, StringComparison.OrdinalIgnoreCase));
 
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -243,7 +276,9 @@ public sealed partial class MainWindow
             return;
         }
 
-        var section = _storyEditorViewModel?.GetCurrentSection() ?? 0;
+        // 小节按**那条备注自己的行号**算，不用 GetCurrentSection() ——
+        // 存的时候当前行可能已经换过去了，用当前行的小节会记错。
+        var section = _storyEditorViewModel?.GetSectionAtRowIndex(rowNumber - 1) ?? 0;
         if (index >= 0)
         {
             var existing = _storyTodoNotes[index];
@@ -262,7 +297,7 @@ public sealed partial class MainWindow
         else
         {
             _storyTodoNotes.Add(new StoryTodoNote(
-                _currentStoryChapter.Code,
+                chapterCode,
                 rowNumber,
                 section,
                 text,
@@ -277,27 +312,29 @@ public sealed partial class MainWindow
 
     private void StoryTodoTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        // 载入某句的备注时也会触发这里 —— 那种"变化"不是用户编辑，别写回去。
+        // ⚠️ **这里只标脏 + 启动计时器，绝不在这里读文本、绝不在这里写数据。**
+        //
+        // 原因（2026-10-13 用户第三次报同一个问题时查出来的）：
+        // TextChanged 是**控件自己的事件**，它比 TwoWay 绑定把新值推给 VM **更早**。
+        // 在这里读 _storyEditorViewModel.TodoText 拿到的是**上一次的旧值** ——
+        // 于是新打的字从来没被写进数据，表现就是"写完切句子就丢了"。
+        // 而且它连"正在保存"都不会亮：旧值等于原值，保存时逐字段比对没发现变化。
+        //
+        // 剧情文本就是这么做的：TextChanged 里只 ScheduleStoryRowSave，
+        // 等 350 毫秒后在 SaveCurrentStoryRow 里才读 _storyEditorViewModel.StoryText ——
+        // **那时候绑定早就推完了**。备注现在照搬这一套：
+        // 真正的写入放在 SaveStoryTodosIfDirty 开头（那里读 TodoText）。
         if (_storyEditorViewModel?.IsLoadingTodo == true)
         {
+            // 载入某句的备注时也会触发这里 —— 那种"变化"不是用户编辑，别标脏。
             return;
         }
 
-        ApplyStoryTodoTextToCurrentRow();
         _isStoryTodoDirty = true;
         _storyEditorViewModel!.TodoStatusText = "本句有备注 · 待保存";
 
-        // ⚠️ 直接调**剧情行那一个** ScheduleStoryRowSave —— 不再另立一套。
-        //
-        // 备注和剧情文本本质上是同一种东西：都是"改了文本 → 等一拍 → 存一次"。
-        // 我前面非要把它们分成两个入口（ScheduleStoryTodoSave），结果是：
-        //   - 守卫条件要抄一遍（抄漏一处就是一个只在某种情况下才复现的 bug）；
-        //   - 两个入口迟早会在"谁先谁后"上走岔。
-        // 合成一个就没有这些问题 —— 用户的原话：「这两个本质是触发同一种保存，
-        // 不用做什么触发时机区分」。
-        //
-        // 代价只是剧情行会被标一次脏，而 SaveCurrentStoryRow 里是**逐字段比对**的，
-        // 内容没变就不会真去写 CSV —— 那点开销可以忽略。
+        // 和剧情文本共用同一个入口 —— 用户的原话：
+        // 「这两个本质是触发同一种保存，不用做什么触发时机区分」。
         ScheduleStoryRowSave();
     }
 
