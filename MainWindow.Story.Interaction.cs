@@ -42,7 +42,7 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private void StorySidePanel_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+        private void StorySidePanel_PointerMoved(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
         {
         }
 
@@ -72,19 +72,38 @@ namespace GalExcleTools
             _ = RefreshStoryPreviewAsync();
         }
 
-        private void StoryCharacterSlot_PointerEntered(object sender, PointerRoutedEventArgs e)
+        /// <summary>
+        /// 鼠标移到某个立绘位上（含说话人那个，它的 Tag 是 0）。
+        ///
+        /// ⚠️ 挂的是 <c>PointerMoved</c>，**不是** <c>PointerEntered</c>。
+        /// PointerEntered 在"控件因为重新布局跑到光标下面"时**也会触发** ——
+        /// 快速点上一句/下一句时界面整体刷新、鼠标其实没动，它却接连触发，
+        /// 每次都去做 Focus(Programmatic) 抢焦点，焦点落到说话人输入框上，
+        /// 那个下拉就自己弹出来了。这就是「切快了就自动聚焦」那个 bug。
+        ///
+        /// PointerMoved 只在鼠标**真的动了**才触发，切句时鼠标没动就不会触发；
+        /// 而快捷键照样能用 —— 鼠标移到立绘上时这里才设 hover 并聚焦。
+        ///
+        /// 另外加了"只在目标变了才动"的守卫：PointerMoved 触发很频繁，
+        /// 不加守卫的话鼠标在同一个位上滑动也会反复调 Focus()。
+        /// </summary>
+        private void StoryCharacterSlot_PointerMoved(object sender, PointerRoutedEventArgs e)
         {
             if (sender is Border slot)
             {
-                if (slot.Tag is int slotIndex)
+                if (slot.Tag is int slotIndex && _hoveredStoryCharacterSlotIndex != slotIndex)
                 {
                     _hoveredStoryCharacterSlotIndex = slotIndex;
                     StoryEditorPage.Focus(FocusState.Programmatic);
                 }
 
-                slot.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.White);
-                slot.BorderThickness = new Thickness(1);
-                slot.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(42, 255, 255, 255));
+                // 高亮是幂等的，但 PointerMoved 触发频繁 —— 每次都 new 一个 Brush 是白扔对象。
+                if (slot.BorderBrush is null)
+                {
+                    slot.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.White);
+                    slot.BorderThickness = new Thickness(1);
+                    slot.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(42, 255, 255, 255));
+                }
             }
         }
 
@@ -105,7 +124,7 @@ namespace GalExcleTools
             }
         }
 
-        private void StoryAssetShortcut_PointerEntered(object sender, PointerRoutedEventArgs e)
+        private void StoryAssetShortcut_PointerMoved(object sender, PointerRoutedEventArgs e)
         {
             if (sender is FrameworkElement element && element.Tag is string fieldName)
             {

@@ -152,9 +152,9 @@ namespace GalExcleTools
             slot.Tag = slotIndex;
             slot.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             slot.ContextFlyout = CreateStoryCharacterSlotMenu(slotIndex);
-            slot.PointerEntered -= StoryCharacterSlot_PointerEntered;
+            slot.PointerMoved -= StoryCharacterSlot_PointerMoved;
             slot.PointerExited -= StoryCharacterSlot_PointerExited;
-            slot.PointerEntered += StoryCharacterSlot_PointerEntered;
+            slot.PointerMoved += StoryCharacterSlot_PointerMoved;
             slot.PointerExited += StoryCharacterSlot_PointerExited;
             ClipPreviewBorderToBounds(slot);
             var useUnifiedPreview = true;
@@ -227,9 +227,9 @@ namespace GalExcleTools
             cancellationToken.ThrowIfCancellationRequested();
             StorySpeakerPreviewSlot.Tag = 0;
             StorySpeakerPreviewSlot.ContextFlyout = CreateStorySpeakerSlotMenu();
-            StorySpeakerPreviewSlot.PointerEntered -= StoryCharacterSlot_PointerEntered;
+            StorySpeakerPreviewSlot.PointerMoved -= StoryCharacterSlot_PointerMoved;
             StorySpeakerPreviewSlot.PointerExited -= StoryCharacterSlot_PointerExited;
-            StorySpeakerPreviewSlot.PointerEntered += StoryCharacterSlot_PointerEntered;
+            StorySpeakerPreviewSlot.PointerMoved += StoryCharacterSlot_PointerMoved;
             StorySpeakerPreviewSlot.PointerExited += StoryCharacterSlot_PointerExited;
             ClipPreviewBorderToBounds(StorySpeakerPreviewSlot);
 
