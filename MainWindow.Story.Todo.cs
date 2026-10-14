@@ -151,6 +151,17 @@ public sealed partial class MainWindow
         _storyTodoNotes.Clear();
         _storyTodoNotes.AddRange(notes);
         StoryTodoStore.Save(_currentProject?.Path, notes);
+
+        // 存完把状态行刷回真实值 —— 否则它一直停在"待保存"，
+        // 看起来像没存上（那正是用户这次报的现象之一）。
+        if (_storyEditorViewModel is not null)
+        {
+            var pending = notes.Count(item => !item.Done);
+            var hasCurrent = FindStoryTodoForCurrentRow() is not null;
+            _storyEditorViewModel.TodoStatusText = notes.Count == 0
+                ? "还没有任何备注 · 已保存"
+                : $"{(hasCurrent ? "本句有备注" : "本句没有备注")} · 全书待办 {pending} 条 / 共 {notes.Count} 条 · 已保存";
+        }
     }
 
     /// <summary>把文本框里的内容落到"当前句"那条备注上（没有就新建）。</summary>
@@ -222,8 +233,29 @@ public sealed partial class MainWindow
         ApplyStoryTodoTextToCurrentRow();
         _isStoryTodoDirty = true;
         _storyEditorViewModel!.TodoStatusText = "本句有备注 · 待保存";
-        // 存盘走编辑器本来那套 debounce（StoryEditSaveTimer_Tick 里顺带存备注），
-        // 所以这里只标脏，不自己起计时器 —— 两套计时器迟早会打架。
+        ScheduleStoryTodoSave();
+    }
+
+    /// <summary>
+    /// 备注的自动保存：和剧情行**共用同一个** debounce 计时器，但要由备注自己踢起来。
+    ///
+    /// ⚠️ 这一句是 2026-10-13 补上的，补之前备注**一个字都存不了**：
+    /// 我原来只标了脏、指望"编辑器那套 debounce 会顺手把它存了" —— 想错了。
+    /// 那个计时器只在**剧情行**编辑时启动（ScheduleStoryRowSave），
+    /// 只往备注框里打字的话它根本没跑过，于是永远走不到保存那一步。
+    ///
+    /// 共用计时器本身是对的（两套计时器迟早打架：一个刚写完另一个又读旧值），
+    /// 但"共用"不等于"会被顺带触发" —— 谁改的东西，谁负责把计时器踢起来。
+    /// </summary>
+    private void ScheduleStoryTodoSave()
+    {
+        if (_isLoadingStoryRow || _isStoryDebugModeEnabled || _storyEditSaveTimer is null)
+        {
+            return;
+        }
+
+        _storyEditSaveTimer.Stop();
+        _storyEditSaveTimer.Start();
     }
 
     private void StoryTodoJumpButton_Click(object sender, RoutedEventArgs e)

@@ -66,6 +66,8 @@ namespace GalExcleTools
 
             _workbenchReturnPage = WorkbenchReturnPage.StoryEditor;
             SaveCurrentStoryRow();
+            // 换章同理：先把当前句的备注落盘，再切走。
+            SaveStoryTodosIfDirty();
             _storyEditSaveTimer?.Stop();
             await _storySaveCoordinator.FlushAsync();
             _currentStoryChapter = chapter;
@@ -442,6 +444,9 @@ namespace GalExcleTools
 
             targetIndex = Math.Clamp(targetIndex, 0, _storyRows.Count - 1);
             SaveCurrentStoryRow();
+            // 备注也要跟着存一次：打完备注立刻点别的行时，debounce 那一拍可能还没到 ——
+            // 不在这里存的话那段文字就丢了（"一句话都存不了"的另一种表现）。
+            SaveStoryTodosIfDirty();
             if (targetIndex == _currentStoryRowIndex)
             {
                 UpdateStoryRowIndexInput();
