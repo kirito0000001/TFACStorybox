@@ -33,19 +33,34 @@ public sealed partial class MainWindow
     private bool _isStoryTodoLoaded;
 
     /// <summary>
-    /// 换句时刷新备注面板 —— 但**只在备注已经载入过之后**才刷。
+    /// 把**当前行**的备注刷进界面。
     ///
-    /// 为什么要这道闸门：<c>NavigateToStoryRow</c> 在"打开章节"的过程中也会被调到，
-    /// 而那时候备注还没载入（<c>LoadStoryTodos</c> 在后面）。
-    /// 提前刷一次会把**上一章**的内容当成这一章的 —— 那正是最难查的一种错。
+    /// 这个函数由 <c>LoadStoryRowIntoUi</c> 调用 —— 就是那个"把当前行刷进界面"的中心入口，
+    /// 和 <c>_storyEditorViewModel.StoryText = row.Get("Tesxt")</c> 紧挨着。
+    /// 换句、撤销、重做、换小节都走那一条路，所以放这儿等于**一次覆盖全部**。
+    ///
+    /// 只在该函数里调，不要另外挂到导航之类的旁路上去：
+    /// 挂旁路会漏掉撤销 / 重做，那时候备注面板还停在上一行的内容上，
+    /// 一编辑就写到错的句子上 —— 这类错最难发现。
+    ///
+    /// 载入前会先落一次待存的（SaveStoryTodosIfDirty）：换行时上一句刚打的字
+    /// 可能还没到 debounce 那一拍，不落就丢了。
     /// </summary>
-    private void RefreshStoryTodoForCurrentRowIfLoaded()
+    private void LoadStoryTodoIntoUi()
     {
-        if (!_isStoryTodoLoaded)
+        if (_storyEditorViewModel is null)
         {
             return;
         }
 
+        if (!_isStoryTodoLoaded)
+        {
+            // 备注还没载入（正在打开章节的过程中会走到这儿）—— 先别刷，
+            // 否则会把上一章的备注当成这一章的。LoadStoryTodos 之后会整体刷一次。
+            return;
+        }
+
+        SaveStoryTodosIfDirty();
         RefreshStoryTodoPanel();
     }
 

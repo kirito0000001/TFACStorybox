@@ -321,6 +321,13 @@ namespace GalExcleTools
                 var row = _storyRows[_currentStoryRowIndex];
                 _storyEditorViewModel.SpeakerText = GetStorySpeakerDisplayName(row.Get("TalkChar"));
                 _storyEditorViewModel.StoryText = row.Get("Tesxt");
+                // 备注和剧情文本**同一层**：就在 StoryText 旁边一起刷。
+                //
+                // 为什么要放这儿而不是 NavigateToStoryRow：这个函数才是"把当前行刷进界面"
+                // 的中心入口 —— 换句、撤销、重做、换小节全都走它。放旁路上的话，
+                // 撤销 / 重做之后备注面板还停在上一行的内容上，一编辑就写到错的句子上。
+                // 2026-10-13 用户的原话：「这两个本质是一个东西」——位置也该在一起。
+                LoadStoryTodoIntoUi();
                 UpdateStoryRowIndexInput();
                 var section = GetCurrentStorySection();
                 EnsureStorySectionOptions(section);
@@ -456,9 +463,6 @@ namespace GalExcleTools
             _currentStoryRowIndex = targetIndex;
             SaveCurrentChapterProgress();
             _storyEditorViewModel.RefreshCommandStates();
-            // 换句了就把备注面板刷到新的一句 —— 不刷的话文本框里还留着上一句的内容，
-            // 一编辑就会写到**错误的句子**上，而那种错很难发现。
-            RefreshStoryTodoForCurrentRowIfLoaded();
             if (rebuildPersistentState)
             {
                 RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
