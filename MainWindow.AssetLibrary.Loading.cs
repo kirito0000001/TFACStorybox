@@ -254,15 +254,10 @@ namespace GalExcleTools
         }
 
         /// <summary>
-        /// 道具图片的卡片加载。
+        /// 道具图片的卡片加载 —— 和背景图那段**逐行同构**，只换了文件夹、控件和调用点。
         ///
-        /// ⚠️ **暂时只显示数量，不铺卡片** —— 因为点开卡片要走查看器
-        /// （<c>ShowBackgroundImageViewerPage</c>），而那个查看器是**背景图专用**的：
-        /// 它改备注 / 替换 / 删除时走的都是硬编码 BG 前缀那条路，
-        /// 拿它开道具图片会把文件改成 BG 开头的名字、两个分类就混了。
-        ///
-        /// 要真正能用，得先把查看器那条链前缀参数化，那是下一块的事。
-        /// 在没做之前，宁可只显示数量，也不做一个"能点但会改错名字"的入口。
+        /// 保持同构是刻意的：以后改"卡片怎么分批加载"这类逻辑，两处一起看清爽，
+        /// 也不会出现"背景图修了、道具图片没修"这种分叉。
         /// </summary>
         private async Task RefreshPropImageCardsAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
@@ -271,8 +266,45 @@ namespace GalExcleTools
 
             PropImagesGridView.Items.Clear();
             PropImagesExpander.Header = $"道具图片 [数量：{imagePaths.Count}]";
+            if (forcePopulateCards || PropImagesExpander.IsExpanded)
+            {
+                await AddGridViewItemsInBatchesAsync(
+                    PropImagesGridView,
+                    imagePaths,
+                    CreatePropImageCard,
+                    cancellationToken,
+                    batchSize: 8);
+            }
+
             AppendLog(LogKind.Info, $"已加载道具图片：{imagePaths.Count} 个文件。");
-            await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 一张道具图片的卡片。
+        ///
+        /// 点击 / 右键菜单走的都是**和背景图同一批方法** —— 它们现在按"图片自己所在的目录"
+        /// 找分类，所以对两个分类都成立，不需要各写一份。
+        ///
+        /// ⚠️ 只有查看器的**名字**还叫 ShowBackgroundImageViewerPage，其实它已经是通用的了
+        /// （显示、左右翻、改备注、替换、删除都按文件自己所在目录走）。
+        /// 名字没跟着改是这一版刻意留的：改名会牵动好几处调用点，价值不大、风险不小。
+        /// </summary>
+        private GridViewItem CreatePropImageCard(string imagePath)
+        {
+            return AssetCardFactory.CreateCard(
+                160,
+                190,
+                AssetCardContentFactory.CreateImageAssetCardContent(imagePath, 148, 148),
+                imagePath,
+                (_, _) =>
+                {
+                    PlaySelectionSound();
+                    ShowBackgroundImageViewerPage(imagePath);
+                },
+                GridViewItemFactory.CreateMenu(
+                    GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetBackgroundImageRemarkAsync(imagePath)),
+                    GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceBackgroundImageAsync(imagePath)),
+                    GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(imagePath))));
         }
 
         private void RefreshPropImageCards(AssetLibraryInfo assetLibrary)
