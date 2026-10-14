@@ -465,7 +465,9 @@ namespace GalExcleTools
                 return;
             }
 
-            var orderedPaths = ImageSetService.GetFilePaths(GetBackgroundFolderPath(_currentAssetLibrary));
+            // 按**正在看的那张图自己所在的目录**取邻居 —— 这样背景图和道具图片
+            // 各在各的分类里前后翻，不会翻到另一个分类去。
+            var orderedPaths = ImageSetService.GetFilePaths(GetImageSetFolderOf(_viewingBackgroundImagePath));
             var currentIndex = orderedPaths.FindIndex(path => PathsEqual(path, _viewingBackgroundImagePath));
             if (currentIndex < 0)
             {

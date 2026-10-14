@@ -42,6 +42,40 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
+        /// <summary>
+        /// 这张图**自己所在**的分类文件夹。
+        ///
+        /// 图片永远躺在它那个分类的目录里（<c>&lt;素材库&gt;/背景图/</c> 或 <c>&lt;素材库&gt;/道具图片/</c>），
+        /// 所以"所在目录"就是"它的分类文件夹"—— 不用再去问"这是背景图还是道具图片"，
+        /// 也就不会出现"处理道具图片时却去查背景图目录"这种串味。
+        /// </summary>
+        private static string GetImageSetFolderOf(string imagePath) =>
+            Path.GetDirectoryName(imagePath) ?? string.Empty;
+
+        /// <summary>
+        /// 按图片所在的分类，刷新对应的卡片列表。
+        ///
+        /// 为什么不用一个统一的 RefreshImageSetCards：两个分类的 GridView 是两个控件，
+        /// 各自有自己的懒加载状态（没展开就不铺卡片），刷错那个等于白刷。
+        /// </summary>
+        private void RefreshImageSetCardsFor(string imagePath)
+        {
+            if (_currentAssetLibrary is null)
+            {
+                return;
+            }
+
+            var folder = GetImageSetFolderOf(imagePath);
+            if (string.Equals(folder, GetBackgroundFolderPath(_currentAssetLibrary), StringComparison.OrdinalIgnoreCase))
+            {
+                RefreshBackgroundImageCards(_currentAssetLibrary);
+            }
+            else if (string.Equals(folder, GetPropImageFolderPath(_currentAssetLibrary), StringComparison.OrdinalIgnoreCase))
+            {
+                RefreshPropImageCards(_currentAssetLibrary);
+            }
+        }
+
         private async Task<string?> SetBackgroundImageRemarkAsync(string imagePath)
         {
             if (_currentAssetLibrary is null || !File.Exists(imagePath))
@@ -60,7 +94,7 @@ namespace GalExcleTools
                 return null;
             }
 
-            var folderPath = GetBackgroundFolderPath(_currentAssetLibrary);
+            var folderPath = GetImageSetFolderOf(imagePath);
             string? updatedPath;
             _isNormalizingBackgroundImages = true;
             try
@@ -73,7 +107,7 @@ namespace GalExcleTools
             }
 
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshBackgroundImageCards(_currentAssetLibrary);
+            RefreshImageSetCardsFor(imagePath);
             RequestDelayedRefresh();
             ShowFloatingTip(
                 InfoBarSeverity.Success,
@@ -104,7 +138,7 @@ namespace GalExcleTools
             _isNormalizingBackgroundImages = true;
             try
             {
-                _imageSetService.DeleteAndNormalize(GetBackgroundFolderPath(_currentAssetLibrary), imagePath);
+                _imageSetService.DeleteAndNormalize(GetImageSetFolderOf(imagePath), imagePath);
             }
             finally
             {
@@ -112,7 +146,7 @@ namespace GalExcleTools
             }
 
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshBackgroundImageCards(_currentAssetLibrary);
+            RefreshImageSetCardsFor(imagePath);
             RequestDelayedRefresh();
             ShowFloatingTip(
                 InfoBarSeverity.Success,
@@ -158,7 +192,7 @@ namespace GalExcleTools
                 }
 
                 TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-                RefreshBackgroundImageCards(_currentAssetLibrary);
+                RefreshImageSetCardsFor(imagePath);
                 RequestDelayedRefresh();
                 if (_viewingBackgroundImagePath is not null && PathsEqual(_viewingBackgroundImagePath, imagePath))
                 {
