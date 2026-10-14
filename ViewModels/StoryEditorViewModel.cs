@@ -38,6 +38,9 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private bool _hasCurrentTransitionFunction;
     private bool _hasCurrentBranch;
     private string _assetStatusText = string.Empty;
+    private string _todoText = string.Empty;
+    private string _todoStatusText = "本句还没有备注";
+    private bool _isLoadingTodo;
     private string _saveStatusText = "已加载";
     private bool _hasCurrentFunction;
     private bool _hasMultipleCurrentFunctions;
@@ -216,6 +219,41 @@ internal sealed class StoryEditorViewModel : ObservableObject
     {
         get => _rowIndexText;
         set => SetProperty(ref _rowIndexText, value);
+    }
+
+    /// <summary>
+    /// 当前句的 TODO 备注正文（右边那个多行文本框，双向绑定）。
+    ///
+    /// 回车在这里**就是换行**，不做任何拦截 —— 备注经常要写好几行，
+    /// 拿回车当"提交"会让它没法用。存盘交给编辑器本来那套自动保存
+    /// （<c>ScheduleStoryTodoSave</c> 走同一个 debounce 计时器）。
+    /// </summary>
+    public string TodoText
+    {
+        get => _todoText;
+        set => SetProperty(ref _todoText, value);
+    }
+
+    /// <summary>备注区的状态行：本句有没有备注、一共几条待办。</summary>
+    public string TodoStatusText
+    {
+        get => _todoStatusText;
+        set => SetProperty(ref _todoStatusText, value);
+    }
+
+    /// <summary>
+    /// 全部备注（按章节 + 行号稳定排序）。
+    ///
+    /// 为什么用 <see cref="ObservableCollection{T}"/>：增删一条要能立刻反映到界面上，
+    /// 而每次改动都整体重建列表会把滚动位置和勾选状态一起丢掉。
+    /// </summary>
+    public ObservableCollection<StoryTodoRowViewModel> TodoItems { get; } = [];
+
+    /// <summary>载入某一句的备注时把它置起来，免得 TextChanged 又把"载入"当成"用户编辑"。</summary>
+    public bool IsLoadingTodo
+    {
+        get => _isLoadingTodo;
+        set => SetProperty(ref _isLoadingTodo, value);
     }
 
     public string RowTotalText

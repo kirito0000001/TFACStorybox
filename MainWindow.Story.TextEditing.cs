@@ -68,6 +68,9 @@ public sealed partial class MainWindow
     {
         sender.Stop();
         SaveCurrentStoryRow();
+        // 备注走**同一个** debounce 计时器。
+        // 单独给备注起一个的话，两套计时器迟早会打架（一个刚写完另一个又读旧值）。
+        SaveStoryTodosIfDirty();
     }
 
     private void StorySpeakerTextBox_TextChanged(

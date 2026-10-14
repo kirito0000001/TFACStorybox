@@ -99,6 +99,8 @@ namespace GalExcleTools
             }
 
             _currentStoryRowIndex = Math.Clamp(chapter.LastEditedRowIndex, 0, _storyRows.Count - 1);
+            // 打开一章就把备注读回来（一个项目一份文件）。
+            LoadStoryTodos();
             _storyEditorViewModel.RefreshCommandStates();
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
             UpdateStoryCharacterSlotLayout();
@@ -449,6 +451,9 @@ namespace GalExcleTools
             _currentStoryRowIndex = targetIndex;
             SaveCurrentChapterProgress();
             _storyEditorViewModel.RefreshCommandStates();
+            // 换句了就把备注面板刷到新的一句 —— 不刷的话文本框里还留着上一句的内容，
+            // 一编辑就会写到**错误的句子**上，而那种错很难发现。
+            RefreshStoryTodoForCurrentRowIfLoaded();
             if (rebuildPersistentState)
             {
                 RebuildStoryPersistentFunctionState(_currentStoryRowIndex);

@@ -615,6 +615,90 @@
                                                 <Button Content="清空当前行数据" Height="36" HorizontalAlignment="Stretch" Command="{Binding ClearCurrentRowCommand}" />
                                             </StackPanel>
                                         </Expander>
+                                        <!--
+                                            TODO 备注：给当前这一句写个备注，列表里点一下能跳回去。
+
+                                            几个刻意的地方：
+                                            - 文本框 AcceptsReturn=True —— **回车就是换行**，不做提交拦截。
+                                              备注常要写好几行，拿回车当提交会让它没法用。
+                                            - 存盘走编辑器本来那套自动保存（同一个 debounce 计时器），
+                                              所以这里没有「保存」按钮。
+                                            - 列表按章节 + 行号**稳定排序**：勾掉"已处理"只灰显、不重排 ——
+                                              每勾一下整张列表都跳会让人找不到东西。
+                                        -->
+                                        <Expander Header="TODO 备注" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
+                                            <StackPanel Spacing="10">
+                                                <TextBox
+                                                    x:Name="StoryTodoTextBox"
+                                                    AcceptsReturn="True"
+                                                    TextWrapping="Wrap"
+                                                    MinHeight="72"
+                                                    MaxHeight="170"
+                                                    PlaceholderText="给这一句写个备注…（回车换行，自动保存）"
+                                                    Text="{Binding TodoText, Mode=TwoWay}"
+                                                    TextChanged="StoryTodoTextBox_TextChanged" />
+                                                <TextBlock
+                                                    Text="{Binding TodoStatusText}"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    TextWrapping="Wrap" />
+                                                <Grid ColumnSpacing="8">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Button Content="上一条备注" Height="36" HorizontalAlignment="Stretch" Click="StoryTodoPreviousButton_Click" />
+                                                    <Button Grid.Column="1" Content="下一条备注" Height="36" HorizontalAlignment="Stretch" Click="StoryTodoNextButton_Click" />
+                                                </Grid>
+                                                <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto">
+                                                    <ItemsControl ItemsSource="{Binding TodoItems}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border
+                                                                    Margin="0,0,0,6"
+                                                                    Padding="10,8"
+                                                                    CornerRadius="6"
+                                                                    BorderThickness="1"
+                                                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                                                    Opacity="{Binding RowOpacity}">
+                                                                    <StackPanel Spacing="6">
+                                                                        <Grid ColumnSpacing="8">
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="Auto" />
+                                                                                <ColumnDefinition Width="*" />
+                                                                                <ColumnDefinition Width="Auto" />
+                                                                            </Grid.ColumnDefinitions>
+                                                                            <CheckBox
+                                                                                MinWidth="0"
+                                                                                VerticalAlignment="Center"
+                                                                                IsChecked="{Binding Done, Mode=TwoWay}"
+                                                                                ToolTipService.ToolTip="勾掉 = 已处理（只灰显，不重排）" />
+                                                                            <TextBlock
+                                                                                Grid.Column="1"
+                                                                                VerticalAlignment="Center"
+                                                                                FontWeight="SemiBold"
+                                                                                TextWrapping="Wrap"
+                                                                                Text="{Binding HeaderText}" />
+                                                                            <Button
+                                                                                Grid.Column="2"
+                                                                                Content="跳过去"
+                                                                                VerticalAlignment="Center"
+                                                                                Tag="{Binding}"
+                                                                                Click="StoryTodoJumpButton_Click" />
+                                                                        </Grid>
+                                                                        <TextBlock Text="{Binding BodyText}" TextWrapping="Wrap" />
+                                                                        <TextBlock
+                                                                            Text="{Binding SnippetText}"
+                                                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                            TextWrapping="Wrap" />
+                                                                    </StackPanel>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </ScrollViewer>
+                                            </StackPanel>
+                                        </Expander>
                                         <Expander Header="显示设置" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
                                             <StackPanel Spacing="8">
                                                 <Grid Height="40" ColumnSpacing="12">
