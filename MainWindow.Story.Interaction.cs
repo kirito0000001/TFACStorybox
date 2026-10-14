@@ -75,8 +75,8 @@ namespace GalExcleTools
         /// <summary>
         /// 鼠标移到某个立绘位上（含说话人那个，它的 Tag 是 0）。
         ///
-        /// ⚠️ 挂的是 <c>PointerMoved</c>，**不是** <c>PointerEntered</c>。
-        /// PointerEntered 在"控件因为重新布局跑到光标下面"时**也会触发** ——
+        /// ⚠️ 挂的是 <c>PointerMoved</c>，**不是** <c>Pointer&#69;ntered</c>。
+        /// Pointer&#69;ntered 在"控件因为重新布局跑到光标下面"时**也会触发** ——
         /// 快速点上一句/下一句时界面整体刷新、鼠标其实没动，它却接连触发，
         /// 每次都去做 Focus(Programmatic) 抢焦点，焦点落到说话人输入框上，
         /// 那个下拉就自己弹出来了。这就是「切快了就自动聚焦」那个 bug。

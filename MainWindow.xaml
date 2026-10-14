@@ -492,7 +492,7 @@
                                                     <ColumnDefinition Width="*" />
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Text="背景" Style="{StaticResource StoryInspectorLabelStyle}" />
-                                                <TextBlock x:Name="StoryCurrentBackgroundText" Grid.Column="1" Tag="BGindex" Text="{Binding CurrentBackgroundValue, Mode=OneWay}" Style="{StaticResource StoryInspectorValueStyle}" ToolTipService.ToolTip="{Binding CurrentBackgroundText, Mode=OneWay}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                                <TextBlock x:Name="StoryCurrentBackgroundText" Grid.Column="1" Tag="BGindex" Text="{Binding CurrentBackgroundValue, Mode=OneWay}" Style="{StaticResource StoryInspectorValueStyle}" ToolTipService.ToolTip="{Binding CurrentBackgroundText, Mode=OneWay}" PointerMoved="StoryAssetShortcut_PointerMoved" PointerExited="StoryAssetShortcut_PointerExited" />
                                             </Grid>
                                             <Grid MinHeight="28" ColumnSpacing="10">
                                                 <Grid.ColumnDefinitions>
@@ -500,7 +500,7 @@
                                                     <ColumnDefinition Width="*" />
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Text="BGM" Style="{StaticResource StoryInspectorLabelStyle}" />
-                                                <TextBlock x:Name="StoryCurrentBgmText" Grid.Column="1" Tag="BGM" Text="{Binding CurrentBgmValue, Mode=OneWay}" Style="{StaticResource StoryInspectorValueStyle}" ToolTipService.ToolTip="{Binding CurrentBgmText, Mode=OneWay}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                                <TextBlock x:Name="StoryCurrentBgmText" Grid.Column="1" Tag="BGM" Text="{Binding CurrentBgmValue, Mode=OneWay}" Style="{StaticResource StoryInspectorValueStyle}" ToolTipService.ToolTip="{Binding CurrentBgmText, Mode=OneWay}" PointerMoved="StoryAssetShortcut_PointerMoved" PointerExited="StoryAssetShortcut_PointerExited" />
                                             </Grid>
                                             <Grid MinHeight="28" ColumnSpacing="10">
                                                 <Grid.ColumnDefinitions>
@@ -508,7 +508,7 @@
                                                     <ColumnDefinition Width="*" />
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Text="环境音" Style="{StaticResource StoryInspectorLabelStyle}" />
-                                                <TextBlock x:Name="StoryCurrentSceneText" Grid.Column="1" Tag="Scene" Text="{Binding CurrentSceneValue, Mode=OneWay}" Style="{StaticResource StoryInspectorValueStyle}" ToolTipService.ToolTip="{Binding CurrentSceneText, Mode=OneWay}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                                <TextBlock x:Name="StoryCurrentSceneText" Grid.Column="1" Tag="Scene" Text="{Binding CurrentSceneValue, Mode=OneWay}" Style="{StaticResource StoryInspectorValueStyle}" ToolTipService.ToolTip="{Binding CurrentSceneText, Mode=OneWay}" PointerMoved="StoryAssetShortcut_PointerMoved" PointerExited="StoryAssetShortcut_PointerExited" />
                                             </Grid>
                                         </StackPanel>
                                         <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,2" />
@@ -588,9 +588,9 @@
                                         </Expander>
                                         <Expander Header="基础素材" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
                                             <StackPanel Spacing="10">
-                                        <Button Content="更换背景图" Tag="BGindex" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeBackgroundCommand}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
-                                        <Button Content="更换BGM" Tag="BGM" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeBgmCommand}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
-                                        <Button Content="更换环境音" Tag="Scene" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeSceneCommand}" PointerEntered="StoryAssetShortcut_PointerEntered" PointerExited="StoryAssetShortcut_PointerExited" />
+                                        <Button Content="更换背景图" Tag="BGindex" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeBackgroundCommand}" PointerMoved="StoryAssetShortcut_PointerMoved" PointerExited="StoryAssetShortcut_PointerExited" />
+                                        <Button Content="更换BGM" Tag="BGM" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeBgmCommand}" PointerMoved="StoryAssetShortcut_PointerMoved" PointerExited="StoryAssetShortcut_PointerExited" />
+                                        <Button Content="更换环境音" Tag="Scene" Height="36" HorizontalAlignment="Stretch" Command="{Binding ChangeSceneCommand}" PointerMoved="StoryAssetShortcut_PointerMoved" PointerExited="StoryAssetShortcut_PointerExited" />
                                             </StackPanel>
                                         </Expander>
                                         <Expander Header="函数" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
