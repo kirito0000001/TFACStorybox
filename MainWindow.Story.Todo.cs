@@ -49,6 +49,19 @@ public sealed partial class MainWindow
     private int _storyTodoEditingRowNumber;
 
     /// <summary>
+    /// 用户在备注框里**实际打的字** —— 在 TextChanged 里直接从控件抓下来。
+    ///
+    /// ⚠️ 为什么不信 <c>_storyEditorViewModel.TodoText</c>：2026-10-14 实测，
+    /// 文件是**写成功了的**（时间戳会动、JSON 结构也对），但 Notes 是**空的** ——
+    /// 也就是说保存跑到时 TodoText 还是空串，用户打的字根本没被读进来。
+    ///
+    /// 原因是那份 VM 属性会被别处改写：载入某一句时把它设成那一句的备注
+    /// （没有备注就是空串），而"程序设成空串"和"用户真的清空了"在属性上
+    /// **长得一模一样**，从属性上分不出来。**控件里的字才是用户真正打的那个。**
+    /// </summary>
+    private string? _pendingStoryTodoText;
+
+    /// <summary>
     /// 把**当前行**的备注刷进界面。
     ///
     /// 这个函数由 <c>LoadStoryRowIntoUi</c> 调用 —— 就是那个"把当前行刷进界面"的中心入口，
@@ -129,6 +142,9 @@ public sealed partial class MainWindow
 
             var note = FindStoryTodoForCurrentRow();
             _storyEditorViewModel.TodoText = note?.Text ?? string.Empty;
+            // 控件里那份也同步成同一个值 —— 不然后面保存时会拿**上一句**的字去写这一句。
+            // 同步成"这一句该有的内容"之后，迟到的保存写回去等于空操作，天然安全。
+            _pendingStoryTodoText = note?.Text ?? string.Empty;
 
             var pending = _storyTodoNotes.Count(item => !item.Done);
         }
@@ -251,7 +267,10 @@ public sealed partial class MainWindow
             return;
         }
 
-        var text = _storyEditorViewModel?.TodoText ?? string.Empty;
+        // 读**控件里那份**（_pendingStoryTodoText），读不到才退回 VM 属性。
+        // 为什么：VM 属性会被"载入某一句"改写，而"程序设成空串"和"用户真的清空"
+        // 长得一模一样 —— 只看属性分不出来，于是出现过"文件写成功但 Notes 是空的"。
+        var text = _pendingStoryTodoText ?? _storyEditorViewModel?.TodoText ?? string.Empty;
         var rowNumber = _storyTodoEditingRowNumber;
         var chapterCode = _storyTodoEditingChapterCode;
         var index = _storyTodoNotes.FindIndex(note =>
@@ -320,8 +339,15 @@ public sealed partial class MainWindow
         // 真正的写入放在 SaveStoryTodosIfDirty 开头（那里读 TodoText）。
         if (_storyEditorViewModel?.IsLoadingTodo == true)
         {
-            // 载入某句的备注时也会触发这里 —— 那种"变化"不是用户编辑，别标脏。
+            // 载入某句的备注时也会触发这里 —— 那种"变化"不是用户编辑，别抓。
             return;
+        }
+
+        // **从控件本身抓字**，不从 VM 属性读 —— 原因见 _pendingStoryTodoText 的注释：
+        // VM 属性会被"载入某句"改写，而"程序设成空串"和"用户真的清空"长得一样。
+        if (sender is TextBox box)
+        {
+            _pendingStoryTodoText = box.Text;
         }
 
         _isStoryTodoDirty = true;
