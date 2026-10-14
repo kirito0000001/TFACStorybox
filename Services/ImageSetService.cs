@@ -120,7 +120,12 @@ internal sealed class ImageSetService
     public void DeleteAndNormalize(string folderPath, string imagePath)
     {
         File.Delete(imagePath);
-        RenameEntries(GetFilePaths(folderPath).Select(ParseFileName).ToList());
+        // ⚠️ 这里必须写成 lambda，**不能**写 `.Select(ParseFileName)`。
+        // `ParseFileName` 现在带一个可选参数（prefix），而**方法组转委托时不认可选参数** ——
+        // 直接传方法组会得到 CS0411（无法推断 Select 的类型参数）。
+        // 不传 prefix 是有意的：让它按已知前缀自动认，删哪一类都行。
+        // （同一个坑我在 GetAssetIndex 上留过注释提醒，结果还是在这栽了一次。）
+        RenameEntries(GetFilePaths(folderPath).Select(path => ParseFileName(path)).ToList());
     }
 
     public static void RenameEntries(IReadOnlyList<ImageSetEntry> entries)
