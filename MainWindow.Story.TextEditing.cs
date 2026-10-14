@@ -121,6 +121,30 @@ public sealed partial class MainWindow
 
         _storySpeakerNameSuggestions = BuildStorySpeakerNameSuggestions();
         RefreshStorySpeakerNameSuggestions(box);
+        // ⚠️ 这里**刻意不再展开下拉**（原来是无条件 IsSuggestionListOpen = true）。
+        //
+        // 原因：GotFocus 在**程序性聚焦**时也会触发 —— 快速连点「下一句」时，
+        // 只要有东西把焦点挪到这儿，候选列表就自己蹦出来。用户的原话是
+        // 「说话人的那个框还是蹦出来了，**然后导致的卡顿**」——
+        // 那个下拉一弹就是几十个候选行的测量+布局，连点时它本身就是卡顿的来源。
+        //
+        // 展开挪到 PointerPressed（用户真的按在输入框上才展开）。
+        // 和这次修悬停是同一个道理：**要区分"用户操作"和"程序动作"，
+        // 就不能用那种两者都会触发的事件（GotFocus / PointerEntered）**。
+    }
+
+    /// <summary>
+    /// 用户**真的点了**输入框 —— 这时候才展开候选列表。
+    /// 点它照旧弹候选（原来的体验不变），但任何程序性聚焦都不会再弹。
+    /// </summary>
+    private void StorySpeakerTextBox_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not AutoSuggestBox box)
+        {
+            return;
+        }
+
+        // 排到下一拍再展开：点击本身会先把焦点给它，等焦点稳定再开更稳。
         DispatcherQueue.TryEnqueue(() => box.IsSuggestionListOpen = true);
     }
 

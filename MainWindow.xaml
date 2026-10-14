@@ -791,6 +791,7 @@
                                      TextChanged="StorySpeakerTextBox_TextChanged"
                                      SuggestionChosen="StorySpeakerTextBox_SuggestionChosen"
                                      GotFocus="StorySpeakerTextBox_GotFocus"
+                                     PointerPressed="StorySpeakerTextBox_PointerPressed"
                                      LostFocus="StoryTextEditor_LostFocus">
                                     <AutoSuggestBox.QueryIcon>
                                         <SymbolIcon Symbol="Find" />
