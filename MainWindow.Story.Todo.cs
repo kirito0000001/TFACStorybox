@@ -271,29 +271,19 @@ public sealed partial class MainWindow
         ApplyStoryTodoTextToCurrentRow();
         _isStoryTodoDirty = true;
         _storyEditorViewModel!.TodoStatusText = "本句有备注 · 待保存";
-        ScheduleStoryTodoSave();
-    }
 
-    /// <summary>
-    /// 备注的自动保存：和剧情行**共用同一个** debounce 计时器，但要由备注自己踢起来。
-    ///
-    /// ⚠️ 这一句是 2026-10-13 补上的，补之前备注**一个字都存不了**：
-    /// 我原来只标了脏、指望"编辑器那套 debounce 会顺手把它存了" —— 想错了。
-    /// 那个计时器只在**剧情行**编辑时启动（ScheduleStoryRowSave），
-    /// 只往备注框里打字的话它根本没跑过，于是永远走不到保存那一步。
-    ///
-    /// 共用计时器本身是对的（两套计时器迟早打架：一个刚写完另一个又读旧值），
-    /// 但"共用"不等于"会被顺带触发" —— 谁改的东西，谁负责把计时器踢起来。
-    /// </summary>
-    private void ScheduleStoryTodoSave()
-    {
-        if (_isLoadingStoryRow || _isStoryDebugModeEnabled || _storyEditSaveTimer is null)
-        {
-            return;
-        }
-
-        _storyEditSaveTimer.Stop();
-        _storyEditSaveTimer.Start();
+        // ⚠️ 直接调**剧情行那一个** ScheduleStoryRowSave —— 不再另立一套。
+        //
+        // 备注和剧情文本本质上是同一种东西：都是"改了文本 → 等一拍 → 存一次"。
+        // 我前面非要把它们分成两个入口（ScheduleStoryTodoSave），结果是：
+        //   - 守卫条件要抄一遍（抄漏一处就是一个只在某种情况下才复现的 bug）；
+        //   - 两个入口迟早会在"谁先谁后"上走岔。
+        // 合成一个就没有这些问题 —— 用户的原话：「这两个本质是触发同一种保存，
+        // 不用做什么触发时机区分」。
+        //
+        // 代价只是剧情行会被标一次脏，而 SaveCurrentStoryRow 里是**逐字段比对**的，
+        // 内容没变就不会真去写 CSV —— 那点开销可以忽略。
+        ScheduleStoryRowSave();
     }
 
     private void StoryTodoJumpButton_Click(object sender, RoutedEventArgs e)
