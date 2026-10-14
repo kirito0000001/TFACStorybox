@@ -637,10 +637,6 @@
                                                     PlaceholderText="给这一句写个备注…（回车换行，自动保存）"
                                                     Text="{Binding TodoText, Mode=TwoWay}"
                                                     TextChanged="StoryTodoTextBox_TextChanged" />
-                                                <TextBlock
-                                                    Text="{Binding TodoStatusText}"
-                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                    TextWrapping="Wrap" />
                                                 <Grid ColumnSpacing="8">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="*" />

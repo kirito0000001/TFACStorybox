@@ -39,7 +39,6 @@ internal sealed class StoryEditorViewModel : ObservableObject
     private bool _hasCurrentBranch;
     private string _assetStatusText = string.Empty;
     private string _todoText = string.Empty;
-    private string _todoStatusText = "本句还没有备注";
     private bool _isLoadingTodo;
     private string _saveStatusText = "已加载";
     private bool _hasCurrentFunction;
@@ -232,13 +231,6 @@ internal sealed class StoryEditorViewModel : ObservableObject
     {
         get => _todoText;
         set => SetProperty(ref _todoText, value);
-    }
-
-    /// <summary>备注区的状态行：本句有没有备注、一共几条待办。</summary>
-    public string TodoStatusText
-    {
-        get => _todoStatusText;
-        set => SetProperty(ref _todoStatusText, value);
     }
 
     /// <summary>

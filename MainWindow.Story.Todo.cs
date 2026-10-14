@@ -131,11 +131,6 @@ public sealed partial class MainWindow
             _storyEditorViewModel.TodoText = note?.Text ?? string.Empty;
 
             var pending = _storyTodoNotes.Count(item => !item.Done);
-            _storyEditorViewModel.TodoStatusText = _storyTodoNotes.Count == 0
-                ? "还没有任何备注"
-                : note is null
-                    ? $"本句没有备注 · 全书待办 {pending} 条 / 共 {_storyTodoNotes.Count} 条"
-                    : $"本句有备注 · 全书待办 {pending} 条 / 共 {_storyTodoNotes.Count} 条";
         }
         finally
         {
@@ -214,21 +209,20 @@ public sealed partial class MainWindow
         // 走到这儿时绑定早已把最新文本推给 TodoText，读到的才是用户真正打的字。
         ApplyStoryTodoTextToCurrentRow();
         MergeStoryTodoDoneStateFromRows();
-        // **存的是 _storyTodoNotes 本身**，不是列表行的拷贝 —— 见上面那段注释。
+
+        // 用**编辑器本来就有的那个**指示器（右上角「已保存 HH:mm:ss」）。
+        //
+        // ⚠️ 不要另造一个 —— 我 2026-10-13 造过一个（备注面板底下的 TodoStatusText），
+        // 结果它自己写着"已保存"，而实际上一个字都没存进去：**它在撒谎**，
+        // 于是我看不见 bug，用户也看不见。用户的原话：
+        // 「你自己给备注底下新建了一个变化，你把那个去掉，我猜你是以为那个是正确的」。
+        // 一个界面只该有一个"存没存上"的说法，而且必须是同一个来源。
+        _storyEditorViewModel!.SaveStatusText = "等待保存...";
         StoryTodoStore.Save(_currentProject?.Path, _storyTodoNotes);
+        _storyEditorViewModel.SaveStatusText = $"已保存 {DateTime.Now:HH:mm:ss}";
 
         // 存完刷一次列表：刚打的那条要能出现在里面（不刷就得等下次换句才看得到）。
         RefreshStoryTodoList();
-
-        // 状态行也刷回真实值 —— 否则它一直停在"待保存"，看起来像没存上。
-        if (_storyEditorViewModel is not null)
-        {
-            var pending = _storyTodoNotes.Count(item => !item.Done);
-            var hasCurrent = FindStoryTodoForCurrentRow() is not null;
-            _storyEditorViewModel.TodoStatusText = _storyTodoNotes.Count == 0
-                ? "还没有任何备注 · 已保存"
-                : $"{(hasCurrent ? "本句有备注" : "本句没有备注")} · 全书待办 {pending} 条 / 共 {_storyTodoNotes.Count} 条 · 已保存";
-        }
     }
 
     /// <summary>
@@ -331,7 +325,6 @@ public sealed partial class MainWindow
         }
 
         _isStoryTodoDirty = true;
-        _storyEditorViewModel!.TodoStatusText = "本句有备注 · 待保存";
 
         // 和剧情文本共用同一个入口 —— 用户的原话：
         // 「这两个本质是触发同一种保存，不用做什么触发时机区分」。
@@ -365,7 +358,6 @@ public sealed partial class MainWindow
             .ToList();
         if (ordered.Count == 0)
         {
-            _storyEditorViewModel!.TodoStatusText = "本章还没有任何备注";
             return;
         }
 
@@ -400,8 +392,6 @@ public sealed partial class MainWindow
                 .FirstOrDefault(item => string.Equals(item.Code, note.ChapterCode, StringComparison.OrdinalIgnoreCase));
             if (chapter is null)
             {
-                _storyEditorViewModel!.TodoStatusText =
-                    $"找不到章节「{note.ChapterCode}」—— 它可能改名或者被删掉了";
                 return;
             }
 
