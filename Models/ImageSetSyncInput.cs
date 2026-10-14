@@ -1,6 +1,10 @@
 using System.Collections.Generic;
 
-namespace GalExcleTools.Models;
+// ⚠️ 命名空间是 **GalExcleTools**（根），不是 GalExcleTools.Models。
+// 这个仓库的 Models/ 目录下所有模型都在根命名空间（AssetLibraryModels、StorySchema…），
+// 别按"文件夹名=命名空间"的习惯写 —— 写了就得每个用它的文件补 using，
+// 漏一个就是 CS0246（2026-10-14 就是这么栽的：UnrealSyncService 没补 using）。
+namespace GalExcleTools;
 
 /// <summary>
 /// 一个「图集分类」的同步输入：本地素材库文件夹里的图片 → 虚幻里的落点。

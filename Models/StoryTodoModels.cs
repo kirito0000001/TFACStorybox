@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
 
-namespace GalExcleTools.Models;
+// 命名空间是 GalExcleTools（根）—— 仓库里 Models/ 下所有模型都这样，别按"文件夹名=命名空间"写。
+namespace GalExcleTools;
 
 /// <summary>
 /// 一条 TODO 备注。挂在**某一章的某一句**上。
