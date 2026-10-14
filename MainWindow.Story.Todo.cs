@@ -121,10 +121,20 @@ public sealed partial class MainWindow
     }
 
     /// <summary>
-    /// 把"当前句的备注"刷到右栏：文本框、状态行、列表。
+    /// 把"当前句的备注"刷到右栏：文本框 + 归属记录。
     ///
     /// 换句、换章、载入之后都要调一次 —— 否则文本框里还留着上一句的内容，
     /// 一编辑就会把它写到**错误的句子**上。那种错很难发现，所以宁可多刷几次。
+    ///
+    /// ⚠️ **这里刻意不重建备注列表。**
+    /// 换句时变的只有"当前是第几句"，而列表里**根本不显示当前句**（没有高亮），
+    /// 所以重建出来的东西和原来一模一样 —— 纯浪费。而这是**每次换句**都会走的路径：
+    /// 50 条备注就是 300 多个控件重建一遍，连点"下一句"时开销直接乘上点击次数。
+    /// （用户 2026-10-14 报过"快速切会卡很久"，这是第二顺位的原因；
+    ///   第一顺位是前缀状态每次 O(n) 重扫，已在 RebuildStoryPersistentFunctionState 修掉。）
+    ///
+    /// 列表该重建的时机只有两个：打开章节（LoadStoryTodos）、真正存盘后
+    /// （SaveStoryTodosIfDirty —— 刚打的备注要出现在列表里）。那两处各自会调。
     /// </summary>
     private void RefreshStoryTodoPanel()
     {
@@ -145,15 +155,11 @@ public sealed partial class MainWindow
             // 控件里那份也同步成同一个值 —— 不然后面保存时会拿**上一句**的字去写这一句。
             // 同步成"这一句该有的内容"之后，迟到的保存写回去等于空操作，天然安全。
             _pendingStoryTodoText = note?.Text ?? string.Empty;
-
-            var pending = _storyTodoNotes.Count(item => !item.Done);
         }
         finally
         {
             _storyEditorViewModel.IsLoadingTodo = false;
         }
-
-        RefreshStoryTodoList();
     }
 
     /// <summary>重建备注列表。按章节 + 行号稳定排序，勾掉的只灰显、不重排。</summary>
