@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace GalExcleTools.Models;
 
@@ -12,7 +13,7 @@ namespace GalExcleTools.Models;
 /// 【为什么不写进剧情 CSV】
 /// CSV 是要**导出给 Unreal** 的（同步会把它变成数据表）。往里面加一列备注，
 /// 那一列会跟着同步进工程 —— 备注是给工具箱自己看的，不该跑到游戏里。
-/// 所以另存一个旁挂文件（见 <see cref="Services.StoryTodoStore"/>）。
+/// 所以另存一个旁挂文件（见 <c>GalExcleTools.Services.StoryTodoStore</c>）。
 /// </summary>
 /// <param name="ChapterCode">章节代码，例如 <c>WHK-M1</c>。</param>
 /// <param name="RowNumber">第几句，从 1 起（和界面上那个「第 N 句」同一个口径）。</param>

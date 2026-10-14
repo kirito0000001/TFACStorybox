@@ -1,5 +1,4 @@
 using System;
-using CommunityToolkit.Mvvm.ComponentModel;
 using GalExcleTools.Models;
 
 namespace GalExcleTools.ViewModels;
@@ -46,6 +45,8 @@ internal sealed partial class StoryTodoRowViewModel : ObservableObject
             if (SetProperty(ref _done, value))
             {
                 Note = Note with { Done = value, UpdatedAt = DateTimeOffset.Now };
+                // 灰显是算出来的，得跟着一起通知 —— 不通知的话勾了不会变灰。
+                OnPropertyChanged(nameof(RowOpacity));
             }
         }
     }
