@@ -127,14 +127,20 @@ internal sealed class UnrealSyncService
     public List<UnrealSyncImportGroup> BuildImportGroups(
         UnrealSyncContext context,
         IReadOnlyList<CharacterInfo> characters,
-        IReadOnlyCollection<string> backgroundPaths,
+        IReadOnlyList<ImageSetSyncInput> imageSets,
         IReadOnlyCollection<string> musicPaths,
         IReadOnlyCollection<string> ambientPaths,
         IReadOnlyCollection<string> soundEffectPaths,
         IReadOnlyCollection<string> voicePaths)
     {
         var groups = new List<UnrealSyncImportGroup>();
-        AddImportGroup(groups, UnrealSyncPathPolicy.BackgroundFolder, backgroundPaths);
+        // 图集分类逐个建导入组 —— 背景图、道具图片、以及以后任何一个都走这里。
+        // 加分类**不用改这个函数**：多造一个 ImageSetSyncInput 就行。
+        foreach (var imageSet in imageSets)
+        {
+            AddImportGroup(groups, imageSet.DestinationFolder, imageSet.FilePaths);
+        }
+
         AddImportGroup(groups, UnrealSyncPathPolicy.BgmFolder, musicPaths);
         AddImportGroup(groups, UnrealSyncPathPolicy.SceneEffectFolder, ambientPaths.Concat(soundEffectPaths).ToList());
         AddProjectVoiceImportGroups(groups, context, voicePaths);
@@ -1698,7 +1704,7 @@ internal sealed class UnrealSyncService
         UnrealSyncContext context,
         bool forceFullSync,
         IReadOnlyList<CharacterInfo> characters,
-        IReadOnlyCollection<string> backgroundPaths,
+        IReadOnlyList<ImageSetSyncInput> imageSets,
         IReadOnlyCollection<string> musicPaths,
         IReadOnlyCollection<string> ambientPaths,
         IReadOnlyCollection<string> soundEffectPaths,
@@ -1710,10 +1716,18 @@ internal sealed class UnrealSyncService
     {
         var syncState = ReadState(context);
         var requiresVerifiedTableSync = syncState.StateVersion < CurrentUnrealSyncStateVersion;
+
+        // 背景图在这一版里还有两处**只有它才需要**的用处：素材索引表、写 UI_Story 的变量。
+        // 用前缀把它挑出来 —— 以后加图集分类时，这两处一个字都不用动
+        // （前提是不要写"第一个就是背景图"那种假设，所以我没按下标取）。
+        var backgroundPaths = imageSets
+            .FirstOrDefault(set => set.Prefix == ImageSetPrefix.Background)
+            ?.FilePaths ?? [];
+
         var allImportGroups = BuildImportGroups(
                 context,
                 characters,
-                backgroundPaths,
+                imageSets,
                 musicPaths,
                 ambientPaths,
                 soundEffectPaths,
@@ -1737,7 +1751,7 @@ internal sealed class UnrealSyncService
         var deleteGroups = BuildDeleteGroups(
             context,
             characters,
-            backgroundPaths,
+            imageSets,
             musicPaths,
             ambientPaths,
             soundEffectPaths,
@@ -2609,7 +2623,7 @@ internal sealed class UnrealSyncService
     private List<UnrealSyncDeleteGroup> BuildDeleteGroups(
         UnrealSyncContext context,
         IReadOnlyList<CharacterInfo> characters,
-        IReadOnlyCollection<string> backgroundPaths,
+        IReadOnlyList<ImageSetSyncInput> imageSets,
         IReadOnlyCollection<string> musicPaths,
         IReadOnlyCollection<string> ambientPaths,
         IReadOnlyCollection<string> soundEffectPaths,
@@ -2622,7 +2636,17 @@ internal sealed class UnrealSyncService
         // 「上一次同步时工具箱写下去的那些」—— 给和工程共用的目录当白名单用。
         var managedObjectPaths = syncState.SourceHashes.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        AddDeleteGroup(groups, context, UnrealSyncPathPolicy.BackgroundFolder, backgroundPaths.Select(GetExpectedImportedAssetName));
+        // 图集分类：和导入组同一个循环，一一对应。
+        // 它们的落点都是工具箱独占的子目录，所以直接清空"不在期望集合里的"。
+        foreach (var imageSet in imageSets)
+        {
+            AddDeleteGroup(
+                groups,
+                context,
+                imageSet.DestinationFolder,
+                imageSet.FilePaths.Select(GetExpectedImportedAssetName));
+        }
+
         AddDeleteGroup(groups, context, UnrealSyncPathPolicy.BgmFolder, musicPaths.Select(GetExpectedImportedAssetName));
 
         // ⚠️ 场景音效的目录**和工程共用**：`Sound/Scene_Effect` 里除了工具箱导进去的

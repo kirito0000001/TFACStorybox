@@ -259,7 +259,18 @@ namespace GalExcleTools
                 context,
                 forceFullSync,
                 characters,
-                ImageSetService.GetFilePaths(GetBackgroundFolderPath(context.AssetLibrary)),
+                [
+                    // 剧情用图：背景图 + 道具图片。
+                    // 以后再加图集分类，**就在这里加一行** —— 同步那侧的签名和循环都不用动。
+                    new ImageSetSyncInput(
+                        UnrealSyncPathPolicy.BackgroundFolder,
+                        ImageSetPrefix.Background,
+                        ImageSetService.GetFilePaths(GetBackgroundFolderPath(context.AssetLibrary))),
+                    new ImageSetSyncInput(
+                        UnrealSyncPathPolicy.PropImageFolder,
+                        ImageSetPrefix.Prop,
+                        ImageSetService.GetFilePaths(GetPropImageFolderPath(context.AssetLibrary))),
+                ],
                 AudioAssetService.GetFilePaths(GetMusicFolderPath(context.AssetLibrary)),
                 AudioAssetService.GetFilePaths(GetAmbientSoundFolderPath(context.AssetLibrary)),
                 AudioAssetService.GetFilePaths(GetSoundEffectFolderPath(context.AssetLibrary)),
