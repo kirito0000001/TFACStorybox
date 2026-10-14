@@ -644,15 +644,26 @@ namespace GalExcleTools
                 _currentStoryRowIndex,
                 fieldName,
                 selectedChoice.Index);
-            if (!await ConfirmStoryAssetReplacementAsync(
-                    replacementPlan,
-                    displayName,
-                    index => FormatStoryAssetChoiceValue(choices, index)))
+            var replacementChoice = await ConfirmStoryAssetReplacementAsync(
+                replacementPlan,
+                displayName,
+                index => FormatStoryAssetChoiceValue(choices, index));
+            if (replacementChoice is DialogResultKind.None or DialogResultKind.Cancel)
             {
                 return;
             }
 
-            CaptureStoryUndoState($"连续更换{displayName}");
+            if (replacementChoice == DialogResultKind.Secondary)
+            {
+                // 「只换一张」：把范围压成当前这一句 —— 后面那段应用逻辑照旧。
+                replacementPlan = replacementPlan with
+                {
+                    EndIndex = replacementPlan.StartIndex,
+                    Count = 1
+                };
+            }
+
+            CaptureStoryUndoState(replacementPlan.Count > 1 ? $"连续更换{displayName}" : $"更换{displayName}");
             var changedCount = StoryAssetFieldService.ApplyForwardContiguousPlan(
                 _storyRows,
                 replacementPlan);
@@ -669,20 +680,39 @@ namespace GalExcleTools
             }
 
             var endRowNumber = replacementPlan.EndIndex + 1;
+            // 文案跟着实际范围走：选「只换一张」时 Count 已经被压成 1，
+            // 再报"已连续更换"就名不副实了（另外两个调用点本来就是这个口径）。
             ShowStoryStatus(
                 InfoBarSeverity.Success,
-                $"{displayName}已连续更换",
-                $"共修改 {changedCount} 句（第 {_currentStoryRowIndex + 1}-{endRowNumber} 句）。");
+                changedCount > 1 ? $"{displayName}已连续更换" : $"{displayName}已更换",
+                changedCount > 1
+                    ? $"共修改 {changedCount} 句（第 {_currentStoryRowIndex + 1}-{endRowNumber} 句）。"
+                    : $"第 {replacementPlan.StartIndex + 1} 句。");
         }
 
-        private async Task<bool> ConfirmStoryAssetReplacementAsync(
+        /// <summary>
+        /// 连续更换前的确认。**三种结果**，不再是"确认/取消"两种：
+        ///   - <see cref="DialogResultKind.Primary"/>：连续更换（整段）；
+        ///   - <see cref="DialogResultKind.Secondary"/>：只换当前这一句；
+        ///   - <see cref="DialogResultKind.None"/>：关掉了，什么都不做。
+        ///
+        /// ⚠️ 这里有个容易搞错的地方：以前那个「取消」按钮**不是 Secondary**，
+        /// 而是 <c>DialogRequest</c> 的第 4 个参数 <c>CloseButtonText</c>（关闭键）——
+        /// 它和右上角的 X 是同一个东西。所以那时候弹窗上只有两个按钮，
+        /// 也没有"只换一张"这个选项。
+        ///
+        /// 现在关掉键传空串：按项目的规范，弹窗可以**右键关闭、Esc 关闭**，
+        /// 不需要可视的关闭键，而且有撤回兜底。
+        /// </summary>
+        private async Task<DialogResultKind> ConfirmStoryAssetReplacementAsync(
             StoryAssetReplacementPlan replacementPlan,
             string displayName,
             Func<int, string> formatValue)
         {
             if (replacementPlan.Count <= 1)
             {
-                return true;
+                // 范围内本来就只有一句，"只换一张"和"连续更换"是同一件事，不必问。
+                return DialogResultKind.Primary;
             }
 
             var stopText = replacementPlan.StopReason switch
@@ -694,21 +724,24 @@ namespace GalExcleTools
                 StoryAssetReplacementStopReason.EndOfChapter => "连续范围一直到本章最后一句。",
                 _ => string.Empty
             };
-            return await _dialogService.ConfirmAsync(new DialogRequest(
+            var result = await _dialogService.ShowAsync(new DialogRequest(
                 $"连续更换{displayName}",
-                $"将第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句，共 {replacementPlan.Count} 句，从“{formatValue(replacementPlan.OriginalIndex)}”改为“{formatValue(replacementPlan.ReplacementIndex)}”。\n{stopText}",
+                $"将第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句，共 {replacementPlan.Count} 句，从“{formatValue(replacementPlan.OriginalIndex)}”改为“{formatValue(replacementPlan.ReplacementIndex)}”。\n{stopText}\n\n也可以只换当前这一句（第 {replacementPlan.StartIndex + 1} 句）。",
                 "连续更换",
-                "取消"));
+                CloseButtonText: string.Empty,
+                SecondaryButtonText: "只换一张"));
+            // 右键 / Esc 关掉时是 None —— 什么都不做，和以前"取消"一个意思。
+            return result;
         }
 
-        private async Task<bool> ConfirmStoryValueReplacementAsync(
+        private async Task<DialogResultKind> ConfirmStoryValueReplacementAsync(
             StoryValueReplacementPlan replacementPlan,
             string displayName,
             Func<string, string> formatValue)
         {
             if (replacementPlan.Count <= 1)
             {
-                return true;
+                return DialogResultKind.Primary;
             }
 
             var stopText = replacementPlan.StopReason switch
@@ -718,11 +751,13 @@ namespace GalExcleTools
                 StoryAssetReplacementStopReason.EndOfChapter => "连续范围一直到本章最后一句。",
                 _ => string.Empty
             };
-            return await _dialogService.ConfirmAsync(new DialogRequest(
+            var result = await _dialogService.ShowAsync(new DialogRequest(
                 $"连续更换{displayName}",
-                $"将第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句，共 {replacementPlan.Count} 句，从“{formatValue(replacementPlan.OriginalValue)}”改为“{formatValue(replacementPlan.ReplacementValue)}”。\n{stopText}",
+                $"将第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句，共 {replacementPlan.Count} 句，从“{formatValue(replacementPlan.OriginalValue)}”改为“{formatValue(replacementPlan.ReplacementValue)}”。\n{stopText}\n\n也可以只换当前这一句（第 {replacementPlan.StartIndex + 1} 句）。",
                 "连续更换",
-                "取消"));
+                CloseButtonText: string.Empty,
+                SecondaryButtonText: "只换一张"));
+            return result;
         }
 
         private static string FormatStoryAssetChoiceValue(

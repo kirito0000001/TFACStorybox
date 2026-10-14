@@ -215,12 +215,25 @@ namespace GalExcleTools
                 return;
             }
 
-            if (!await ConfirmStoryValueReplacementAsync(
-                    replacementPlan,
-                    displayName,
-                    value => FormatStoryCharacterValue(characters, value)))
+            var replacementChoice = await ConfirmStoryValueReplacementAsync(
+                replacementPlan,
+                displayName,
+                value => FormatStoryCharacterValue(characters, value));
+            if (replacementChoice is DialogResultKind.None or DialogResultKind.Cancel)
             {
+                // 关掉了（右键 / Esc）—— 什么都不做，和以前"取消"一个意思。
                 return;
+            }
+
+            if (replacementChoice == DialogResultKind.Secondary)
+            {
+                // 「只换一张」：把范围压成**当前这一句**。
+                // 压完后面那段应用逻辑一行都不用改 —— 它本来就是按 Start..End 走的。
+                replacementPlan = replacementPlan with
+                {
+                    EndIndex = replacementPlan.StartIndex,
+                    Count = 1
+                };
             }
 
             CaptureStoryUndoState(replacementPlan.Count > 1 ? $"连续更换{displayName}" : $"更换{displayName}");
@@ -255,9 +268,20 @@ namespace GalExcleTools
                 replacementIndex,
                 characterField);
             var displayName = $"{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}{layerSpec.DisplayName}";
-            if (!await ConfirmStoryAssetReplacementAsync(replacementPlan, displayName, formatValue))
+            var replacementChoice = await ConfirmStoryAssetReplacementAsync(replacementPlan, displayName, formatValue);
+            if (replacementChoice is DialogResultKind.None or DialogResultKind.Cancel)
             {
                 return;
+            }
+
+            if (replacementChoice == DialogResultKind.Secondary)
+            {
+                // 「只换一张」：同上，把范围压成当前这一句。
+                replacementPlan = replacementPlan with
+                {
+                    EndIndex = replacementPlan.StartIndex,
+                    Count = 1
+                };
             }
 
             CaptureStoryUndoState(replacementPlan.Count > 1 ? $"连续更换{displayName}" : $"更换{displayName}");
