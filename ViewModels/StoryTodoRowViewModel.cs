@@ -35,13 +35,6 @@ internal sealed partial class StoryTodoRowViewModel : ObservableObject
     /// <summary>列表标题：第几句、在哪一章、第几小节。</summary>
     public string HeaderText => Note.HeaderText;
 
-    /// <summary>
-    /// 写备注时那句的开头。行号因为插句 / 删句漂了之后，
-    /// 靠这段文字还能认出"原来说的是哪句"。
-    /// </summary>
-    public string SnippetText =>
-        string.IsNullOrWhiteSpace(Note.Snippet) ? string.Empty : $"「{Note.Snippet}」";
-
     /// <summary>备注正文。列表上显示的这个是**只读**的 —— 改内容在右边那个文本框里改。</summary>
     public string BodyText => Note.Text;
 

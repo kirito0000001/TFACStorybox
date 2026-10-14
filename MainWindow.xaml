@@ -687,10 +687,6 @@
                                                                                 Click="StoryTodoJumpButton_Click" />
                                                                         </Grid>
                                                                         <TextBlock Text="{Binding BodyText}" TextWrapping="Wrap" />
-                                                                        <TextBlock
-                                                                            Text="{Binding SnippetText}"
-                                                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                                            TextWrapping="Wrap" />
                                                                     </StackPanel>
                                                                 </Border>
                                                             </DataTemplate>

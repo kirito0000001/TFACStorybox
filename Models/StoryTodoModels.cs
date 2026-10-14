@@ -16,21 +16,20 @@ namespace GalExcleTools.Models;
 /// </summary>
 /// <param name="ChapterCode">章节代码，例如 <c>WHK-M1</c>。</param>
 /// <param name="RowNumber">第几句，从 1 起（和界面上那个「第 N 句」同一个口径）。</param>
-/// <param name="Section">写备注时在第几小节。只用来分组显示，跳转不依赖它。</param>
-/// <param name="Snippet">
-/// 写备注时那句的开头几十个字。
+/// <param name="Section">
+/// 写备注时在第几小节。**只用来显示，不参与定位。**
 ///
-/// **这个是行号漂移时的救生圈**：中间插一句、删一句，后面的行号就全错位了。
-/// 到时候靠这段文字认出"原来说的是哪句"，总比跳到一个不相干的地方强。
+/// 为什么不拿它当键：小节会被重新拆分（「创建新小节」按钮就是把当前句拆出去），
+/// 键里带上它的话，每拆一次小节，那一章后面的备注就全成孤儿了。
+/// 定位只认「章节 + 行号」——这两样才是编辑器的稳定口径。
 /// </param>
 /// <param name="Text">备注正文。</param>
-/// <param name="Done">是否已处理。勾掉的排到列表后面并灰显。</param>
+/// <param name="Done">是否已处理。勾掉的灰显。</param>
 /// <param name="UpdatedAt">最后一次改动时间。</param>
 internal sealed record StoryTodoNote(
     string ChapterCode,
     int RowNumber,
     int Section,
-    string Snippet,
     string Text,
     bool Done,
     DateTimeOffset UpdatedAt)

@@ -22,11 +22,9 @@ namespace GalExcleTools;
 /// 我们只要记住行号，跳回去这件事就能直接复用 <c>NavigateToStoryRow</c>。
 /// 挂在小节上反而跳不准。
 ///
-/// 【行号会漂】
-/// 中间插一句、删一句，后面的行号就全错位了。所以每条备注都存了
-/// <see cref="StoryTodoNote.Snippet"/>（写的时候那句的开头）——
-/// 列表里显示出来，跳歪了也能一眼认出来"原来说的是哪句"。
-/// 这比假装行号永远准要诚实。
+/// 【定位只认"章节 + 行号"】
+/// 这两样才是编辑器的稳定口径。小节会被重新拆分，拿它当键的话，
+/// 每拆一次小节那一章后面的备注就全成孤儿了 —— 所以小节只存下来当显示信息。
 /// </summary>
 public sealed partial class MainWindow
 {
@@ -181,7 +179,6 @@ public sealed partial class MainWindow
             return;
         }
 
-        var snippet = BuildStoryTodoSnippet();
         var section = _storyEditorViewModel?.GetCurrentSection() ?? 0;
         if (index >= 0)
         {
@@ -195,7 +192,6 @@ public sealed partial class MainWindow
             {
                 Text = text,
                 Section = section,
-                Snippet = snippet,
                 UpdatedAt = DateTimeOffset.Now
             };
         }
@@ -205,22 +201,12 @@ public sealed partial class MainWindow
                 _currentStoryChapter.Code,
                 rowNumber,
                 section,
-                snippet,
                 text,
                 Done: false,
                 UpdatedAt: DateTimeOffset.Now));
         }
 
         _isStoryTodoDirty = true;
-    }
-
-    /// <summary>拿当前这句的开头几十个字当"这是哪句"的凭据。</summary>
-    private string BuildStoryTodoSnippet()
-    {
-        var text = _storyEditorViewModel?.StoryText ?? string.Empty;
-        text = text.Replace("\r", " ").Replace("\n", " ").Trim();
-        const int maxLength = 24;
-        return text.Length <= maxLength ? text : text[..maxLength] + "…";
     }
 
     // ── 界面事件 ──────────────────────────────────────────────────
@@ -252,7 +238,7 @@ public sealed partial class MainWindow
 
     private void StoryTodoNextButton_Click(object sender, RoutedEventArgs e) => JumpStoryTodoByOffset(1);
 
-    /// <summary>按当前章的行号顺序，跳到前/后一条备注。</summary>
+    /// <summary>按当前章的行号顺序，跳到前/后一条备注。到头了绕回去。</summary>
     private void JumpStoryTodoByOffset(int offset)
     {
         if (_currentStoryChapter is null)
@@ -280,20 +266,34 @@ public sealed partial class MainWindow
         JumpToStoryTodo(target);
     }
 
-    private void JumpToStoryTodo(StoryTodoNote note)
+    private async void JumpToStoryTodo(StoryTodoNote note)
     {
-        if (_currentStoryChapter is null)
+        if (_currentProject is null)
         {
             return;
         }
 
-        if (!string.Equals(note.ChapterCode, _currentStoryChapter.Code, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(note.ChapterCode, _currentStoryChapter?.Code, StringComparison.OrdinalIgnoreCase))
         {
-            // 跨章的备注：这里不自动切章节。切章会丢掉当前未保存的编辑状态，
-            // 那是另一件事，得先问清楚再做。先把话说明白。
-            _storyEditorViewModel!.TodoStatusText =
-                $"这条备注在「{note.ChapterCode}」第 {note.RowNumber} 句 —— 先切到那一章再跳";
-            return;
+            // 跨章：**先切过去再跳**。
+            //
+            // 备注列表是整个项目的（"回头快速找回来"的时候没人记得它在第几章），
+            // 所以跨章是**常态**，不是异常。
+            //
+            // 这里**不用担心丢编辑**：切章走的是 ShowStoryEditorPageAsync，
+            // 它开头就是 SaveCurrentStoryRow() → 停掉 debounce 计时器 →
+            // await _storySaveCoordinator.FlushAsync()。这正是编辑器平时换章走的那条路，
+            // 复用同一条比另造一条安全得多。
+            var chapter = _projectWorkspaceService.GetChapters(_currentProject)
+                .FirstOrDefault(item => string.Equals(item.Code, note.ChapterCode, StringComparison.OrdinalIgnoreCase));
+            if (chapter is null)
+            {
+                _storyEditorViewModel!.TodoStatusText =
+                    $"找不到章节「{note.ChapterCode}」—— 它可能改名或者被删掉了";
+                return;
+            }
+
+            await ShowStoryEditorPageAsync(chapter);
         }
 
         var targetIndex = Math.Clamp(note.RowNumber - 1, 0, Math.Max(0, _storyRows.Count - 1));
