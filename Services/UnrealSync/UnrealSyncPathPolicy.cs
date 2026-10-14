@@ -12,10 +12,14 @@ namespace GalExcleTools.Services;
 /// 这种），而新工程的落点**跨了 /Game 下三个顶层目录**（AssetMaterial / BaseC / UIWidget），
 /// 不再是"一个根加几个子目录"。继续用 TargetAssetRoot 拼会越拼越歪。
 ///
-/// 【新旧落点对照】2026-10-12 按口述 + 目标工程磁盘实况核定：
+/// 【新旧落点对照】2026-10-12 按口述 + 目标工程磁盘实况核定；
+/// 2026-10-14 背景图与道具图片**重新分类**（用户：「我之前的分类有点问题」）：
+/// 两者都收进 <c>ImageS/PlotUse</c> 底下各占一个子目录 —— 它们都是"剧情用图"，
+/// 平摊在 ImageS 下会把背景图和其它用途的图混在一起。
 ///
 /// 数据       老落点                                        新落点
-/// 背景图     {根}/BackGround                               /Game/AssetMaterial/ImageS/Background_Image/PlotUse
+/// 背景图     {根}/BackGround                               /Game/AssetMaterial/ImageS/PlotUse/Background
+/// 道具图片   （新增）                                        /Game/AssetMaterial/ImageS/PlotUse/ItemImage
 /// BGM        {根}/BGM                                      /Game/AssetMaterial/Sound/BGM/PlotUse
 /// 环境音     {根}/Scene_Effect                             /Game/AssetMaterial/Sound/Scene_Effect
 /// 特殊音效   同环境音                                        同环境音（两者共用目录）
@@ -39,7 +43,26 @@ internal static class UnrealSyncPathPolicy
     /// <summary>素材总根。目标工程实况：Content/AssetMaterial/。</summary>
     public const string AssetMaterialRoot = GameRoot + "/AssetMaterial";
 
-    public const string BackgroundFolder = AssetMaterialRoot + "/ImageS/Background_Image/PlotUse";
+    /// <summary>
+    /// 剧情用图的共同根：背景图和道具图片都在它底下各占一个子目录。
+    ///
+    /// 2026-10-14 从 <c>ImageS/Background_Image/PlotUse</c> 挪过来 ——
+    /// 老的摆法把背景图平摊在 <c>ImageS</c> 下，和别的用途的图混在一起。
+    /// </summary>
+    public const string PlotImageRoot = AssetMaterialRoot + "/ImageS/PlotUse";
+
+    /// <summary>背景图落点。</summary>
+    public const string BackgroundFolder = PlotImageRoot + "/Background";
+
+    /// <summary>
+    /// 道具图片落点。
+    ///
+    /// 和背景图**同构**（一个文件夹一堆 png、序号即索引），所以整条链路照搬。
+    /// 区别只有一处：道具图片**不进剧情 CSV**（用户 2026-10-14 定的）——
+    /// 它现在只进素材库、只跟着同步过去，剧情那边还没有用它的地方。
+    /// 以后要在剧情里用，再加列。
+    /// </summary>
+    public const string PropImageFolder = PlotImageRoot + "/ItemImage";
 
     public const string BgmFolder = AssetMaterialRoot + "/Sound/BGM/PlotUse";
 
@@ -263,7 +286,8 @@ internal static class UnrealSyncPathPolicy
     public static IReadOnlyList<string> ExpectedContentFolders { get; } =
     [
         "AssetMaterial",
-        "AssetMaterial/ImageS/Background_Image/PlotUse",
+        "AssetMaterial/ImageS/PlotUse/Background",
+        "AssetMaterial/ImageS/PlotUse/ItemImage",
         "AssetMaterial/Sound/BGM/PlotUse",
         "AssetMaterial/Sound/Scene_Effect",
         "AssetMaterial/Sound/Voice",
