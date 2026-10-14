@@ -15,6 +15,17 @@ public sealed partial class MainWindow
 
     private bool SaveCurrentStoryRow()
     {
+        // ⚠️ **备注和剧情行一起存。**
+        //
+        // 剧情行有 12 个地方会存（换句、换章、删行、导出、退出……），
+        // 备注如果只在其中几个地方跟一下，剩下那些地方就是"打完字丢了"。
+        // 挂在**这一个入口**上，12 个位置一次覆盖 —— 也正是用户说的
+        // 「把这个备注和剧情文本做成同一种」。
+        //
+        // 放在最前面：后面几个 early-return（没脏、正在载入……）只说明**剧情行**
+        // 没事，不代表备注没事 —— 备注可以是唯一脏的那个。
+        SaveStoryTodosIfDirty();
+
         if (_isLoadingStoryRow || _currentStoryDocumentPath is null || _storyRows.Count == 0)
         {
             return false;

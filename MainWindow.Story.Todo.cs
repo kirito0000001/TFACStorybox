@@ -129,15 +129,40 @@ public sealed partial class MainWindow
     }
 
     /// <summary>
-    /// 备注列表里的当前内容（含"已处理"的最新勾选状态）。
+    /// 保存前把「勾选状态」从列表行里收回来。
     ///
-    /// **必须从列表行里读**，不能直接用 <c>_storyTodoNotes</c> ——
-    /// 勾选是双向绑定到行上的，字段变化只落在行对象里。
+    /// ⚠️ **绝对不能拿行里的 Note 整体覆盖 _storyTodoNotes** ——
+    /// 那是 2026-10-13「备注写完就没了」的根子：
+    ///
+    ///   行是**快照**（刷新列表时建的），你打字加进去的备注不在快照里；
+    ///   而保存时如果拿快照反过来盖一遍，刚写的那条就没了。
+    ///   表现成"点下一句，备注不见了"，看着像跑到别处去了，其实是被盖掉了。
+    ///
+    /// 行里唯一"比数据新"的只有 <c>Done</c>（勾选框双向绑定在行上）。
+    /// 所以就只收它 —— 一句话：**谁的字段谁负责，别互相盖。**
     /// </summary>
-    private List<StoryTodoNote> CollectStoryTodoNotesFromRows() =>
-        _storyEditorViewModel is null
-            ? _storyTodoNotes.ToList()
-            : _storyEditorViewModel.TodoItems.Select(row => row.Note).ToList();
+    private void MergeStoryTodoDoneStateFromRows()
+    {
+        if (_storyEditorViewModel is null)
+        {
+            return;
+        }
+
+        foreach (var row in _storyEditorViewModel.TodoItems)
+        {
+            var index = _storyTodoNotes.FindIndex(note =>
+                note.RowNumber == row.RowNumber &&
+                string.Equals(note.ChapterCode, row.ChapterCode, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0 && _storyTodoNotes[index].Done != row.Done)
+            {
+                _storyTodoNotes[index] = _storyTodoNotes[index] with
+                {
+                    Done = row.Done,
+                    UpdatedAt = DateTimeOffset.Now
+                };
+            }
+        }
+    }
 
     private void SaveStoryTodosIfDirty()
     {
@@ -147,24 +172,37 @@ public sealed partial class MainWindow
         }
 
         _isStoryTodoDirty = false;
-        var notes = CollectStoryTodoNotesFromRows();
-        _storyTodoNotes.Clear();
-        _storyTodoNotes.AddRange(notes);
-        StoryTodoStore.Save(_currentProject?.Path, notes);
+        MergeStoryTodoDoneStateFromRows();
+        // **存的是 _storyTodoNotes 本身**，不是列表行的拷贝 —— 见上面那段注释。
+        StoryTodoStore.Save(_currentProject?.Path, _storyTodoNotes);
 
-        // 存完把状态行刷回真实值 —— 否则它一直停在"待保存"，
-        // 看起来像没存上（那正是用户这次报的现象之一）。
+        // 存完刷一次列表：刚打的那条要能出现在里面（不刷就得等下次换句才看得到）。
+        RefreshStoryTodoList();
+
+        // 状态行也刷回真实值 —— 否则它一直停在"待保存"，看起来像没存上。
         if (_storyEditorViewModel is not null)
         {
-            var pending = notes.Count(item => !item.Done);
+            var pending = _storyTodoNotes.Count(item => !item.Done);
             var hasCurrent = FindStoryTodoForCurrentRow() is not null;
-            _storyEditorViewModel.TodoStatusText = notes.Count == 0
+            _storyEditorViewModel.TodoStatusText = _storyTodoNotes.Count == 0
                 ? "还没有任何备注 · 已保存"
-                : $"{(hasCurrent ? "本句有备注" : "本句没有备注")} · 全书待办 {pending} 条 / 共 {notes.Count} 条 · 已保存";
+                : $"{(hasCurrent ? "本句有备注" : "本句没有备注")} · 全书待办 {pending} 条 / 共 {_storyTodoNotes.Count} 条 · 已保存";
         }
     }
 
-    /// <summary>把文本框里的内容落到"当前句"那条备注上（没有就新建）。</summary>
+    /// <summary>
+    /// 把文本框里的内容落到**当前句**那条备注上（没有就新建）。
+    ///
+    /// 写成"当前句"是刻意的 —— 和剧情文本（SaveCurrentStoryRow 用 StoryText）**同一个模式**：
+    ///
+    ///   导航时先把这个"待存的"落到**旧行**（NavigateToStoryRow 开头就调 SaveStoryTodosIfDirty），
+    ///   然后把 VM 属性替换成**新行**的内容。
+    ///   于是就算 TextChanged 迟到（WinUI 推值 → TextBox 抛事件，晚于本次导航），
+    ///   它读到的 TodoText 已经是新行自己的值，写回去等于空操作 —— 自然就安全了。
+    ///
+    /// ⚠️ 不要改成"记住文本框属于哪一句"：那样迟到的那次会把**新行的文字写到旧行上**，
+    /// 比不做还糟。2026-10-13 试过一版，就是这个下场。**跟着剧情文本走就对了。**
+    /// </summary>
     private void ApplyStoryTodoTextToCurrentRow()
     {
         if (_currentStoryChapter is null || _storyRows.Count == 0)
