@@ -307,6 +307,91 @@ namespace GalExcleTools
             }
         }
 
+        /// <summary>
+        /// 导入道具图片。和背景图是**同一套流程**，差别只有两处：
+        /// 文件夹换成本地素材库的「道具图片」，文件名前缀换成 <see cref="ImageSetPrefix.Prop"/>。
+        /// 所以 png 转换那一步（<c>ImportBackgroundImageAsPngAsync</c>）直接复用。
+        /// </summary>
+        private async void AddPropImagesButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentAssetLibrary is null)
+            {
+                return;
+            }
+
+            PlayPositiveSound();
+            var picker = new FileOpenPicker
+            {
+                SuggestedStartLocation = PickerLocationId.PicturesLibrary
+            };
+            foreach (var extension in ImageSetService.Extensions)
+            {
+                picker.FileTypeFilter.Add(extension);
+            }
+
+            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+
+            var selectedFiles = await picker.PickMultipleFilesAsync();
+            if (selectedFiles.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var importedCount = await ImportPropImagesAsync(selectedFiles.Select(file => file.Path));
+                ShowFloatingTip(
+                    importedCount > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                    importedCount > 0 ? "道具图片已导入" : "没有导入道具图片",
+                    importedCount > 0 ? $"已导入 {importedCount} 个文件。" : "选择的文件没有可导入内容。",
+                    logMessage: $"导入道具图片：{importedCount} 个文件。");
+            }
+            catch (Exception ex)
+            {
+                AssetLibraryDetailStatusText.Text = $"导入道具图片失败：{ex.Message}";
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "道具图片导入失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "导入道具图片失败。");
+            }
+        }
+
+        private async Task<int> ImportPropImagesAsync(IEnumerable<string> sourcePaths)
+        {
+            if (_currentAssetLibrary is null)
+            {
+                return 0;
+            }
+
+            var propFolderPath = GetPropImageFolderPath(_currentAssetLibrary);
+            _isNormalizingBackgroundImages = true;
+            var importedCount = 0;
+            try
+            {
+                importedCount = await _imageSetService.ImportFilesAsync(
+                    propFolderPath,
+                    sourcePaths,
+                    ImportBackgroundImageAsPngAsync,
+                    ImageSetPrefix.Prop);
+            }
+            finally
+            {
+                _isNormalizingBackgroundImages = false;
+            }
+
+            if (importedCount == 0)
+            {
+                return 0;
+            }
+
+            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            RefreshPropImageCards(_currentAssetLibrary);
+            RequestDelayedRefresh();
+            return importedCount;
+        }
+
         private async Task<int> ImportBackgroundImagesAsync(IEnumerable<string> sourcePaths)
         {
             if (_currentAssetLibrary is null)

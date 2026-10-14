@@ -1145,6 +1145,28 @@
                                 </StackPanel>
                             </Expander>
 
+                            <!--
+                                道具图片：和背景图**同一套结构**（一个文件夹一堆 png、编号即排序、
+                                备注写在文件名里），只是文件名前缀是 Item 而不是 BG。
+                                落点 ImageS/PlotUse/ItemImage，同步会跟着过去。
+                                它现在**不进剧情 CSV** —— 剧情那边还没有用它的地方。
+                            -->
+                            <Expander x:Name="PropImagesExpander" Header="道具图片">
+                                <StackPanel Spacing="12">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="道具图片文件夹中的图片会显示在这里。导入时会复制到当前素材库的“道具图片”文件夹。" Style="{StaticResource SubtleTextStyle}" />
+                                        <Button Grid.Column="1" Content="导入道具图片" Click="AddPropImagesButton_Click" />
+                                    </Grid>
+                                    <GridView
+                                        x:Name="PropImagesGridView"
+                                        Style="{StaticResource AssetGridViewStyle}" />
+                                </StackPanel>
+                            </Expander>
+
                             <Expander x:Name="CharactersExpander" Header="立绘">
                                 <StackPanel
                                     x:Name="CharacterDropZone"

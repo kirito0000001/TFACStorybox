@@ -50,6 +50,7 @@ namespace GalExcleTools
         private void RegisterAssetLibraryExpanderLazyLoading()
         {
             BackgroundImagesExpander.Expanding += BackgroundImagesExpander_Expanded;
+            PropImagesExpander.Expanding += PropImagesExpander_Expanded;
             MusicExpander.Expanding += MusicExpander_Expanded;
             AmbientSoundExpander.Expanding += AmbientSoundExpander_Expanded;
             SoundEffectExpander.Expanding += SoundEffectExpander_Expanded;
@@ -250,6 +251,41 @@ namespace GalExcleTools
         private void RefreshBackgroundImageCards(AssetLibraryInfo assetLibrary)
         {
             RunAssetLibraryLoad(RefreshBackgroundImageCardsAsync(assetLibrary, GetAssetLibraryLoadToken()));
+        }
+
+        /// <summary>
+        /// 道具图片的卡片加载。
+        ///
+        /// ⚠️ **暂时只显示数量，不铺卡片** —— 因为点开卡片要走查看器
+        /// （<c>ShowBackgroundImageViewerPage</c>），而那个查看器是**背景图专用**的：
+        /// 它改备注 / 替换 / 删除时走的都是硬编码 BG 前缀那条路，
+        /// 拿它开道具图片会把文件改成 BG 开头的名字、两个分类就混了。
+        ///
+        /// 要真正能用，得先把查看器那条链前缀参数化，那是下一块的事。
+        /// 在没做之前，宁可只显示数量，也不做一个"能点但会改错名字"的入口。
+        /// </summary>
+        private async Task RefreshPropImageCardsAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
+        {
+            var propFolderPath = GetPropImageFolderPath(assetLibrary);
+            var imagePaths = ImageSetService.GetFilePaths(propFolderPath);
+
+            PropImagesGridView.Items.Clear();
+            PropImagesExpander.Header = $"道具图片 [数量：{imagePaths.Count}]";
+            AppendLog(LogKind.Info, $"已加载道具图片：{imagePaths.Count} 个文件。");
+            await Task.CompletedTask;
+        }
+
+        private void RefreshPropImageCards(AssetLibraryInfo assetLibrary)
+        {
+            RunAssetLibraryLoad(RefreshPropImageCardsAsync(assetLibrary, GetAssetLibraryLoadToken()));
+        }
+
+        private void PropImagesExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
+        {
+            if (_currentAssetLibrary is not null)
+            {
+                RefreshPropImageCards(_currentAssetLibrary);
+            }
         }
 
         private GridViewItem CreateBackgroundImageCard(string imagePath)

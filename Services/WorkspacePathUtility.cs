@@ -6,6 +6,15 @@ internal static class WorkspacePathUtility
 {
     private const string ToolsFolderName = "Tools";
     private const string BackgroundFolderName = "背景图";
+
+    /// <summary>
+    /// 道具图片的素材库文件夹。
+    ///
+    /// 和背景图**同一套结构**（一个文件夹一堆 png、编号即排序、备注写在文件名里），
+    /// 只是文件名前缀换成了 <see cref="ImageSetPrefix.Prop"/>。
+    /// 落点是 <c>ImageS/PlotUse/ItemImage</c>（见 UnrealSyncPathPolicy）。
+    /// </summary>
+    private const string PropImageFolderName = "道具图片";
     private const string CharacterFolderName = "立绘";
     private const string MusicFolderName = "音乐";
     private const string AmbientSoundFolderName = "环境音";
@@ -65,6 +74,11 @@ internal static class WorkspacePathUtility
     public static string GetBackgroundFolderPath(AssetLibraryInfo assetLibrary)
     {
         return Path.Combine(assetLibrary.Path, BackgroundFolderName);
+    }
+
+    public static string GetPropImageFolderPath(AssetLibraryInfo assetLibrary)
+    {
+        return Path.Combine(assetLibrary.Path, PropImageFolderName);
     }
 
     public static string GetMusicFolderPath(AssetLibraryInfo assetLibrary)
