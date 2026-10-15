@@ -19,8 +19,10 @@ if ($manager -notmatch 'UpdateOption[\s\S]*?SetCustomSection[\s\S]*?_chapterChoi
 if ($manager -notmatch 'VirtualKey\.Escape[\s\S]*?VirtualKey\.Enter[\s\S]*?HideChapterChoiceManager') { $issues.Add('Overlay must support Escape cancel and Enter save.') }
 
 if ($issues.Count -gt 0) {
-    $issues | ForEach-Object { Write-Error $_ }
+    $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
+    Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
     exit 1
+
 }
 
 Write-Host 'Chapter choice-manager overlay checks passed.'

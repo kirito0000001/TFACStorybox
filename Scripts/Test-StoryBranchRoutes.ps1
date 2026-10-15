@@ -61,8 +61,10 @@ Require-Pattern `
     'The delete flow must repoint section anchors before the document is queued for saving.'
 
 if ($issues.Count -gt 0) {
-    $issues | ForEach-Object { Write-Error $_ }
+    $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
+    Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
     exit 1
+
 }
 
 $assemblyPath = Join-Path $root 'bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\TFAC剧情箱-轮椅版.dll'

@@ -34,8 +34,10 @@ Require-Pattern 'ViewModels\SettingsViewModel.cs' 'ShouldWriteLog[\s\S]*?LogUser
 Require-Pattern 'MainWindow.Tips.cs' 'CopyErrorLogToClipboard[\s\S]*?CreateLogText\(LogKind\.Error' 'Automatic error-tip copies must use the same TFAC log format.'
 
 if ($issues.Count -gt 0) {
-    $issues | ForEach-Object { Write-Error $_ }
+    $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
+    Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
     exit 1
+
 }
 
 Write-Host 'Log panel checks passed.'

@@ -304,8 +304,10 @@ if ($Build) {
 }
 
 if ($issues.Count -gt 0) {
-    $issues | ForEach-Object { Write-Error $_ }
+    $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
+    Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
     exit 1
+
 }
 
 Write-Host "Source health checks passed."
