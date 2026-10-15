@@ -623,15 +623,37 @@ namespace GalExcleTools
             }
 
             var removedChoices = GetCurrentStoryChoiceValues();
+            // 这一句可能是某个小节的锚点（小节第一句）。删之前先把身份记下来 ——
+            // 删完就查不到它属于哪一节了，而「接替行是不是还在同一节里」正是接手规则要用到的判断。
+            var deletedRowId = _storyRows[_currentStoryRowIndex].StableId;
+            var deletedRowSection = GetStorySectionAtRowIndex(_currentStoryRowIndex);
             CaptureStoryUndoState("删除当前句");
             var result = _storyEditorService.DeleteCurrent(_storyRows, _storyRowSections, _currentStoryRowIndex, removedChoices);
             _currentStoryRowIndex = result.RowIndex;
+            // 接替行 = 落在被删行位置上的那一句（删的是最后一句时，就是新的最后一句）。
+            var replacementRowId = _storyRows.Count == 0
+                ? null
+                : _storyRows[Math.Clamp(_currentStoryRowIndex, 0, _storyRows.Count - 1)].StableId;
+            // 选项目标和「自定义跳转逻辑」标记存的是小节第一行的 StableId，行没了引用就悬空。
+            // 这一步必须在 QueueCurrentStoryDocumentSave 之前做完 —— 存档 + 撤销事务都以那一刻为准。
+            var sectionAnchorsRepointed = StoryBranchService.RepointSectionAnchorsAfterRowDelete(
+                _storyEditorViewModel.Document,
+                deletedRowId,
+                deletedRowSection,
+                replacementRowId);
             var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes(result.RemovedChoiceValues);
             QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
             SaveCurrentChapterProgress();
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
             _storyEditorViewModel.RefreshCommandStates();
             LoadStoryRowIntoUi();
+            if (sectionAnchorsRepointed)
+            {
+                ShowStoryStatus(
+                    InfoBarSeverity.Informational,
+                    "小节锚点已顺延",
+                    "选项跳转 / 自定义跳转原来指向这一句，已改指向接替的那一句。");
+            }
         }
 
     }

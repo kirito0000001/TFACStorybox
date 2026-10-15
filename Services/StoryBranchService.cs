@@ -150,6 +150,90 @@ internal static class StoryBranchService
         return rowIndex < 0 ? null : GetSectionAtRowIndex(document, rowIndex);
     }
 
+    /// <summary>
+    /// 删除某一句之后，把「指向这一行的小节锚点」挪到接替它的那一行。
+    ///
+    /// 【为什么必须有这一步】
+    /// 选项目标小节和「自定义跳转逻辑」标记，存的都是**小节第一行的 StableId**。
+    /// 那一行一旦被删掉，引用就成了悬空 ID —— 而且没有任何一步会报错：
+    /// - 选项编辑器的目标下拉里找不到它 → 悄悄退回「进入共通线」，确认一次分支就没了；
+    /// - 选项管理器把它当校验错误 → 整章选项直接保存不了；
+    /// - 自定义跳转标记查不到 → 开关静默变回「自动同步」，
+    ///   下次同步 AllRoad 就把手工写的那套盖掉。
+    ///
+    /// 【接手规则】
+    /// - 选项目标：一律改指向接替行。接替行占的就是被删行的位置，
+    ///   小节通常还在原地，指过去仍然落在同一节里；
+    ///   被删行是「只有一句的小节」时，接替行是后面那一节的开头 ——
+    ///   也比留个悬空 ID 强（悬空会让整章选项存不进去）。
+    /// - 自定义跳转标记：**只有接替行还在被删行的那一小节里**才跟着挪。
+    ///   那一节已经整个不存在的时候跟着挪，等于把「保留手工设置」平白罩到下一节头上，
+    ///   所以这里直接丢掉。
+    /// </summary>
+    /// <returns>是否真的改动了引用。</returns>
+    public static bool RepointSectionAnchorsAfterRowDelete(
+        StoryDocument document,
+        string deletedRowStableId,
+        int deletedRowSection,
+        string? replacementRowStableId)
+    {
+        var deletedId = deletedRowStableId?.Trim() ?? string.Empty;
+        if (deletedId.Length == 0)
+        {
+            return false;
+        }
+
+        var replacementId = string.IsNullOrWhiteSpace(replacementRowStableId)
+            ? null
+            : replacementRowStableId.Trim();
+        var changed = false;
+
+        var repointedRoutes = new List<StoryChoiceRoute>(document.BranchRoutes.Count);
+        foreach (var route in document.BranchRoutes)
+        {
+            if (!string.Equals(
+                    route.TargetSectionFirstRowId?.Trim() ?? string.Empty,
+                    deletedId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                repointedRoutes.Add(route);
+                continue;
+            }
+
+            changed = true;
+            if (replacementId is not null)
+            {
+                repointedRoutes.Add(route with { TargetSectionFirstRowId = replacementId });
+            }
+            // 接替行为空 = 这一行是整章唯一的一句（删除时被替换成空白行）：无从接手，丢掉路线，
+            // 不留悬空 ID。
+        }
+
+        document.BranchRoutes.Clear();
+        document.BranchRoutes.AddRange(repointedRoutes);
+
+        if (document.CustomBranchSectionFirstRowIds.Remove(deletedId))
+        {
+            changed = true;
+            if (replacementId is not null &&
+                GetSectionOfRowStableId(document, replacementId) == deletedRowSection)
+            {
+                document.CustomBranchSectionFirstRowIds.Add(replacementId);
+            }
+        }
+
+        return changed;
+    }
+
+    private static int? GetSectionOfRowStableId(StoryDocument document, string stableId)
+    {
+        var rowIndex = document.Rows.FindIndex(row => string.Equals(
+            row.StableId,
+            stableId,
+            StringComparison.OrdinalIgnoreCase));
+        return rowIndex < 0 ? null : GetSectionAtRowIndex(document, rowIndex);
+    }
+
     public static bool IsCustomBranchSection(StoryDocument document, int section)
     {
         var firstRowId = GetSectionFirstRowId(document, section);

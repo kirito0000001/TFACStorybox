@@ -50,6 +50,16 @@ Require-Pattern `
     'Text="当前分支"[\s\S]*?CurrentBranchItems[\s\S]*?OptionLabel[\s\S]*?SourceText' `
     'The current-story inspector must persistently show the active branch and option content.'
 
+Require-Pattern `
+    (Join-Path $root 'Services\StoryBranchService.cs') `
+    'RepointSectionAnchorsAfterRowDelete[\s\S]*?route with \{ TargetSectionFirstRowId = replacementId \}[\s\S]*?CustomBranchSectionFirstRowIds\.Remove\(deletedId\)' `
+    'Deleting a sentence must repoint the route and custom-AllRoad anchors that pointed at it.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Story.cs') `
+    'DeleteCurrent\(_storyRows, _storyRowSections, _currentStoryRowIndex, removedChoices\)[\s\S]*?RepointSectionAnchorsAfterRowDelete[\s\S]*?QueueCurrentStoryDocumentSave' `
+    'The delete flow must repoint section anchors before the document is queued for saving.'
+
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Error $_ }
     exit 1
@@ -126,6 +136,64 @@ if (Test-Path -LiteralPath $assemblyPath) {
         $targets[29].DisplayName -ne '第 29 小节' -or
         $targets[29].FirstSentencePreview -ne '第 30 小节第一句话') {
         throw 'Target sections must grow dynamically without a fixed count limit.'
+    }
+
+    # 删除句子后的小节锚点接手：选项目标一律顺延到接替行，
+    # 「自定义跳转逻辑」标记只在接替行还留在同一小节里时才跟着挪。
+    $repointMethod = $serviceType.GetMethod('RepointSectionAnchorsAfterRowDelete')
+    if ($null -eq $repointMethod) {
+        Write-Host '(skip anchor reflection: 当前 DLL 还没有 RepointSectionAnchorsAfterRowDelete，重新编译后会做这一项。)'
+    }
+    else {
+        $anchorDocument = [System.Activator]::CreateInstance($documentType, $true)
+        $anchorRows = $documentType.GetProperty('Rows').GetValue($anchorDocument)
+        $anchorSections = $documentType.GetProperty('RowSections').GetValue($anchorDocument)
+        $anchorRowsCreated = @()
+        foreach ($entry in @(@('1', 1), @('2', 2), @('3', 2), @('4', 3), @('5', 3))) {
+            $row = [System.Activator]::CreateInstance($rowType, $true)
+            [void]$setCell.Invoke($row, @('Name', $entry[0]))
+            [void]$anchorRows.Add($row)
+            $anchorSections.Add($entry[0], $entry[1])
+            $anchorRowsCreated += $row
+        }
+
+        $anchorIdA = $rowType.GetProperty('StableId').GetValue($anchorRowsCreated[0])
+        $anchorIdB = $rowType.GetProperty('StableId').GetValue($anchorRowsCreated[1])
+        $anchorIdC = $rowType.GetProperty('StableId').GetValue($anchorRowsCreated[2])
+        $anchorIdD = $rowType.GetProperty('StableId').GetValue($anchorRowsCreated[3])
+        $anchorIdE = $rowType.GetProperty('StableId').GetValue($anchorRowsCreated[4])
+        $anchorRoutes = $documentType.GetProperty('BranchRoutes').GetValue($anchorDocument)
+        $anchorCustom = $documentType.GetProperty('CustomBranchSectionFirstRowIds').GetValue($anchorDocument)
+        [void]$anchorRoutes.Add([System.Activator]::CreateInstance($routeType, @('M3-00-Choice1', 0, 'A', $anchorIdB, $true)))
+        [void]$anchorRoutes.Add([System.Activator]::CreateInstance($routeType, @('M3-00-Choice1', 1, 'B', $anchorIdA, $true)))
+        [void]$anchorCustom.Add($anchorIdB)
+        [void]$anchorCustom.Add($anchorIdA)
+
+        # 删掉第 2 句（第 2 小节开头），接替的是第 3 句 —— 仍然在第 2 小节里。
+        [void]$anchorRows.Remove($anchorRowsCreated[1])
+        [void]$anchorSections.Remove('2')
+        $changed = $repointMethod.Invoke($null, @($anchorDocument, $anchorIdB, 2, $anchorIdC))
+        if (-not $changed -or
+            $anchorRoutes[0].TargetSectionFirstRowId -ne $anchorIdC -or
+            $anchorCustom.Contains($anchorIdB) -or
+            -not $anchorCustom.Contains($anchorIdC)) {
+            throw 'Deleting a section anchor must repoint its routes and keep the custom AllRoad flag inside the same section.'
+        }
+
+        # 删掉第 1 句（第 1 小节只有这一句），接替行落在第 3 小节：路线顺延，但标记不能跟着串节。
+        [void]$anchorRows.Remove($anchorRowsCreated[0])
+        [void]$anchorSections.Remove('1')
+        $changed = $repointMethod.Invoke($null, @($anchorDocument, $anchorIdA, 1, $anchorIdD))
+        if (-not $changed -or
+            $anchorRoutes[1].TargetSectionFirstRowId -ne $anchorIdD -or
+            $anchorCustom.Contains($anchorIdA) -or
+            $anchorCustom.Contains($anchorIdD)) {
+            throw 'A vanished section must not hand its manual AllRoad flag to the next section.'
+        }
+
+        if ($repointMethod.Invoke($null, @($anchorDocument, $anchorIdE, 3, $null))) {
+            throw 'Deleting a sentence nobody points at must not report anchor changes.'
+        }
     }
 }
 
