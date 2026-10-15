@@ -52,6 +52,25 @@ Require-Pattern `
     'SetCurrentStorySection' `
     'The unwired section-editing path must stay removed.' -NotMatch
 
+# ── 合并小节（向前 / 向后）──
+# 合并 = **去掉**一条小节边界（拆分是加一条），行本身一条都不动。
+Require-Pattern `
+    (Join-Path $root 'Services\StoryEditorService.cs') `
+    'MergeSectionWithPrevious[\s\S]*?MergeSectionWithNext[\s\S]*?FindMergeBoundaryIndex\(readOnlyRows[\s\S]*?sections\[index\] = Math\.Max\(1, sections\[index\] - 1\)' `
+    'Merging a section must remove one ordered section boundary (the inverse of splitting).'
+
+# 合并会改小节号 → 嵌着小节号的 Choice 函数名要迁移；
+# 两节里只要有一节标着「自定义跳转逻辑」，合并后也要留着（否则手工 AllRoad 会被自动重建盖掉）。
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Story.Sections.cs') `
+    'MergeStorySection[\s\S]*?CanMergeSectionWithPrevious[\s\S]*?SetCustomBranchSection[\s\S]*?NormalizeStoryChoiceFunctionPrefixes[\s\S]*?QueueCurrentStoryDocumentSave' `
+    'Merging sections must keep the manual-AllRoad flag and migrate the section-numbered choice functions.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.xaml') `
+    'Header="行与小节"[\s\S]*?Content="创建新小节"[\s\S]*?Content="向前合并小节"[\s\S]*?MergePreviousSectionCommand[\s\S]*?Content="向后合并小节"[\s\S]*?MergeNextSectionCommand' `
+    'The section tool list needs explicit forward and backward merge buttons.'
+
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
     Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
@@ -147,6 +166,66 @@ if (Test-Path -LiteralPath $assemblyPath) {
             -not $bySource.ContainsKey('/Game/Story/WHK-M1-00.WHK-M1-00') -or
             $bySource.ContainsKey('/Game/Story/Stray.Stray')) {
             throw 'A duplicate section table must be resolved to the chapter-named CSV, and a section without a table must be skipped.'
+        }
+    }
+
+    # ── 合并小节：去掉一条边界，行一条都不动 ──
+    # 断言的是本次改动后的行为，所以等编译过再跑（旧 DLL 里没有这些方法）。
+    $mergeMethod = $editorServiceType.GetMethod('MergeSectionWithNext')
+    $canMergePreviousMethod = $editorServiceType.GetMethod('CanMergeSectionWithPrevious')
+    if ($null -eq $mergeMethod -or $null -eq $canMergePreviousMethod) {
+        Write-Host '(skip merge reflection: 当前 DLL 早于本次改动，重新编译后会做「合并去掉一条边界」这几项。)'
+    }
+    else {
+        $buildSession = {
+            param($sections)
+            $doc = [System.Activator]::CreateInstance($documentType, $true)
+            $rows = $documentType.GetProperty('Rows').GetValue($doc)
+            $map = $documentType.GetProperty('RowSections').GetValue($doc)
+            for ($index = 0; $index -lt $sections.Count; $index++) {
+                $row = [System.Activator]::CreateInstance($rowType, $true)
+                [void]$setCell.Invoke($row, @('Name', ($index + 1).ToString()))
+                [void]$rows.Add($row)
+                $map.Add(($index + 1).ToString(), $sections[$index])
+            }
+
+            return @{ Rows = $rows; Sections = $map }
+        }
+
+        $session = & $buildSession @(1, 1, 2, 2, 3, 3)
+        $rows = $session.Rows
+        $sections = $session.Sections
+        $canNext = $editorServiceType.GetMethod('CanMergeSectionWithNext')
+        $canPrevious = $canMergePreviousMethod
+
+        # 头尾两节没有可合并的邻居。
+        if ($canPrevious.Invoke($editorService, @($rows, $sections, 0)) -or
+            $canNext.Invoke($editorService, @($rows, $sections, 5)) -or
+            -not $canNext.Invoke($editorService, @($rows, $sections, 0)) -or
+            -not $canPrevious.Invoke($editorService, @($rows, $sections, 3))) {
+            throw 'Merge availability must follow the current section position (first/last section has no neighbour).'
+        }
+
+        # 向后合并：从中间那一句点也行（合并的是"当前小节 + 后一节"，与句在节内哪一行无关）。
+        if (-not $mergeMethod.Invoke($editorService, @($rows, $sections, 0)) -or
+            $sections['1'] -ne 1 -or $sections['2'] -ne 1 -or $sections['3'] -ne 1 -or
+            $sections['4'] -ne 1 -or $sections['5'] -ne 2 -or $sections['6'] -ne 2) {
+            throw 'Merging with the next section must drop that boundary and renumber the sections after it.'
+        }
+
+        if ($rows.Count -ne 6 -or $rows[0].Get('Name') -ne '1' -or $rows[5].Get('Name') -ne '6') {
+            throw 'Merging sections must not touch the rows themselves (no insert, delete, or rename).'
+        }
+
+        # 向前合并：第 5 句现在属第 2 小节，并进第 1 小节 → 整章只剩一节。
+        if (-not $editorServiceType.GetMethod('MergeSectionWithPrevious').Invoke($editorService, @($rows, $sections, 4)) -or
+            $sections['4'] -ne 1 -or $sections['6'] -ne 1) {
+            throw 'Merging with the previous section must drop the current section start boundary.'
+        }
+
+        if ($canPrevious.Invoke($editorService, @($rows, $sections, 0)) -or
+            $canNext.Invoke($editorService, @($rows, $sections, 0))) {
+            throw 'A single-section chapter must have nothing left to merge.'
         }
     }
 }

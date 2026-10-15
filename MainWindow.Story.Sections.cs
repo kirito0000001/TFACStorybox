@@ -111,6 +111,11 @@ namespace GalExcleTools
             var nextSection = GetCurrentStorySection();
             EnsureStorySectionOptions(_storyRowSections.Values.DefaultIfEmpty(1).Max());
             SelectStorySection(nextSection);
+            // 拆分之后当前句属于**新**小节了，开关得跟着重算：
+            // 「自定义跳转逻辑」是跟着"小节第一行"记的，而新小节的第一行就是当前句。
+            // 不重算的话，原来那一节如果开着，开关会一直显示"保留手工设置"，
+            // 让人以为新拆出来这一节也保留着 —— 其实没有。
+            UpdateStoryCustomBranchLogicToggle(nextSection);
             NormalizeStoryChoiceFunctionPrefixes(out var migratedChoiceNotes);
             QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
             UpdateStoryRowIndexInput();
@@ -118,6 +123,100 @@ namespace GalExcleTools
             UpdateStoryToolbarCurrentInfo();
             _storyEditorViewModel.RefreshCommandStates();
             ShowStoryStatus(InfoBarSeverity.Success, "已拆分小节", $"当前句现在是{StorySectionDisplay.FormatName(nextSection)}的第一句。");
+        }
+
+        private void MergePreviousStorySection()
+        {
+            MergeStorySection(mergeWithPrevious: true);
+        }
+
+        private void MergeNextStorySection()
+        {
+            MergeStorySection(mergeWithPrevious: false);
+        }
+
+        /// <summary>
+        /// 合并小节：向前 = 并进前面那一节，向后 = 把后面那一节并进来。
+        ///
+        /// 和「创建新小节」是**互为逆操作**的一对，所以这条链照着它抄：
+        /// 拆分是"在当前句这里**加**一条小节边界"，合并是"**去掉**一条小节边界"。
+        ///
+        /// 【两条容易漏掉的连带影响】
+        /// 1. 小节号变了 → 嵌在小节号里的 Choice 函数名（<c>WHK-M6-06-Choice3</c>）
+        ///    必须跟着迁移，不然那些选项会指到别的小节上。拆分走的是同一个迁移函数。
+        /// 2. 「自定义跳转逻辑」的语义是"这一节保留手工 AllRoad"。两节里**只要有一节开着**，
+        ///    合并后那一节就继续开着 —— 否则合并会把手工写的那套 AllRoad
+        ///    变成"下次同步自动重建"，而且这一步不会有任何报错。
+        ///
+        /// 行一条都不动，所以小节锚点（选项目标 / 自定义标记存的都是行 StableId）不受影响。
+        /// </summary>
+        private void MergeStorySection(bool mergeWithPrevious)
+        {
+            if (!CanEditStoryData() || _currentStoryDocumentPath is null || _storyRows.Count == 0)
+            {
+                return;
+            }
+
+            SaveCurrentStoryRow();
+            var currentSection = GetCurrentStorySection();
+            var canMerge = mergeWithPrevious
+                ? _storyEditorService.CanMergeSectionWithPrevious(_storyRows, _storyRowSections, _currentStoryRowIndex)
+                : _storyEditorService.CanMergeSectionWithNext(_storyRows, _storyRowSections, _currentStoryRowIndex);
+            if (!canMerge)
+            {
+                ShowStoryStatus(
+                    InfoBarSeverity.Informational,
+                    "无法合并小节",
+                    mergeWithPrevious
+                        ? "当前句已经在第一个小节里，前面没有可合并的小节。"
+                        : "当前句已经在最后一个小节里，后面没有可合并的小节。");
+                return;
+            }
+
+            // 前后两节：合并后留下的是前面那一节的号（小节号整体往前收一位）。
+            var precedingSection = mergeWithPrevious ? currentSection - 1 : currentSection;
+            var followingSection = mergeWithPrevious ? currentSection : currentSection + 1;
+            var keepCustomBranchLogic =
+                StoryBranchService.IsCustomBranchSection(_storyEditorViewModel.Document, precedingSection) ||
+                StoryBranchService.IsCustomBranchSection(_storyEditorViewModel.Document, followingSection);
+
+            CaptureStoryUndoState(mergeWithPrevious ? "向前合并小节" : "向后合并小节");
+            var merged = mergeWithPrevious
+                ? _storyEditorService.MergeSectionWithPrevious(_storyRows, _storyRowSections, _currentStoryRowIndex)
+                : _storyEditorService.MergeSectionWithNext(_storyRows, _storyRowSections, _currentStoryRowIndex);
+            if (!merged)
+            {
+                // 正常走不到（能不能合并在上面刚问过）。真走到这儿：把这次没提交的撤销事务撤掉，
+                // 免得它挂在 UndoService 里，把下一次操作的快照顶掉。
+                _storyEditorViewModel.UndoService.CancelPending();
+                ShowStoryStatus(InfoBarSeverity.Warning, "无法合并小节", "小节边界和刚才看到的不一样了，请再看一眼当前句所在的小节。");
+                return;
+            }
+
+            if (keepCustomBranchLogic)
+            {
+                StoryBranchService.SetCustomBranchSection(_storyEditorViewModel.Document, precedingSection, true);
+            }
+
+            // 小节号变了 → Choice 函数名要跟着迁移（和打开章节、拆分小节是同一套）。
+            StoryChoiceNoteState? migratedChoiceNotes = null;
+            if (SynchronizeStorySectionState())
+            {
+                NormalizeStoryChoiceFunctionPrefixes(out migratedChoiceNotes);
+            }
+
+            EnsureStorySectionOptions(_storyRowSections.Values.DefaultIfEmpty(1).Max());
+            SelectStorySection(precedingSection);
+            UpdateStoryCustomBranchLogicToggle(precedingSection);
+            QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
+            UpdateStoryRowIndexInput();
+            UpdateStoryEditorHeader();
+            UpdateStoryToolbarCurrentInfo();
+            _storyEditorViewModel.RefreshCommandStates();
+            ShowStoryStatus(
+                InfoBarSeverity.Success,
+                mergeWithPrevious ? "已向前合并" : "已向后合并",
+                $"{StorySectionDisplay.FormatName(precedingSection)}和{StorySectionDisplay.FormatName(followingSection)}现在是同一节了。");
         }
 
         private void SelectStorySection(int section)

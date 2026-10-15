@@ -508,6 +508,8 @@ namespace GalExcleTools
                 () => NavigateStorySection(-1),
                 () => NavigateStorySection(1),
                 AddStorySection,
+                MergePreviousStorySection,
+                MergeNextStorySection,
                 () => ChooseStoryAssetIndexAsync("更换背景图", "BGindex", GetStoryBackgroundChoices()),
                 () => ChooseStoryAssetIndexAsync("更换BGM", "BGM", GetStoryBgmChoices()),
                 () => ChooseStoryAssetIndexAsync("更换环境音", "Scene", GetStorySceneChoices()),

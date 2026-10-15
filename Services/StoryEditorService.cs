@@ -169,6 +169,120 @@ internal sealed class StoryEditorService
         return true;
     }
 
+    /// <summary>当前小节能不能和**前面**那一节合并（当前句已经在第一个小节里就不能）。</summary>
+    public bool CanMergeSectionWithPrevious(
+        IReadOnlyList<StoryRow> rows,
+        IReadOnlyDictionary<string, int> rowSections,
+        int currentRowIndex)
+    {
+        return FindMergeBoundaryIndex(rows, rowSections, currentRowIndex, mergeWithPrevious: true) > 0;
+    }
+
+    /// <summary>当前小节能不能和**后面**那一节合并（当前句已经在最后一个小节里就不能）。</summary>
+    public bool CanMergeSectionWithNext(
+        IReadOnlyList<StoryRow> rows,
+        IReadOnlyDictionary<string, int> rowSections,
+        int currentRowIndex)
+    {
+        return FindMergeBoundaryIndex(rows, rowSections, currentRowIndex, mergeWithPrevious: false) > 0;
+    }
+
+    /// <summary>
+    /// 把当前小节并进**前面**那一节。
+    ///
+    /// 合并和拆分是**互为逆操作**的一对（见 <see cref="SplitSectionAtCurrent"/>）：
+    ///   - 拆分 = 在某一行**加**一条小节边界（从那一行起，所有小节号 +1）；
+    ///   - 合并 = **去掉**一条小节边界（从那条边界起，所有小节号 -1）。
+    /// 所以两个方向只差"去掉哪条边界"这一个判断，实现共用一套。
+    ///
+    /// 行本身**一条都不动** —— 小节号只是给连续行块编的序号，
+    /// 去掉一条边界之后剩下的号天然还是连续的，不用再补。
+    /// </summary>
+    public bool MergeSectionWithPrevious(
+        IList<StoryRow> rows,
+        Dictionary<string, int> rowSections,
+        int currentRowIndex)
+    {
+        return MergeSectionBoundary(rows, rowSections, currentRowIndex, mergeWithPrevious: true);
+    }
+
+    /// <summary>把**后面**那一节并进当前小节。</summary>
+    public bool MergeSectionWithNext(
+        IList<StoryRow> rows,
+        Dictionary<string, int> rowSections,
+        int currentRowIndex)
+    {
+        return MergeSectionBoundary(rows, rowSections, currentRowIndex, mergeWithPrevious: false);
+    }
+
+    private bool MergeSectionBoundary(
+        IList<StoryRow> rows,
+        Dictionary<string, int> rowSections,
+        int currentRowIndex,
+        bool mergeWithPrevious)
+    {
+        var readOnlyRows = rows as IReadOnlyList<StoryRow> ?? rows.ToList();
+        var boundaryIndex = FindMergeBoundaryIndex(readOnlyRows, rowSections, currentRowIndex, mergeWithPrevious);
+        if (boundaryIndex <= 0)
+        {
+            return false;
+        }
+
+        var sections = GetSectionsInRowOrder(readOnlyRows, rowSections);
+        for (var index = boundaryIndex; index < sections.Count; index++)
+        {
+            sections[index] = Math.Max(1, sections[index] - 1);
+        }
+
+        ApplySectionsInRowOrder(readOnlyRows, rowSections, sections);
+        return true;
+    }
+
+    /// <summary>
+    /// 要**去掉**的那条小节边界落在第几行（-1 = 没有可合并的边界）。
+    ///
+    /// 向前合并去掉的是「当前小节的开头」，向后合并去掉的是「下一小节的开头」——
+    /// 两条边界的共同点是"从这一行起，小节号都要减 1"。
+    /// 当前小节本来就从第 0 行开始的那一档算作没有边界：前面没有东西可并。
+    /// </summary>
+    private int FindMergeBoundaryIndex(
+        IReadOnlyList<StoryRow> rows,
+        IReadOnlyDictionary<string, int> rowSections,
+        int currentRowIndex,
+        bool mergeWithPrevious)
+    {
+        if (rows.Count == 0)
+        {
+            return -1;
+        }
+
+        currentRowIndex = Math.Clamp(currentRowIndex, 0, rows.Count - 1);
+        var sections = GetSectionsInRowOrder(rows, rowSections);
+        var currentSection = sections[currentRowIndex];
+        if (mergeWithPrevious)
+        {
+            // 往前走到小节号变化的那一行的下一行 = 当前小节的第一行。
+            var firstRowIndex = currentRowIndex;
+            while (firstRowIndex > 0 && sections[firstRowIndex - 1] == currentSection)
+            {
+                firstRowIndex--;
+            }
+
+            return firstRowIndex > 0 ? firstRowIndex : -1;
+        }
+
+        // 往后找到第一个小节号不同的行 = 下一小节的第一行（小节是连续块，中间不会夹别的）。
+        for (var index = currentRowIndex + 1; index < sections.Count; index++)
+        {
+            if (sections[index] != currentSection)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
     public StoryRowsEditResult DeleteCurrent(
         IList<StoryRow> rows,
         Dictionary<string, int> rowSections,

@@ -64,6 +64,8 @@ internal sealed class StoryEditorViewModel : ObservableObject
         PreviousSectionCommand = new RelayCommand(() => { });
         NextSectionCommand = new RelayCommand(() => { });
         AddSectionCommand = new RelayCommand(() => { });
+        MergePreviousSectionCommand = new RelayCommand(() => { });
+        MergeNextSectionCommand = new RelayCommand(() => { });
         ChangeBackgroundCommand = new AsyncRelayCommand(() => Task.CompletedTask);
         ChangeBgmCommand = new AsyncRelayCommand(() => Task.CompletedTask);
         ChangeSceneCommand = new AsyncRelayCommand(() => Task.CompletedTask);
@@ -111,6 +113,12 @@ internal sealed class StoryEditorViewModel : ObservableObject
     public RelayCommand NextSectionCommand { get; private set; }
 
     public RelayCommand AddSectionCommand { get; private set; }
+
+    /// <summary>把当前小节并进前面那一节。</summary>
+    public RelayCommand MergePreviousSectionCommand { get; private set; }
+
+    /// <summary>把后面那一节并进当前小节。</summary>
+    public RelayCommand MergeNextSectionCommand { get; private set; }
 
     public AsyncRelayCommand ChangeBackgroundCommand { get; private set; }
 
@@ -485,6 +493,8 @@ internal sealed class StoryEditorViewModel : ObservableObject
         Action previousSection,
         Action nextSection,
         Action addSection,
+        Action mergePreviousSection,
+        Action mergeNextSection,
         Func<Task> changeBackground,
         Func<Task> changeBgm,
         Func<Task> changeScene,
@@ -504,6 +514,10 @@ internal sealed class StoryEditorViewModel : ObservableObject
         PreviousSectionCommand = new RelayCommand(previousSection, () => Rows.Count > 0);
         NextSectionCommand = new RelayCommand(nextSection, () => Rows.Count > 0);
         AddSectionCommand = new RelayCommand(addSection, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
+        // 合并的可用性和"创建新小节"一样由文档条件决定；"是不是已经在头/尾那一节"
+        // 交给处理器判断 —— 那里能顺手给一句"为什么不能合"的提示，比把按钮灰掉更有用。
+        MergePreviousSectionCommand = new RelayCommand(mergePreviousSection, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
+        MergeNextSectionCommand = new RelayCommand(mergeNextSection, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
         ChangeBackgroundCommand = new AsyncRelayCommand(changeBackground, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
         ChangeBgmCommand = new AsyncRelayCommand(changeBgm, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
         ChangeSceneCommand = new AsyncRelayCommand(changeScene, () => Rows.Count > 0 && DocumentPath is not null && !IsDebugModeEnabled);
@@ -534,6 +548,8 @@ internal sealed class StoryEditorViewModel : ObservableObject
         OnPropertyChanged(nameof(PreviousSectionCommand));
         OnPropertyChanged(nameof(NextSectionCommand));
         OnPropertyChanged(nameof(AddSectionCommand));
+        OnPropertyChanged(nameof(MergePreviousSectionCommand));
+        OnPropertyChanged(nameof(MergeNextSectionCommand));
         OnPropertyChanged(nameof(ChangeBackgroundCommand));
         OnPropertyChanged(nameof(ChangeBgmCommand));
         OnPropertyChanged(nameof(ChangeSceneCommand));
@@ -557,6 +573,8 @@ internal sealed class StoryEditorViewModel : ObservableObject
         PreviousSectionCommand.NotifyCanExecuteChanged();
         NextSectionCommand.NotifyCanExecuteChanged();
         AddSectionCommand.NotifyCanExecuteChanged();
+        MergePreviousSectionCommand.NotifyCanExecuteChanged();
+        MergeNextSectionCommand.NotifyCanExecuteChanged();
         ChangeBackgroundCommand.NotifyCanExecuteChanged();
         ChangeBgmCommand.NotifyCanExecuteChanged();
         ChangeSceneCommand.NotifyCanExecuteChanged();

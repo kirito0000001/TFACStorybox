@@ -611,6 +611,8 @@
                                                     Toggled="StoryCustomBranchLogicToggle_Toggled"
                                                     ToolTipService.ToolTip="开启后，同步 AllRoad 时跳过当前小节" />
                                                 <Button Content="创建新小节" Height="36" HorizontalAlignment="Stretch" Command="{Binding AddSectionCommand}" ToolTipService.ToolTip="从当前句开始拆分一个新小节" />
+                                                <Button Content="向前合并小节" Height="36" HorizontalAlignment="Stretch" Command="{Binding MergePreviousSectionCommand}" ToolTipService.ToolTip="把当前小节并进前面那一节（后面的小节号往前收一位）" />
+                                                <Button Content="向后合并小节" Height="36" HorizontalAlignment="Stretch" Command="{Binding MergeNextSectionCommand}" ToolTipService.ToolTip="把后面那一节并进当前小节（后面的小节号往前收一位）" />
                                                 <Button Content="删除当前句" Height="36" HorizontalAlignment="Stretch" Command="{Binding DeleteRowCommand}" ToolTipService.ToolTip="删除当前句" />
                                                 <Button Content="清空当前行数据" Height="36" HorizontalAlignment="Stretch" Command="{Binding ClearCurrentRowCommand}" />
                                             </StackPanel>
