@@ -535,7 +535,7 @@ namespace GalExcleTools
             _storyChoiceManagerService = new StoryChoiceManagerService(_storyDocumentRepository);
             _storySaveCoordinator = new StorySaveCoordinator(_storyDocumentRepository);
             _storyCsvExporter = new StoryCsvExporter(_storyCsvService, _storyDocumentRepository);
-            _chapterPackageService = new ChapterPackageService(_storyDocumentRepository);
+            _chapterPackageService = new ChapterPackageService(_storyDocumentRepository, _folderBackupService);
             _storyCsvImporter = new StoryCsvImporter(_storyCsvService, _storyDocumentRepository);
             _storySaveCoordinator.SaveFailed += (_, exception) => DispatcherQueue.TryEnqueue(() =>
             {

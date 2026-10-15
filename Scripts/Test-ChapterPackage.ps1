@@ -56,6 +56,39 @@ Require-Pattern `
     'FlushChapterEditsBeforeExportAsync[\s\S]*?SaveCurrentStoryRow[\s\S]*?FlushAsync[\s\S]*?SaveStoryTodosIfDirty' `
     'The pre-export flush must cover both the story document and the project-wide todo file.'
 
+# ── 导入 / 合并侧 ──
+Require-Pattern `
+    (Join-Path $root 'Models\ChapterPackageModels.cs') `
+    'ChapterMergeItemKind[\s\S]*?ChapterMergeChoice[\s\S]*?ChapterMergeChoice Choice \{ get; set; \} = ChapterMergeChoice\.KeepLocal' `
+    'A merge must classify every difference and default to keeping the local side.'
+
+Require-Pattern `
+    (Join-Path $root 'Services\ChapterPackageService.cs') `
+    'LoadPackage[\s\S]*?PackageTypeValue[\s\S]*?CurrentPackageSchemaVersion[\s\S]*?DocumentFileName' `
+    'Loading a package must verify its type and format version before reading the document.'
+
+Require-Pattern `
+    (Join-Path $root 'Services\ChapterPackageService.cs') `
+    'BuildMergePlan[\s\S]*?SnapshotLocalRows[\s\S]*?SnapshotPackageRows[\s\S]*?BuildRowMergeItems[\s\S]*?BuildTodoMergeItems' `
+    'The diff must align rows and todos on both sides before classifying them.'
+
+Require-Pattern `
+    (Join-Path $root 'Services\ChapterPackageService.cs') `
+    'ApplyMerge[\s\S]*?CreateBackup[\s\S]*?RebuildRowNamesAndSections[\s\S]*?MergeTodos' `
+    'Merging must back the chapter up first, then rebuild rows/sections, then merge todos.'
+
+# 连续新增的句子不能倒序插进来：插入之后锚点要变成"刚插进去的那一行"。
+Require-Pattern `
+    (Join-Path $root 'Services\ChapterPackageService.cs') `
+    'OnlyInPackage:[\s\S]*?localDocument\.Rows\.Insert\(insertIndex, newRow\)[\s\S]*?anchor = newRow' `
+    'Consecutive inserted rows must keep the package order (the anchor moves to the row just inserted).'
+
+# 备注文件是整个项目一份：合并本章时必须把别的章节原样带回去。
+Require-Pattern `
+    (Join-Path $root 'Services\ChapterPackageService.cs') `
+    'MergeTodos[\s\S]*?!IsChapterNote\(note, chapter\.Code\)[\s\S]*?StoryTodoStore\.Save' `
+    'Merging todos must keep the other chapters'' notes untouched in the project-wide file.'
+
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
     Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
@@ -74,10 +107,24 @@ if (Test-Path -LiteralPath $assemblyPath) {
     else {
         $chapterType = $assembly.GetType('GalExcleTools.ChapterInfo', $true)
         $repositoryType = $assembly.GetType('GalExcleTools.Services.StoryDocumentRepository', $true)
-        $repository = [System.Activator]::CreateInstance(
-            $repositoryType,
+        $jsonOptions = [System.Text.Json.JsonSerializerOptions]::new()
+        $repository = [System.Activator]::CreateInstance($repositoryType, @($jsonOptions))
+        $backupServiceType = $assembly.GetType('GalExcleTools.Services.FolderBackupService', $true)
+        $backupService = [System.Activator]::CreateInstance(
+            $backupServiceType,
             @([System.Text.Json.JsonSerializerOptions]::new()))
-        $service = [System.Activator]::CreateInstance($serviceType, @($repository))
+        # 构造函数在本次改动里多了一个参数（合并前备份要用 FolderBackupService）。
+        # 旧 DLL 里只有一个 —— 这里按参数个数挑：两种 DLL 都能构造，
+        # 于是"导出那半"照样能验，"合并那半"由下面的 gate 决定跑不跑。
+        $constructor = $serviceType.GetConstructors() |
+            Where-Object { $_.GetParameters().Count -eq 2 } |
+            Select-Object -First 1
+        $service = if ($null -ne $constructor) {
+            $constructor.Invoke(@($repository, $backupService))
+        }
+        else {
+            [System.Activator]::CreateInstance($serviceType, @($repository))
+        }
 
         $tempRoot = Join-Path $env:TEMP ('gal-chapter-package-' + [guid]::NewGuid().ToString('N'))
         # ⚠️ 显式转成 string：Join-Path 的输出是 PSObject 包装的，而反射 Invoke 不拆包装。
@@ -183,6 +230,151 @@ if (Test-Path -LiteralPath $assemblyPath) {
             }
             finally {
                 $archive.Dispose()
+            }
+
+            # ── 导入侧：差异分类 + 合并写回 ──
+            # 这一段断言的是本次改动后的行为，所以等编译过再跑（旧 DLL 里还是只有导出那半）。
+            $loadPackageMethod = $serviceType.GetMethod('LoadPackage')
+            if ($null -eq $loadPackageMethod) {
+                Write-Host '(skip merge reflection: 当前 DLL 早于本次改动，重新编译后会做「差异分类 + 合并写回」这一段。)'
+            }
+            else {
+            # 把"本机"改成对面改过一轮的样子：
+            #   aaa（第一句）：正文被改过（→ Modified）
+            #   bbb（第二句）：本机没有了（→ OnlyInPackage，对方看着像"他新增"）
+            #   ddd：本机新增的一句（→ OnlyLocal）
+            #   ccc（第三句）：没动（→ 不列进差异）
+            # 备注同理：aaa 那条正文被改过、ddd 多一条、包里 ccc 那条本机没有。
+            $localDocumentJson = [ordered]@{
+                SchemaVersion = 3
+                ChapterCode   = 'WHK-M6-00'
+                SavedAt       = '2026-10-15T13:00:00+08:00'
+                Sections      = @(
+                    [ordered]@{ Number = 1; Lines = @(
+                        [ordered]@{ StableId = '11111111111111111111111111111111'; Cells = [ordered]@{ Tesxt = '第一句（本机改过）' } },
+                        [ordered]@{ StableId = 'dddddddddddddddddddddddddddddddd'; Cells = [ordered]@{ Tesxt = '本机新增的一句' } }
+                    ) },
+                    [ordered]@{ Number = 2; Lines = @(
+                        [ordered]@{ StableId = '33333333333333333333333333333333'; Cells = [ordered]@{ Tesxt = '第三句' } }
+                    ) }
+                )
+                ChoiceNotes   = [ordered]@{ Choices = [ordered]@{} }
+                BranchRoutes  = @()
+                CustomBranchSectionFirstRowIds = @()
+            }
+            [System.IO.File]::WriteAllText(
+                (Join-Path $chapterPath 'story.document.json'),
+                ($localDocumentJson | ConvertTo-Json -Depth 12),
+                [System.Text.UTF8Encoding]::new($false))
+
+            $localTodosJson = [ordered]@{
+                Version = 2
+                Notes   = @(
+                    [ordered]@{ ChapterCode = 'WHK-M6-00'; RowNumber = 1; Section = 1; Text = '本机改过的备注'; Done = $false; UpdatedAt = '2026-10-15T13:00:00+08:00'; StableId = '11111111111111111111111111111111' },
+                    [ordered]@{ ChapterCode = 'WHK-M6-00'; RowNumber = 2; Section = 1; Text = '本机新增句的备注'; Done = $false; UpdatedAt = '2026-10-15T13:01:00+08:00'; StableId = 'dddddddddddddddddddddddddddddddd' },
+                    [ordered]@{ ChapterCode = 'WHK-M7-00'; RowNumber = 2; Section = 1; Text = '别章备注'; Done = $false; UpdatedAt = '2026-10-15T13:02:00+08:00'; StableId = '44444444444444444444444444444444' }
+                )
+            }
+            [System.IO.File]::WriteAllText(
+                (Join-Path $tempRoot 'Tools\story-todos.json'),
+                ($localTodosJson | ConvertTo-Json -Depth 12),
+                [System.Text.UTF8Encoding]::new($false))
+
+            $localDocument = $repositoryType.GetMethod('Load').Invoke($repository, @($chapter))
+            $todoStoreType = $assembly.GetType('GalExcleTools.Services.StoryTodoStore', $true)
+            $localTodos = @($todoStoreType.GetMethod('Load').Invoke($null, @($projectPath)))
+            $todoListType = [System.Collections.Generic.List``1].MakeGenericType(
+                $assembly.GetType('GalExcleTools.StoryTodoNote', $true))
+            $localTodoList = [System.Activator]::CreateInstance($todoListType)
+            foreach ($note in $localTodos) { [void]$localTodoList.Add($note) }
+
+            $content = $serviceType.GetMethod('LoadPackage').Invoke($service, @($packagePath))
+            $plan = $serviceType.GetMethod('BuildMergePlan').Invoke(
+                $service,
+                @($chapter, $content, $localDocument, $localTodoList))
+
+            $rowItems = @($plan.RowItems)
+            $modified = @($rowItems | Where-Object { $_.Kind.ToString() -eq 'Modified' })
+            $onlyInPackage = @($rowItems | Where-Object { $_.Kind.ToString() -eq 'OnlyInPackage' })
+            $onlyLocal = @($rowItems | Where-Object { $_.Kind.ToString() -eq 'OnlyLocal' })
+            if ($modified.Count -ne 1 -or $onlyInPackage.Count -ne 1 -or $onlyLocal.Count -ne 1) {
+                throw "差异分类不对：Modified=$($modified.Count) OnlyInPackage=$($onlyInPackage.Count) OnlyLocal=$($onlyLocal.Count)"
+            }
+
+            if ($modified[0].StableId -ne '11111111111111111111111111111111' -or
+                $modified[0].ChangedFields -notcontains '文本' -or
+                $onlyInPackage[0].StableId -ne '22222222222222222222222222222222' -or
+                $onlyLocal[0].StableId -ne 'dddddddddddddddddddddddddddddddd') {
+                throw '差异条目认错了句子（StableId 或变化字段不对）。'
+            }
+
+            # 列表顺序 = 合并后的阅读顺序：对方新增的 bbb 应该排在本机 aaa 之后、本机新增的 ddd 之前。
+            if ($rowItems.Count -ne 3 -or
+                $rowItems[0].StableId -ne '11111111111111111111111111111111' -or
+                $rowItems[1].Kind.ToString() -ne 'OnlyInPackage' -or
+                $rowItems[2].StableId -ne 'dddddddddddddddddddddddddddddddd') {
+                throw '差异列表的顺序必须等于合并后的阅读顺序（对方新增的句子要落在它的锚点后面）。'
+            }
+
+            if (@($plan.TodoItems).Count -ne 3) {
+                throw "备注差异应当有 3 条（改过 / 本机独有 / 包里独有），实际 $(@($plan.TodoItems).Count)。"
+            }
+
+            # 全部选"用对方"。
+            $choiceType = $assembly.GetType('GalExcleTools.ChapterMergeChoice', $true)
+            $usePackage = [System.Enum]::Parse($choiceType, 'UsePackage')
+            foreach ($item in $rowItems) { $item.Choice = $usePackage }
+            foreach ($item in @($plan.TodoItems)) { $item.Choice = $usePackage }
+
+            $applyResult = $serviceType.GetMethod('ApplyMerge').Invoke(
+                $service,
+                @($chapter, $plan, $localDocument, $projectPath, $null, [System.Threading.CancellationToken]::None))
+            if ($applyResult.UpdatedRowCount -ne 1 -or
+                $applyResult.InsertedRowCount -ne 1 -or
+                $applyResult.DeletedRowCount -ne 1 -or
+                $applyResult.UpdatedTodoCount -ne 3) {
+                throw "合并计数不对：改 $($applyResult.UpdatedRowCount) 插 $($applyResult.InsertedRowCount) 删 $($applyResult.DeletedRowCount) 备注 $($applyResult.UpdatedTodoCount)"
+            }
+
+            # 合并前必须先备份（走的是「备份 / 还原」那一套，用户能退回来）。
+            if (-not (Test-Path -LiteralPath $applyResult.BackupPath)) {
+                throw '合并前必须先给章节做一次备份。'
+            }
+            $backupMeta = [System.IO.File]::ReadAllText("$($applyResult.BackupPath).meta.json")
+            if ($backupMeta -notmatch '合并章节包前') {
+                throw '那次备份的备注应当写明是"合并章节包前"。'
+            }
+
+            $merged = $repositoryType.GetMethod('Load').Invoke($repository, @($chapter))
+            $mergedRows = @($merged.Rows)
+            if ($mergedRows.Count -ne 3) {
+                throw "合并后应当是 3 行（改 1 / 插 1 / 删 1），实际 $($mergedRows.Count)。"
+            }
+            if ($mergedRows[0].Get('Tesxt') -ne '第一句' -or
+                $mergedRows[1].Get('Tesxt') -ne '第二句' -or
+                $mergedRows[2].Get('Tesxt') -ne '第三句') {
+                throw "合并后的正文不对：$($mergedRows[0].Get('Tesxt')) / $($mergedRows[1].Get('Tesxt')) / $($mergedRows[2].Get('Tesxt'))"
+            }
+            if ($mergedRows[1].StableId -ne '22222222222222222222222222222222') {
+                throw '插入的行必须带着包里那个 StableId —— 下次对接还要靠它认人。'
+            }
+            if ($merged.RowSections['1'] -ne 1 -or $merged.RowSections['2'] -ne 1 -or $merged.RowSections['3'] -ne 2) {
+                throw "小节归属不对（插入行应当跟随它前面那一行）：$($merged.RowSections['1'])/$($merged.RowSections['2'])/$($merged.RowSections['3'])"
+            }
+
+            $mergedTodos = @($todoStoreType.GetMethod('Load').Invoke($null, @($projectPath)))
+            $chapterTodos = @($mergedTodos | Where-Object { $_.ChapterCode -eq 'WHK-M6-00' })
+            if ($chapterTodos.Count -ne 2) {
+                throw "合并后本章备注应当是 2 条，实际 $($chapterTodos.Count)。"
+            }
+            if (@($chapterTodos | Where-Object { $_.Text -eq '本章备注甲' }).Count -ne 1 -or
+                @($chapterTodos | Where-Object { $_.Done -eq $true }).Count -ne 1 -or
+                @($chapterTodos | Where-Object { $_.RowNumber -eq 3 }).Count -ne 1) {
+                throw '合并后本章备注的内容 / 勾选 / 行号重算不对。'
+            }
+            if (@($mergedTodos | Where-Object { $_.ChapterCode -eq 'WHK-M7-00' }).Count -ne 1) {
+                throw '别的章节的备注必须原样保留（备注文件是整个项目一份）。'
+            }
             }
         }
         finally {

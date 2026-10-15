@@ -71,3 +71,138 @@ internal sealed class ChapterPackageManifest
 internal sealed record ChapterPackageExportResult(
     string PackagePath,
     ChapterPackageManifest Manifest);
+
+/// <summary>拆包结果：清单 + 包里的文档 + 包里的备注。</summary>
+internal sealed record ChapterPackageContent(
+    string PackagePath,
+    ChapterPackageManifest Manifest,
+    StoryDocumentFile Document,
+    List<StoryTodoNote> Todos);
+
+/// <summary>一条差异属于哪一类。</summary>
+internal enum ChapterMergeItemKind
+{
+    /// <summary>两边都有这一句，但内容不一样（谁改的分不出来 —— 二方对比的固有歧义）。</summary>
+    Modified,
+
+    /// <summary>只有包里（对方那边）有：可能是他新增的，也可能是这边删了。分不清，所以默认不动。</summary>
+    OnlyInPackage,
+
+    /// <summary>只有本机有：可能是这边新增的，也可能是对方删了。同上，默认不动。</summary>
+    OnlyLocal
+}
+
+/// <summary>这一条用哪边。默认一律 <see cref="KeepLocal"/> —— 合并是"我这边收下对方的改动"，
+/// 没点名的地方就不该被动。</summary>
+internal enum ChapterMergeChoice
+{
+    KeepLocal,
+    UsePackage
+}
+
+/// <summary>剧情行的一条差异（按句）。</summary>
+internal sealed class ChapterMergeItem
+{
+    public required ChapterMergeItemKind Kind { get; init; }
+
+    /// <summary>对齐键：行的 StableId。</summary>
+    public required string StableId { get; init; }
+
+    /// <summary>本机第几句（0 = 本机没有这一句）。</summary>
+    public int LocalRowNumber { get; init; }
+
+    /// <summary>包里第几句（0 = 包里没有这一句）。</summary>
+    public int PackageRowNumber { get; init; }
+
+    public int LocalSection { get; init; }
+
+    public int PackageSection { get; init; }
+
+    /// <summary>列表左边那栏：本机这一句长什么样（"说话人：文本"）。</summary>
+    public string LocalSummary { get; init; } = string.Empty;
+
+    /// <summary>列表右边那栏：包里这一句长什么样。</summary>
+    public string PackageSummary { get; init; } = string.Empty;
+
+    /// <summary>哪些字段不一样（中文名）。只有 <see cref="ChapterMergeItemKind.Modified"/> 才有。</summary>
+    public List<string> ChangedFields { get; init; } = [];
+
+    /// <summary>
+    /// 界面上的选择。<b>可变</b>：用户逐条切换，最后整份计划交给合并。
+    /// </summary>
+    public ChapterMergeChoice Choice { get; set; } = ChapterMergeChoice.KeepLocal;
+}
+
+/// <summary>TODO 备注的一条差异。</summary>
+internal sealed class ChapterTodoMergeItem
+{
+    public required ChapterMergeItemKind Kind { get; init; }
+
+    /// <summary>对齐键：有 StableId 就用它；老备注（还没迁移出 StableId）退化成 <c>#行号</c>。</summary>
+    public required string MergeKey { get; init; }
+
+    public string StableId { get; init; } = string.Empty;
+
+    public int LocalRowNumber { get; init; }
+
+    public int PackageRowNumber { get; init; }
+
+    public string LocalText { get; init; } = string.Empty;
+
+    public string PackageText { get; init; } = string.Empty;
+
+    public bool LocalDone { get; init; }
+
+    public bool PackageDone { get; init; }
+
+    /// <summary>界面上的选择，含义同 <see cref="ChapterMergeItem.Choice"/>。</summary>
+    public ChapterMergeChoice Choice { get; set; } = ChapterMergeChoice.KeepLocal;
+}
+
+/// <summary>
+/// 整章的差异计划：界面照着它画列表、用户选完再交给合并。
+///
+/// 【两类条目分开】剧情行归 <see cref="RowItems"/>，TODO 备注归 <see cref="TodoItems"/> ——
+/// 它们的数据源和落点都不一样（行落 story.document.json，备注落项目级 story-todos.json）。
+/// </summary>
+internal sealed class ChapterMergePlan
+{
+    /// <summary>拆包结果（文档、备注、清单都在里面 —— 合并时也用它，避免计划和包对不上）。</summary>
+    public required ChapterPackageContent Package { get; init; }
+
+    public ChapterPackageManifest Manifest => Package.Manifest;
+
+    public string PackagePath => Package.PackagePath;
+
+    /// <summary>按**阅读顺序**排好：本机行序为骨架，"只有对方有"的句按锚点插在它该在的位置。</summary>
+    public List<ChapterMergeItem> RowItems { get; init; } = [];
+
+    public List<ChapterTodoMergeItem> TodoItems { get; init; } = [];
+
+    /// <summary>不拦路、但必须让人看见的提醒（不同源 / 章码不一样 / 选项函数缺备注……）。</summary>
+    public List<string> Warnings { get; init; } = [];
+
+    public int ModifiedCount => RowItems.Count(item => item.Kind == ChapterMergeItemKind.Modified);
+
+    public int OnlyInPackageCount => RowItems.Count(item => item.Kind == ChapterMergeItemKind.OnlyInPackage);
+
+    public int OnlyLocalCount => RowItems.Count(item => item.Kind == ChapterMergeItemKind.OnlyLocal);
+
+    public int TodoChangeCount => TodoItems.Count;
+
+    public bool HasAnyChange => RowItems.Count > 0 || TodoItems.Count > 0;
+
+    /// <summary>已经点了"用对方"的条数（界面上那个"将应用 N 条"）。</summary>
+    public int SelectedFromPackageCount =>
+        RowItems.Count(item => item.Choice == ChapterMergeChoice.UsePackage) +
+        TodoItems.Count(item => item.Choice == ChapterMergeChoice.UsePackage);
+}
+
+/// <summary>合并结果，用来告诉用户到底动了什么。</summary>
+internal sealed record ChapterMergeApplyResult(
+    int UpdatedRowCount,
+    int InsertedRowCount,
+    int DeletedRowCount,
+    int UpdatedTodoCount,
+    string BackupPath);
+

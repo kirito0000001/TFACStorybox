@@ -14,7 +14,10 @@ namespace GalExcleTools.Services;
 internal sealed class FolderBackupService
 {
     private const int MaxFolderBackupCount = 3;
-    private const string ChapterBackupsFolderName = "ChapterBackups";
+
+    /// <summary>章节备份目录名。公开出来是因为"合并章节包前"也要往这里备份一次（见 ChapterPackageService）。</summary>
+    public const string ChapterBackupsFolderName = "ChapterBackups";
+
     private const string ProjectBackupsFolderName = "ProjectBackups";
     private const string AssetLibraryBackupsFolderName = "AssetLibraryBackups";
     private const string UnrealBackupsFolderName = "UnrealBackups";
