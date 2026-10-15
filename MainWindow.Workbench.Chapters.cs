@@ -407,10 +407,13 @@ namespace GalExcleTools
                 await FlushChapterEditsBeforeExportAsync(chapter);
 
                 // ② 选保存位置（和项目 / 素材库的「导出」同一套手感）。
+                //    文件名是**章节中文名 + 日期序号**（例如 `第六章_20261015_1712.zip`）——
+                //    这个包是要发出去的，收件人一眼就知道是哪一章、哪一次导的；
+                //    用代号（WHK-M6-00）当文件名反而要靠记忆去对。
                 var picker = new FileSavePicker
                 {
                     SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
-                    SuggestedFileName = $"{SanitizeBackupFileName(chapter.Code)}_{DateTime.Now:yyyyMMdd_HHmmss}"
+                    SuggestedFileName = $"{SanitizeBackupFileName(chapter.Name)}_{DateTime.Now:yyyyMMdd_HHmmss}"
                 };
                 picker.FileTypeChoices.Add("TFACStorybox 章节编辑包", [".zip"]);
                 InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));

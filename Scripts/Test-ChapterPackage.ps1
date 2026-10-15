@@ -44,6 +44,13 @@ Require-Pattern `
     'ExportChapterPackageFromUiAsync[\s\S]*?FlushChapterEditsBeforeExportAsync[\s\S]*?_chapterPackageService\.Export' `
     'Exporting a chapter must flush pending edits before the package is built.'
 
+# 包名 = 章节中文名 + 日期序号（`第六章_20261015_1712.zip`）：这东西是发给别人的，
+# 收件人要看一眼就知道是哪一章、哪一次导的 —— 用代号（WHK-M6-00）反而要靠记忆去对。
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Workbench.Chapters.cs') `
+    'SuggestedFileName = \$"\{SanitizeBackupFileName\(chapter\.Name\)\}_\{DateTime\.Now:yyyyMMdd_HHmmss\}"' `
+    'The exported package must be named after the chapter''s display name, with the date serial after it.'
+
 Require-Pattern `
     (Join-Path $root 'MainWindow.Workbench.Chapters.cs') `
     'FlushChapterEditsBeforeExportAsync[\s\S]*?SaveCurrentStoryRow[\s\S]*?FlushAsync[\s\S]*?SaveStoryTodosIfDirty' `
@@ -82,22 +89,25 @@ if (Test-Path -LiteralPath $assemblyPath) {
             New-Item -ItemType Directory -Path (Join-Path $tempRoot 'Tools') -Force | Out-Null
 
             # 一份最小但合法的 StoryDocument：2 个小节、3 行。
+            # ⚠️ 字段名一律 PascalCase —— 工具箱自己写出来的就是 PascalCase
+            #    （story.document.json 那边仓库是大小写不敏感的，但 todos.json 不是，
+            #     夹带写成 camelCase 会静默读成空：这个用例第一版就是这么挂的）。
             $document = [ordered]@{
-                schemaVersion = 3
-                chapterCode   = 'WHK-M6-00'
-                savedAt       = '2026-10-15T12:00:00+08:00'
-                sections      = @(
-                    [ordered]@{ number = 1; lines = @(
-                        [ordered]@{ stableId = '11111111111111111111111111111111'; cells = [ordered]@{ Tesxt = '第一句' } },
-                        [ordered]@{ stableId = '22222222222222222222222222222222'; cells = [ordered]@{ Tesxt = '第二句' } }
+                SchemaVersion = 3
+                ChapterCode   = 'WHK-M6-00'
+                SavedAt       = '2026-10-15T12:00:00+08:00'
+                Sections      = @(
+                    [ordered]@{ Number = 1; Lines = @(
+                        [ordered]@{ StableId = '11111111111111111111111111111111'; Cells = [ordered]@{ Tesxt = '第一句' } },
+                        [ordered]@{ StableId = '22222222222222222222222222222222'; Cells = [ordered]@{ Tesxt = '第二句' } }
                     ) },
-                    [ordered]@{ number = 2; lines = @(
-                        [ordered]@{ stableId = '33333333333333333333333333333333'; cells = [ordered]@{ Tesxt = '第三句' } }
+                    [ordered]@{ Number = 2; Lines = @(
+                        [ordered]@{ StableId = '33333333333333333333333333333333'; Cells = [ordered]@{ Tesxt = '第三句' } }
                     ) }
                 )
-                choiceNotes   = [ordered]@{ choices = [ordered]@{} }
-                branchRoutes  = @()
-                customBranchSectionFirstRowIds = @()
+                ChoiceNotes   = [ordered]@{ Choices = [ordered]@{} }
+                BranchRoutes  = @()
+                CustomBranchSectionFirstRowIds = @()
             }
             [System.IO.File]::WriteAllText(
                 (Join-Path $chapterPath 'story.document.json'),
@@ -106,11 +116,11 @@ if (Test-Path -LiteralPath $assemblyPath) {
 
             # 项目级备注：本章 2 条 + 别的章节 1 条（后者不该进包）。
             $todos = [ordered]@{
-                version = 2
-                notes   = @(
-                    [ordered]@{ chapterCode = 'WHK-M6-00'; rowNumber = 1; section = 1; text = '本章备注甲'; done = $false; updatedAt = '2026-10-15T12:00:00+08:00'; stableId = '11111111111111111111111111111111' },
-                    [ordered]@{ chapterCode = 'WHK-M6-00'; rowNumber = 3; section = 2; text = '本章备注乙'; done = $true;  updatedAt = '2026-10-15T12:01:00+08:00'; stableId = '33333333333333333333333333333333' },
-                    [ordered]@{ chapterCode = 'WHK-M7-00'; rowNumber = 2; section = 1; text = '别章备注';   done = $false; updatedAt = '2026-10-15T12:02:00+08:00'; stableId = '44444444444444444444444444444444' }
+                Version = 2
+                Notes   = @(
+                    [ordered]@{ ChapterCode = 'WHK-M6-00'; RowNumber = 1; Section = 1; Text = '本章备注甲'; Done = $false; UpdatedAt = '2026-10-15T12:00:00+08:00'; StableId = '11111111111111111111111111111111' },
+                    [ordered]@{ ChapterCode = 'WHK-M6-00'; RowNumber = 3; Section = 2; Text = '本章备注乙'; Done = $true;  UpdatedAt = '2026-10-15T12:01:00+08:00'; StableId = '33333333333333333333333333333333' },
+                    [ordered]@{ ChapterCode = 'WHK-M7-00'; RowNumber = 2; Section = 1; Text = '别章备注';   Done = $false; UpdatedAt = '2026-10-15T12:02:00+08:00'; StableId = '44444444444444444444444444444444' }
                 )
             }
             [System.IO.File]::WriteAllText(
@@ -151,9 +161,9 @@ if (Test-Path -LiteralPath $assemblyPath) {
                 $todoEntry = $archive.Entries | Where-Object { $_.FullName -eq 'todos.json' }
                 $reader = [System.IO.StreamReader]::new($todoEntry.Open())
                 try { $packedTodos = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
-                if (@($packedTodos.notes).Count -ne 2 -or
-                    @($packedTodos.notes | Where-Object { $_.chapterCode -ne 'WHK-M6-00' }).Count -ne 0 -or
-                    @($packedTodos.notes | Where-Object { $_.stableId -eq '11111111111111111111111111111111' }).Count -ne 1) {
+                if (@($packedTodos.Notes).Count -ne 2 -or
+                    @($packedTodos.Notes | Where-Object { $_.ChapterCode -ne 'WHK-M6-00' }).Count -ne 0 -or
+                    @($packedTodos.Notes | Where-Object { $_.StableId -eq '11111111111111111111111111111111' }).Count -ne 1) {
                     throw 'Only this chapter''s todos (with their stable ids) may be packed.'
                 }
 
