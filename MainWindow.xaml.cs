@@ -72,6 +72,7 @@ namespace GalExcleTools
         private readonly StorySaveCoordinator _storySaveCoordinator;
         private readonly StoryCsvExporter _storyCsvExporter;
         private readonly StoryCsvImporter _storyCsvImporter;
+        private readonly ChapterPackageService _chapterPackageService;
         private readonly StoryEditorService _storyEditorService;
         private readonly ProjectTextDataService _projectTextDataService;
         private readonly ProjectVoiceAssetService _projectVoiceAssetService = new();
@@ -534,6 +535,7 @@ namespace GalExcleTools
             _storyChoiceManagerService = new StoryChoiceManagerService(_storyDocumentRepository);
             _storySaveCoordinator = new StorySaveCoordinator(_storyDocumentRepository);
             _storyCsvExporter = new StoryCsvExporter(_storyCsvService, _storyDocumentRepository);
+            _chapterPackageService = new ChapterPackageService(_storyDocumentRepository);
             _storyCsvImporter = new StoryCsvImporter(_storyCsvService, _storyDocumentRepository);
             _storySaveCoordinator.SaveFailed += (_, exception) => DispatcherQueue.TryEnqueue(() =>
             {

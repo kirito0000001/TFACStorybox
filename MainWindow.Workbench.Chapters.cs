@@ -57,6 +57,7 @@ namespace GalExcleTools
                 GridViewItemFactory.CreateMenuItem("选项与分支", async (_, _) => await ShowChapterChoiceManagerAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("AI 剧情填表", async (_, _) => await ShowAiStoryFillWorkflowAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("导入小节", async (_, _) => await ImportStorySectionsFromUiAsync(chapter)),
+                GridViewItemFactory.CreateMenuItem("导出章节", async (_, _) => await ExportChapterPackageFromUiAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("备份", async (_, _) => await BackupChapterFromUiAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("还原", async (_, _) => await RestoreChapterFromUiAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("修复", async (_, _) => await RepairChapterIndexesFromUiAsync(chapter)),
@@ -376,6 +377,94 @@ namespace GalExcleTools
                 ShowChapterStatus(InfoBarSeverity.Error, "导入小节失败", ex.Message);
                 AppendLog(LogKind.Error, "导入小节 CSV 失败。", ex);
             }
+        }
+
+        /// <summary>
+        /// 「导出章节」：把这一章的**剧情数据**导成一个编辑包，给另一边的人编辑。
+        ///
+        /// 【和「备份」不是一回事】
+        /// 备份 = 给自己回退用的整目录 zip（含 CSV、AI 填表备份，落点在自己目录下、留 3 份）。
+        /// 这个包 = 给**对面的人**用的对接件：只有剧情主数据 + 本章 TODO 备注 + 一份清单，
+        /// 不放素材（两边素材一致）。对方编完把它发回来，走「导入章节」做差异对比、选一方合并。
+        ///
+        /// 包的结构与理由见 <see cref="ChapterPackageService"/>。
+        /// </summary>
+        private async Task ExportChapterPackageFromUiAsync(ChapterInfo chapter)
+        {
+            if (_currentProject is null)
+            {
+                ShowChapterStatus(InfoBarSeverity.Warning, "无法导出章节", "请先打开一个项目。");
+                return;
+            }
+
+            try
+            {
+                ChapterInfoBar.IsOpen = false;
+
+                // ① 先把还没落盘的编辑写下去。导出的可能正是**当前打开的这一章**，
+                //    而自动保存有 900ms debounce —— 不 flush 的话包里会少最后一拍。
+                //    这一步必须在生成包**之前**：包直接搬磁盘上那份文档。
+                await FlushChapterEditsBeforeExportAsync(chapter);
+
+                // ② 选保存位置（和项目 / 素材库的「导出」同一套手感）。
+                var picker = new FileSavePicker
+                {
+                    SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+                    SuggestedFileName = $"{SanitizeBackupFileName(chapter.Code)}_{DateTime.Now:yyyyMMdd_HHmmss}"
+                };
+                picker.FileTypeChoices.Add("TFACStorybox 章节编辑包", [".zip"]);
+                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+                var packageFile = await picker.PickSaveFileAsync();
+                if (packageFile is null)
+                {
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(packageFile.Path))
+                {
+                    ShowChapterStatus(InfoBarSeverity.Warning, "章节未导出", "请选择本机文件夹里的保存位置。");
+                    return;
+                }
+
+                // ③ 生成包。压一个几百 KB 的 zip 是秒级的，不另开进度弹窗
+                //    （AI 剧情填表导出也是直接出结果）。
+                var projectPath = _currentProject.Path;
+                var export = await Task.Run(() => _chapterPackageService.Export(chapter, projectPath, packageFile.Path));
+                ShowChapterStatus(
+                    InfoBarSeverity.Success,
+                    "章节已导出",
+                    $"{chapter.Name}（{chapter.Code}）\n"
+                    + $"{export.Manifest.RowCount} 行 / {export.Manifest.SectionCount} 个小节 / {export.Manifest.TodoCount} 条备注\n"
+                    + "把这个 zip 发给另一边；他编完发回来时用「导入章节」做差异对比。");
+                AppendLog(
+                    LogKind.User,
+                    $"导出章节编辑包：{chapter.Name}（{chapter.Code}）-> {export.PackagePath}"
+                    + $"（{export.Manifest.RowCount} 行 / {export.Manifest.SectionCount} 小节 / {export.Manifest.TodoCount} 备注，包号 {export.Manifest.PackageId[..8]}）");
+            }
+            catch (Exception ex)
+            {
+                ShowChapterStatus(InfoBarSeverity.Error, "导出章节失败", ex.Message);
+                AppendLog(LogKind.Error, "导出章节失败。", ex);
+            }
+        }
+
+        /// <summary>
+        /// 导出前把"还没落盘的编辑"写下去。
+        ///
+        /// - 故事文档：只有导出的正好是**当前打开的那一章**才需要（保存走 900ms debounce 的
+        ///   <c>StorySaveCoordinator</c>，"改完最后一句 → 立刻导出"时磁盘上还是上一拍的样子）。
+        /// - TODO 备注：项目级一个文件，无论是哪一章都先落一次；没脏就是空操作。
+        /// </summary>
+        private async Task FlushChapterEditsBeforeExportAsync(ChapterInfo chapter)
+        {
+            if (_currentStoryChapter is not null && PathsEqual(_currentStoryChapter.Path, chapter.Path))
+            {
+                SaveCurrentStoryRow();
+                _storyEditSaveTimer?.Stop();
+                await _storySaveCoordinator.FlushAsync();
+            }
+
+            SaveStoryTodosIfDirty();
         }
 
         private async Task<List<string>?> ShowStorySectionImportDialogAsync(ChapterInfo chapter)
