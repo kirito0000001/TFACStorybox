@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GalExcleTools.Services;
 
 // 命名空间是 GalExcleTools（根）—— 仓库里 Models/ 下所有模型都这样，别按"文件夹名=命名空间"写。
 namespace GalExcleTools;
@@ -36,10 +37,10 @@ internal sealed record StoryTodoNote(
     bool Done,
     DateTimeOffset UpdatedAt)
 {
-    /// <summary>列表里那行标题：第几句、在哪一章。</summary>
+    /// <summary>列表里那行标题：第几句、在哪一章、第几小节。</summary>
     public string HeaderText =>
         Section > 0
-            ? $"第 {RowNumber} 句 · {ChapterCode} · 第 {Section} 小节"
+            ? $"第 {RowNumber} 句 · {ChapterCode} · {StorySectionDisplay.FormatName(Section)}"
             : $"第 {RowNumber} 句 · {ChapterCode}";
 }
 

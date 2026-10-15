@@ -520,13 +520,13 @@ namespace GalExcleTools
             var targetSectionIndex = currentSectionIndex + Math.Sign(direction);
             if (targetSectionIndex < 0)
             {
-                ShowStoryStatus(InfoBarSeverity.Informational, "已经是第一节", "没有更前面的小节。");
+                ShowStoryStatus(InfoBarSeverity.Informational, "已经是第一个小节", "没有更前面的小节。");
                 return;
             }
 
             if (targetSectionIndex >= orderedSections.Count)
             {
-                ShowStoryStatus(InfoBarSeverity.Informational, "已经是最后一节", "没有更后面的小节。");
+                ShowStoryStatus(InfoBarSeverity.Informational, "已经是最后一个小节", "没有更后面的小节。");
                 return;
             }
 

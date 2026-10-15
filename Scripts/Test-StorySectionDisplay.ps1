@@ -9,6 +9,8 @@ if (!(Test-Path -LiteralPath $servicePath)) {
 $sources = @(
     'MainWindow.Story.Sections.cs',
     'MainWindow.Workbench.ChoiceManager.cs',
+    'MainWindow.Workbench.TextTool.cs',
+    'Models\StoryTodoModels.cs',
     'Services\StoryBranchService.cs',
     'Services\StoryFunctionService.cs',
     'Services\StoryCsvImporter.cs',
@@ -18,6 +20,18 @@ foreach ($source in $sources) {
     $text = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $root $source)
     if ($text -notmatch 'StorySectionDisplay\.FormatName') {
         throw "$source must use the shared zero-based section formatter."
+    }
+}
+
+# 反面：不许再把**内部 1 起号**直接印进界面文字（那正是"编辑器第 6 小节、文本工具小节 7"的来源）。
+$forbidden = @(
+    @{ Source = 'MainWindow.Workbench.TextTool.cs'; Pattern = '小节 \{row\.Section\}' },
+    @{ Source = 'Models\StoryTodoModels.cs'; Pattern = '第 \{Section\} 小节' }
+)
+foreach ($entry in $forbidden) {
+    $text = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $root $entry.Source)
+    if ($text -match $entry.Pattern) {
+        throw "$($entry.Source) must not print the internal one-based section number ($($entry.Pattern))."
     }
 }
 

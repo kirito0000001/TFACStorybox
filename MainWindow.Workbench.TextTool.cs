@@ -503,9 +503,20 @@ namespace GalExcleTools
             return grid;
         }
 
-        private static string CreateProjectTextSourceContent(ProjectTextRow row)
+        /// <summary>
+        /// 文本工具里那句「章节 / 第 N 小节 / 行 M」的位置文字。
+        ///
+        /// 小节号必须走 <see cref="StorySectionDisplay"/> 的**显示口径（0 起）**。
+        /// 这里原来直接印内部的 1 起号，于是同一句话在剧情编辑器里是「第 6 小节」、
+        /// 到文本语音/本地化里变成「小节 7」—— 两边对不上，用户没法确认自己看的是不是同一节。
+        /// （2026-08-23 那次「统一成 0 起」的改动漏了这里，还有 TODO 备注列表。）
+        ///
+        /// 顺带删掉了一个没人调用的 CreateProjectTextSourceContent —— 它拼的是同一段文字，
+        /// 留着就是第二份口径，迟早各自漂。
+        /// </summary>
+        private static string CreateProjectTextRowLocation(ProjectTextRow row)
         {
-            return $"{row.Text}\n{row.ChapterCode} / 小节 {row.Section} / 行 {row.RowName}";
+            return $"{row.ChapterCode} / {StorySectionDisplay.FormatName(row.Section)} / 行 {row.RowName}";
         }
 
         private static Border CreateProjectTextSourceCell(ProjectTextRow row)
@@ -522,7 +533,7 @@ namespace GalExcleTools
             });
             panel.Children.Add(new TextBlock
             {
-                Text = $"{row.ChapterCode} / 小节 {row.Section} / 行 {row.RowName}",
+                Text = CreateProjectTextRowLocation(row),
                 TextWrapping = TextWrapping.Wrap,
                 FontWeight = Microsoft.UI.Text.FontWeights.Normal,
                 Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
