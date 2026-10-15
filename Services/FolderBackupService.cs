@@ -22,6 +22,38 @@ internal sealed class FolderBackupService
     private const string AssetLibraryBackupsFolderName = "AssetLibraryBackups";
     private const string UnrealBackupsFolderName = "UnrealBackups";
 
+    /// <summary>
+    /// **导出**（发给别人 / 存档）时额外要跳过的目录名 —— 比备份多跳这一批"本机工件"：
+    /// 同步中间产物（<c>UnrealAssetIndexTables</c> / <c>UnrealSync</c>）、
+    /// AI 填表的逐次备份（<c>AIStoryFillBackups</c>）、
+    /// CSV 导出的事务残留（<c>.story-csv-export-transaction</c>，崩在中途才会留下）。
+    /// 它们描述的是"**这台机器**上做到哪一步了"，发给对方只会让对方以为已经同步过。
+    /// 2026-10-15 交接协作者时加的。
+    ///
+    /// ⚠️ 备份（<see cref="CreateBackup"/>）**不**跳这批：备份要的是"完整快照"，
+    /// 少了同步状态还算什么快照。所以两处的过滤是分开的。
+    /// </summary>
+    private static readonly string[] ExportExcludedLocalFolderNames =
+    [
+        "UnrealAssetIndexTables",
+        "UnrealSync",
+        "AIStoryFillBackups",
+        ".story-csv-export-transaction"
+    ];
+
+    /// <summary>导出时要额外跳过的**文件**名（同样只描述本机状态）。</summary>
+    private static readonly string[] ExportExcludedLocalFileNames =
+    [
+        "unreal-sync-state.json",
+        "ai-story-import-state.json"
+    ];
+
+    /// <summary>导出时额外跳过的文件名前缀：<c>story.voice-map.*.json</c> 这类历史迁移备份。</summary>
+    private const string ExportLocalArtifactFilePrefix = "story.voice-map.";
+
+    /// <summary>上面那条前缀要放行的正牌文件（备注映射本身是要带走的）。</summary>
+    private const string KeptVoiceMapFileName = "story.voice-map.json";
+
     private readonly JsonSerializerOptions _jsonOptions;
 
     public FolderBackupService(JsonSerializerOptions jsonOptions)
@@ -107,7 +139,8 @@ internal sealed class FolderBackupService
         string folderPath,
         string exportPath,
         IProgress<FolderBackupProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        WorkspacePackageManifest? manifest = null)
     {
         if (!Directory.Exists(folderPath))
         {
@@ -128,15 +161,29 @@ internal sealed class FolderBackupService
         }
 
         var backupsPath = GetFolderBackupsPath(folderPath, ProjectBackupsFolderName);
-        progress?.Report(new FolderBackupProgress("正在扫描要导出的项目文件...", 0, 0, 0, 0, 0, null));
+        // 文案跟着包里的清单说话（素材库导出不该说"项目文件"）。
+        var noun = GetPackageNoun(manifest);
+        progress?.Report(new FolderBackupProgress($"正在扫描要导出的{noun}文件...", 0, 0, 0, 0, 0, null));
         cancellationToken.ThrowIfCancellationRequested();
-        var files = EnumerateBackupFiles(folderPath, backupsPath)
+        var files = EnumerateBackupFiles(folderPath, backupsPath, excludeLocalArtifacts: true)
             .Where(filePath => !PathsEqual(filePath, exportFullPath))
             .ToList();
         var totalBytes = files.Sum(filePath => new FileInfo(filePath).Length);
 
+        // 清单放在**第一个**条目：读取方扫一下条目表就能拿到"这是什么包"。
+        if (manifest is not null)
+        {
+            manifest.FileCount = files.Count;
+            manifest.TotalBytes = totalBytes;
+        }
+
         using (var archive = ZipFile.Open(exportFullPath, ZipArchiveMode.Create))
         {
+            if (manifest is not null)
+            {
+                WriteManifestEntry(archive, manifest);
+            }
+
             long completedBytes = 0;
             for (var index = 0; index < files.Count; index++)
             {
@@ -160,9 +207,34 @@ internal sealed class FolderBackupService
             }
         }
 
-        progress?.Report(new FolderBackupProgress("项目导出完成。", 100, files.Count, files.Count, totalBytes, totalBytes, null));
+        progress?.Report(new FolderBackupProgress($"{noun}导出完成。", 100, files.Count, files.Count, totalBytes, totalBytes, null));
         return BuildEntry(exportFullPath);
     }
+
+    /// <summary>进度文案里的名词：有清单就按清单说，没有就沿用旧的"项目"。</summary>
+    private static string GetPackageNoun(WorkspacePackageManifest? manifest)
+    {
+        return manifest?.PackageType switch
+        {
+            WorkspacePackageManifest.AssetLibraryPackageTypeValue => "素材库",
+            WorkspacePackageManifest.ProjectPackageTypeValue => "项目",
+            _ => "项目"
+        };
+    }
+
+    private static void WriteManifestEntry(ZipArchive archive, WorkspacePackageManifest manifest)
+    {
+        var entry = archive.CreateEntry(WorkspacePackageManifest.FileName, CompressionLevel.Optimal);
+        using var stream = entry.Open();
+        using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        writer.Write(JsonSerializer.Serialize(manifest, ManifestJsonOptions));
+    }
+
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 
     public void Restore(string folderPath, string backupsFolderName, FolderBackupEntry backup)
     {
@@ -208,27 +280,70 @@ internal sealed class FolderBackupService
             .ToList();
     }
 
-    private IEnumerable<string> EnumerateBackupFiles(string folderPath, string currentBackupsPath)
+    private IEnumerable<string> EnumerateBackupFiles(
+        string folderPath,
+        string currentBackupsPath,
+        bool excludeLocalArtifacts = false)
     {
         return Directory
             .EnumerateFiles(folderPath, "*", SearchOption.AllDirectories)
-            .Where(filePath => !ShouldSkipBackupFile(filePath, currentBackupsPath));
+            .Where(filePath => !ShouldSkipBackupFile(folderPath, filePath, currentBackupsPath, excludeLocalArtifacts));
     }
 
-    private static bool ShouldSkipBackupFile(string filePath, string currentBackupsPath)
+    /// <summary>
+    /// 这个文件要不要跳过。
+    ///
+    /// 【为什么相对路径算，而不是从盘符算】原先是拿"从盘符根开始的路径段"去比名字，
+    /// 于是**工作区所在的上层目录**只要叫 <c>ChapterBackups</c> 之类，整份导出就会被跳空。
+    /// 改成"相对被导出文件夹的路径段"，只认这份数据内部的目录名。
+    /// </summary>
+    private static bool ShouldSkipBackupFile(
+        string folderPath,
+        string filePath,
+        string currentBackupsPath,
+        bool excludeLocalArtifacts)
     {
         if (IsPathInsideDirectory(filePath, currentBackupsPath))
         {
             return true;
         }
 
-        var segments = Path.GetRelativePath(Path.GetPathRoot(Path.GetFullPath(filePath))!, filePath)
-            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return segments.Any(segment =>
-            string.Equals(segment, ProjectBackupsFolderName, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(segment, AssetLibraryBackupsFolderName, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(segment, ChapterBackupsFolderName, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(segment, UnrealBackupsFolderName, StringComparison.OrdinalIgnoreCase));
+        var relativePath = Path.GetRelativePath(folderPath, filePath);
+        var segments = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        // 备份目录：两种模式都跳过（备份也不该把自己上一次的备份套进去）。
+        if (segments.Any(IsBackupsFolderName))
+        {
+            return true;
+        }
+
+        // 下面这批只在**导出**时跳：备份要的是完整快照。
+        if (!excludeLocalArtifacts)
+        {
+            return false;
+        }
+
+        if (segments.Any(segment => ExportExcludedLocalFolderNames.Contains(segment, StringComparer.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var fileName = segments[^1];
+        if (ExportExcludedLocalFileNames.Contains(fileName, StringComparer.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return fileName.StartsWith(ExportLocalArtifactFilePrefix, StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(fileName, KeptVoiceMapFileName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsBackupsFolderName(string segment)
+    {
+        return string.Equals(segment, ProjectBackupsFolderName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(segment, AssetLibraryBackupsFolderName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(segment, ChapterBackupsFolderName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(segment, UnrealBackupsFolderName, StringComparison.OrdinalIgnoreCase);
     }
 
     private void PruneBackups(string folderPath, string backupsFolderName)

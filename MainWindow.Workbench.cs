@@ -200,7 +200,9 @@ namespace GalExcleTools
                 var picker = new FileSavePicker
                 {
                     SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
-                    SuggestedFileName = $"{SanitizeBackupFileName(project.Code)}_{DateTime.Now:yyyyMMdd_HHmmss}"
+                    // 项目中文名在前、日期序号在后（和章节编辑包一个规矩）：这东西是发给别人的，
+                    // 收件人一眼就知道是哪个项目、哪一次导的。
+                    SuggestedFileName = $"{SanitizeBackupFileName(project.Name)}_{DateTime.Now:yyyyMMdd_HHmmss}"
                 };
                 picker.FileTypeChoices.Add("TFACStorybox 项目包", [".zip"]);
                 InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
@@ -221,10 +223,31 @@ namespace GalExcleTools
                     return;
                 }
 
+                // 包里带一份清单：对方（以及以后的导入逻辑）不用靠猜就知道这是什么包、
+                // 该配哪个素材库。清单里的文件数 / 字节数由导出那边填。
+                var manifest = new WorkspacePackageManifest
+                {
+                    PackageType = WorkspacePackageManifest.ProjectPackageTypeValue,
+                    PackageId = Guid.NewGuid().ToString("N"),
+                    ExportedAt = DateTimeOffset.Now,
+                    ToolVersion = AppVersionService.GetDisplayVersion(),
+                    Name = project.Name,
+                    Code = project.Code,
+                    FolderName = project.FolderName,
+                    AssetLibraryName = project.AssetLibraryName,
+                    AssetLibraryFolderName = project.AssetLibraryFolderName,
+                    ChapterCount = _projectWorkspaceService.GetChapters(project).Count
+                };
+
                 var export = await ShowFolderBackupProgressDialogAsync(
                     "正在导出项目",
                     project.Name,
-                    progress => Task.Run(() => _folderBackupService.ExportToZip(project.Path, exportFile.Path, progress, GetGlobalProgressCancellationToken())));
+                    progress => Task.Run(() => _folderBackupService.ExportToZip(
+                        project.Path,
+                        exportFile.Path,
+                        progress,
+                        GetGlobalProgressCancellationToken(),
+                        manifest)));
                 ShowFloatingTip(
                     InfoBarSeverity.Success,
                     "项目已导出",
@@ -331,7 +354,9 @@ namespace GalExcleTools
                 var picker = new FileSavePicker
                 {
                     SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
-                    SuggestedFileName = $"{SanitizeBackupFileName(assetLibrary.FolderName)}_{DateTime.Now:yyyyMMdd_HHmmss}"
+                    // 素材库中文名在前、日期序号在后（和项目包 / 章节包一个规矩）。
+                    // 注意用 Name 而不是 FolderName —— 后者带着"素材库-"前缀。
+                    SuggestedFileName = $"{SanitizeBackupFileName(assetLibrary.Name)}_{DateTime.Now:yyyyMMdd_HHmmss}"
                 };
                 picker.FileTypeChoices.Add("TFACStorybox 素材库包", [".zip"]);
                 InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
@@ -352,10 +377,26 @@ namespace GalExcleTools
                     return;
                 }
 
+                // 清单里带上"导出时的文件夹名"：对方按同名导入，项目的关联才不会断。
+                var manifest = new WorkspacePackageManifest
+                {
+                    PackageType = WorkspacePackageManifest.AssetLibraryPackageTypeValue,
+                    PackageId = Guid.NewGuid().ToString("N"),
+                    ExportedAt = DateTimeOffset.Now,
+                    ToolVersion = AppVersionService.GetDisplayVersion(),
+                    Name = assetLibrary.Name,
+                    FolderName = assetLibrary.FolderName
+                };
+
                 var export = await ShowFolderBackupProgressDialogAsync(
                     "正在导出素材库",
                     assetLibrary.Name,
-                    progress => Task.Run(() => _folderBackupService.ExportToZip(assetLibrary.Path, exportFile.Path, progress, GetGlobalProgressCancellationToken())));
+                    progress => Task.Run(() => _folderBackupService.ExportToZip(
+                        assetLibrary.Path,
+                        exportFile.Path,
+                        progress,
+                        GetGlobalProgressCancellationToken(),
+                        manifest)));
                 ShowFloatingTip(
                     InfoBarSeverity.Success,
                     "素材库已导出",
