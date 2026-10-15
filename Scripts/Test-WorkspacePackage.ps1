@@ -59,6 +59,22 @@ Require-Pattern `
     'ExportAssetLibraryFromUiAsync[\s\S]*?SuggestedFileName = \$"\{SanitizeBackupFileName\(assetLibrary\.Name\)\}_\{DateTime\.Now:yyyyMMdd_HHmmss\}"[\s\S]*?WorkspacePackageManifest\.AssetLibraryPackageTypeValue' `
     'Exporting an asset library must be named after its display name (not the prefixed folder name).'
 
+# ── 导入侧：先看条目表、直接铺到目标目录、挡 zip-slip、进度接到底部进度条 ──
+Require-Pattern `
+    (Join-Path $root 'Services\ProjectWorkspaceService.cs') `
+    'ImportProjectArchive[\s\S]*?FindPackageMetaEntry[\s\S]*?ExtractPackageEntries[\s\S]*?DeleteDirectoryQuietly' `
+    'Importing must peek the entry table, extract straight into the target, and clean up on failure.'
+
+Require-Pattern `
+    (Join-Path $root 'Services\ProjectWorkspaceService.cs') `
+    'ExtractPackageEntries[\s\S]*?WorkspacePackageManifest\.FileName[\s\S]*?IsPathInsideDirectory\(destination, targetRoot\)' `
+    'Extracting must not unpack the manifest into the workspace object, and must reject zip-slip entries.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Workbench.Import.cs') `
+    'new Progress<FolderBackupProgress>' `
+    'Importing must wire the extraction progress to the bottom progress bar.'
+
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
     Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
@@ -70,7 +86,7 @@ if (Test-Path -LiteralPath $assemblyPath) {
     $assembly = [System.Reflection.Assembly]::LoadFrom((Resolve-Path $assemblyPath))
     $manifestType = $assembly.GetType('GalExcleTools.WorkspacePackageManifest', $false)
     if ($null -eq $manifestType) {
-        Write-Host '(skip workspace-package reflection: 当前 DLL 早于本次改动，重新编译后会做「导出内容 + 清单 + 备份不跳」这几项。)'
+        Write-Host '(skip workspace-package reflection: 当前 DLL 早于本次改动，重新编译后会做「导出内容 + 清单 + 备份不跳 + 导入解压/zip-slip」这几项。)'
     }
     else {
         $backupServiceType = $assembly.GetType('GalExcleTools.Services.FolderBackupService', $true)
@@ -186,6 +202,89 @@ if (Test-Path -LiteralPath $assemblyPath) {
             }
             finally {
                 $backupArchive.Dispose()
+            }
+
+            # ── 导入侧：直接铺到目标目录（不再解到临时目录再拷一遍）+ zip-slip 防护 ──
+            $projectServiceType = $assembly.GetType('GalExcleTools.Services.ProjectWorkspaceService', $true)
+            $projectService = [System.Activator]::CreateInstance($projectServiceType, $true)
+            [string]$importRoot = Join-Path $outer 'import-workspace'
+            New-Item -ItemType Directory -Path $importRoot -Force | Out-Null
+
+            $importMethod = $projectServiceType.GetMethod('ImportProjectArchive')
+            if ($importMethod.GetParameters().Count -ne 4) {
+                throw 'ImportProjectArchive 应当有 4 个参数（rootPath / archivePath / progress / token）—— 导入要能按条目报进度。'
+            }
+
+            $imported = $importMethod.Invoke(
+                $projectService,
+                @($importRoot, $packagePath, $null, [System.Threading.CancellationToken]::None))
+            if ((Split-Path -Leaf $imported.Path) -ne '项目-测试项目') {
+                throw "没有上层目录的包应当落到 项目-{项目名}，实际是 $($imported.Path)"
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $imported.Path 'Chapters\WHK-M1-00\story.document.json'))) {
+                throw '导入应当把剧情文档铺出来。'
+            }
+            if (Test-Path -LiteralPath (Join-Path $imported.Path 'package-manifest.json')) {
+                throw '清单是"关于这个包"的说明，不该铺进工作区对象里。'
+            }
+            $importedMeta = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $imported.Path 'Tools\project.meta.json') | ConvertFrom-Json
+            if ($importedMeta.AssetLibraryFolderName -ne '素材库-测试素材库') {
+                throw '导入必须保住项目与素材库的关联（AssetLibraryFolderName）。'
+            }
+
+            # 别人手动压的包（多一层目录）：要认，并且用那一层的名字当文件夹名。
+            [string]$manualSource = Join-Path $outer 'manual-src'
+            New-Item -ItemType Directory -Path (Join-Path $manualSource '项目-手压项目\Tools') -Force | Out-Null
+            [System.IO.File]::WriteAllText(
+                (Join-Path $manualSource '项目-手压项目\Tools\project.meta.json'),
+                '{ "ProjectName": "手压项目", "ProjectCode": "MANUAL", "AssetLibraryName": "", "AssetLibraryFolderName": null }',
+                [System.Text.UTF8Encoding]::new($false))
+            [string]$manualZip = Join-Path $outer 'manual.zip'
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($manualSource, $manualZip)
+            $manualImported = $importMethod.Invoke(
+                $projectService,
+                @($importRoot, $manualZip, $null, [System.Threading.CancellationToken]::None))
+            if ((Split-Path -Leaf $manualImported.Path) -ne '项目-手压项目') {
+                throw "有上层目录的包应当沿用那一层的名字，实际是 $($manualImported.Path)"
+            }
+
+            # zip-slip：条目名用 .. 往目标目录外面跑，必须拒绝，且不能在目标外留下东西。
+            [string]$evilZip = Join-Path $outer 'evil.zip'
+            $evilArchive = [System.IO.Compression.ZipFile]::Open($evilZip, [System.IO.Compression.ZipArchiveMode]::Create)
+            try {
+                foreach ($pair in @(
+                    @{ Name = 'Tools/project.meta.json'; Text = '{ "ProjectName": "坏包", "ProjectCode": "EVIL" }' },
+                    @{ Name = '../escaped.txt'; Text = 'x' }
+                )) {
+                    $entry = $evilArchive.CreateEntry($pair.Name)
+                    $writer = [System.IO.StreamWriter]::new($entry.Open())
+                    try { $writer.Write($pair.Text) } finally { $writer.Dispose() }
+                }
+            }
+            finally {
+                $evilArchive.Dispose()
+            }
+
+            $rejected = $false
+            try {
+                [void]$importMethod.Invoke(
+                    $projectService,
+                    @($importRoot, $evilZip, $null, [System.Threading.CancellationToken]::None))
+            }
+            catch {
+                $rejected = $true
+            }
+
+            if (-not $rejected) {
+                throw '带 .. 的条目必须被拒绝（zip-slip）。'
+            }
+            foreach ($escaped in @((Join-Path $importRoot 'escaped.txt'), (Join-Path $outer 'escaped.txt'))) {
+                if (Test-Path -LiteralPath $escaped) {
+                    throw "zip-slip 条目跑到了目标目录之外：$escaped"
+                }
+            }
+            if (Test-Path -LiteralPath (Join-Path $importRoot '项目-坏包')) {
+                throw '导入失败后必须把刚铺的那半份目录清掉。'
             }
         }
         finally {

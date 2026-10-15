@@ -493,43 +493,51 @@ internal sealed class ProjectWorkspaceService
         }
     }
 
-    public ProjectInfo ImportProjectArchive(string projectRootPath, string archivePath, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// 导入一个项目包。
+    ///
+    /// 【2026-10-15 换了实现】原来是"先整包解到临时目录、再拷进工作区"：
+    /// 3 GB 的素材库包等于 6 GB 写入，而且 <c>ZipFile.ExtractToDirectory</c> 没有进度回调，
+    /// 进度条会好几分钟不动。现在先读**条目表**（很便宜）定出根目录与身份文件，
+    /// 再逐条直接写进最终位置 —— 省掉一次全量拷贝，进度也是真的。
+    /// </summary>
+    public ProjectInfo ImportProjectArchive(
+        string projectRootPath,
+        string archivePath,
+        IProgress<FolderBackupProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         if (!File.Exists(archivePath))
         {
             throw new FileNotFoundException("项目包不存在。", archivePath);
         }
 
-        var tempPath = Path.Combine(Path.GetTempPath(), "GalExcleTools", "ProjectImport", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempPath);
+        using var archive = ZipFile.OpenRead(archivePath);
+        var metaEntry = FindPackageMetaEntry(archive, ProjectMetaFileName);
+        if (metaEntry is null)
+        {
+            throw new InvalidDataException("这个 zip 里没有找到 Tools/project.meta.json，无法识别为项目包。");
+        }
+
+        var rootPrefix = GetPackageRootPrefix(metaEntry, ProjectMetaFileName);
+        var meta = ReadJsonText<ProjectMeta>(ReadEntryText(metaEntry)) ?? new ProjectMeta();
+        var projectName = string.IsNullOrWhiteSpace(meta.ProjectName)
+            ? Path.GetFileNameWithoutExtension(archivePath)
+            : meta.ProjectName;
+        var projectCode = string.IsNullOrWhiteSpace(meta.ProjectCode)
+            ? Path.GetFileNameWithoutExtension(archivePath)
+            : meta.ProjectCode;
+        var rootFolderName = GetPackageRootFolderName(rootPrefix);
+        var sourceFolderName = rootFolderName.Length == 0
+            ? $"{ProjectFolderPrefix}{projectName}"
+            : rootFolderName;
+        var targetFolderName = TextUtility.SanitizeImportedRootFolderName(sourceFolderName);
+
+        Directory.CreateDirectory(projectRootPath);
+        var targetPath = GetUniqueDirectoryPath(projectRootPath, targetFolderName);
         try
         {
-            ZipFile.ExtractToDirectory(archivePath, tempPath);
-            cancellationToken.ThrowIfCancellationRequested();
-            var importedRootPath = FindImportedProjectRoot(tempPath);
-            if (importedRootPath is null)
-            {
-                throw new InvalidDataException("这个 zip 里没有找到 Tools/project.meta.json，无法识别为项目包。");
-            }
-
-            var metaPath = Path.Combine(importedRootPath, ToolsFolderName, ProjectMetaFileName);
-            var meta = ReadJson<ProjectMeta>(metaPath) ?? new ProjectMeta();
-            var projectName = string.IsNullOrWhiteSpace(meta.ProjectName)
-                ? Path.GetFileNameWithoutExtension(archivePath)
-                : meta.ProjectName;
-            var projectCode = string.IsNullOrWhiteSpace(meta.ProjectCode)
-                ? Path.GetFileNameWithoutExtension(archivePath)
-                : meta.ProjectCode;
-            var sourceFolderName = FileSystemUtility.PathsEqual(importedRootPath, tempPath)
-                ? $"{ProjectFolderPrefix}{projectName}"
-                : Path.GetFileName(importedRootPath);
-            var targetFolderName = TextUtility.SanitizeImportedRootFolderName(sourceFolderName);
-            var targetPath = GetUniqueDirectoryPath(projectRootPath, targetFolderName);
-
-            Directory.CreateDirectory(targetPath);
-            cancellationToken.ThrowIfCancellationRequested();
-            CopyDirectoryContents(importedRootPath, targetPath);
-
+            ExtractPackageEntries(archive, rootPrefix, targetPath, progress, cancellationToken);
             WriteProjectMeta(targetPath, importedMeta =>
             {
                 importedMeta.ProjectName = string.IsNullOrWhiteSpace(importedMeta.ProjectName) ? projectName : importedMeta.ProjectName;
@@ -539,52 +547,52 @@ internal sealed class ProjectWorkspaceService
 
             return ReadProjectInfo(targetPath);
         }
-        finally
+        catch
         {
-            if (Directory.Exists(tempPath))
-            {
-                Directory.Delete(tempPath, recursive: true);
-            }
+            // 半份"看起来像个项目"的目录比没有更糟：失败就把刚铺的那个整个删掉。
+            DeleteDirectoryQuietly(targetPath);
+            throw;
         }
     }
 
-    public AssetLibraryInfo ImportAssetLibraryArchive(string projectRootPath, string archivePath, CancellationToken cancellationToken = default)
+    /// <summary>导入一个素材库包。实现说明同 <see cref="ImportProjectArchive"/>。</summary>
+    public AssetLibraryInfo ImportAssetLibraryArchive(
+        string projectRootPath,
+        string archivePath,
+        IProgress<FolderBackupProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         if (!File.Exists(archivePath))
         {
             throw new FileNotFoundException("素材库包不存在。", archivePath);
         }
 
-        var tempPath = Path.Combine(Path.GetTempPath(), "GalExcleTools", "AssetLibraryImport", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempPath);
+        using var archive = ZipFile.OpenRead(archivePath);
+        var metaEntry = FindPackageMetaEntry(archive, AssetLibraryMetaFileName);
+        if (metaEntry is null)
+        {
+            throw new InvalidDataException("这个 zip 里没有找到 Tools/asset-library.meta.json，无法识别为素材库包。");
+        }
+
+        var rootPrefix = GetPackageRootPrefix(metaEntry, AssetLibraryMetaFileName);
+        var meta = ReadJsonText<AssetLibraryMeta>(ReadEntryText(metaEntry)) ?? new AssetLibraryMeta();
+        var assetLibraryName = string.IsNullOrWhiteSpace(meta.AssetLibraryName)
+            ? Path.GetFileNameWithoutExtension(archivePath)
+            : meta.AssetLibraryName;
+        var rootFolderName = GetPackageRootFolderName(rootPrefix);
+        var sourceFolderName = rootFolderName.Length == 0
+            ? TextUtility.BuildPrefixedFolderName(assetLibraryName, AssetLibraryFolderPrefix)
+            : rootFolderName;
+        var targetFolderName = TextUtility.BuildPrefixedFolderName(
+            TextUtility.SanitizeImportedRootFolderName(sourceFolderName),
+            AssetLibraryFolderPrefix);
+
+        Directory.CreateDirectory(projectRootPath);
+        var targetPath = GetUniqueDirectoryPath(projectRootPath, targetFolderName);
         try
         {
-            ZipFile.ExtractToDirectory(archivePath, tempPath);
-            cancellationToken.ThrowIfCancellationRequested();
-            var importedRootPath = FindImportedAssetLibraryRoot(tempPath);
-            if (importedRootPath is null)
-            {
-                throw new InvalidDataException("这个 zip 里没有找到 Tools/asset-library.meta.json，无法识别为素材库包。");
-            }
-
-            var metaPath = Path.Combine(importedRootPath, ToolsFolderName, AssetLibraryMetaFileName);
-            var meta = ReadJson<AssetLibraryMeta>(metaPath) ?? new AssetLibraryMeta();
-            var assetLibraryName = string.IsNullOrWhiteSpace(meta.AssetLibraryName)
-                ? Path.GetFileNameWithoutExtension(archivePath)
-                : meta.AssetLibraryName;
-            var sourceFolderName = FileSystemUtility.PathsEqual(importedRootPath, tempPath)
-                ? TextUtility.BuildPrefixedFolderName(assetLibraryName, AssetLibraryFolderPrefix)
-                : Path.GetFileName(importedRootPath);
-            var targetFolderName = TextUtility.BuildPrefixedFolderName(
-                TextUtility.SanitizeImportedRootFolderName(sourceFolderName),
-                AssetLibraryFolderPrefix);
-            var targetPath = GetUniqueDirectoryPath(projectRootPath, targetFolderName);
-
-            Directory.CreateDirectory(targetPath);
-            cancellationToken.ThrowIfCancellationRequested();
-            CopyDirectoryContents(importedRootPath, targetPath);
+            ExtractPackageEntries(archive, rootPrefix, targetPath, progress, cancellationToken);
             EnsureAssetLibraryCategoryFolders(targetPath);
-
             WriteAssetLibraryMeta(targetPath, importedMeta =>
             {
                 importedMeta.AssetLibraryName = string.IsNullOrWhiteSpace(importedMeta.AssetLibraryName)
@@ -595,12 +603,10 @@ internal sealed class ProjectWorkspaceService
 
             return ReadAssetLibraryInfo(targetPath);
         }
-        finally
+        catch
         {
-            if (Directory.Exists(tempPath))
-            {
-                Directory.Delete(tempPath, recursive: true);
-            }
+            DeleteDirectoryQuietly(targetPath);
+            throw;
         }
     }
 
@@ -665,46 +671,123 @@ internal sealed class ProjectWorkspaceService
         return candidatePath;
     }
 
-    private static void CopyDirectoryContents(string sourcePath, string targetPath)
+    /// <summary>
+    /// 在 zip 的条目表里找身份文件（<c>Tools/xxx.meta.json</c>），取**最浅**的那个。
+    ///
+    /// 为什么要允许有上层目录：别人不一定会用工具箱导出 —— 也可能把文件夹直接右键压成 zip，
+    /// 那样条目名前面会多一层（甚至两层）目录。原来的实现是把整个包解到临时目录再搜，
+    /// 现在只扫条目表，效果一样但不用先落盘。
+    /// </summary>
+    private static ZipArchiveEntry? FindPackageMetaEntry(ZipArchive archive, string metaFileName)
     {
-        Directory.CreateDirectory(targetPath);
-        foreach (var directoryPath in Directory.EnumerateDirectories(sourcePath, "*", SearchOption.AllDirectories))
-        {
-            var relativePath = Path.GetRelativePath(sourcePath, directoryPath);
-            Directory.CreateDirectory(Path.Combine(targetPath, relativePath));
-        }
-
-        foreach (var filePath in Directory.EnumerateFiles(sourcePath, "*", SearchOption.AllDirectories))
-        {
-            var relativePath = Path.GetRelativePath(sourcePath, filePath);
-            var targetFilePath = Path.Combine(targetPath, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(targetFilePath)!);
-            File.Copy(filePath, targetFilePath, overwrite: true);
-        }
+        var suffix = $"{ToolsFolderName}/{metaFileName}";
+        return archive.Entries
+            .Where(entry => !entry.FullName.Replace('\\', '/').EndsWith('/'))
+            .Where(entry => entry.FullName.Replace('\\', '/').EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(entry => entry.FullName.Count(character => character is '/' or '\\'))
+            .ThenBy(entry => entry.FullName, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
     }
 
-    private static string? FindImportedAssetLibraryRoot(string extractedRootPath)
+    /// <summary>身份文件所在的那层根目录（相对 zip 根；没有上层目录就是空串）。</summary>
+    private static string GetPackageRootPrefix(ZipArchiveEntry metaEntry, string metaFileName)
     {
-        if (File.Exists(Path.Combine(extractedRootPath, ToolsFolderName, AssetLibraryMetaFileName)))
-        {
-            return extractedRootPath;
-        }
-
-        return Directory
-            .EnumerateDirectories(extractedRootPath, "*", SearchOption.AllDirectories)
-            .FirstOrDefault(path => File.Exists(Path.Combine(path, ToolsFolderName, AssetLibraryMetaFileName)));
+        var normalized = metaEntry.FullName.Replace('\\', '/');
+        var suffix = $"{ToolsFolderName}/{metaFileName}";
+        return normalized[..^suffix.Length].Trim('/');
     }
 
-    private static string? FindImportedProjectRoot(string extractedRootPath)
+    /// <summary>根目录那个文件夹的名字（<c>a/b</c> → <c>b</c>）；没有上层目录就是空串。</summary>
+    private static string GetPackageRootFolderName(string rootPrefix)
     {
-        if (File.Exists(Path.Combine(extractedRootPath, ToolsFolderName, ProjectMetaFileName)))
+        return rootPrefix.Length == 0 ? string.Empty : rootPrefix.Split('/', StringSplitOptions.RemoveEmptyEntries)[^1];
+    }
+
+    private static string ReadEntryText(ZipArchiveEntry entry)
+    {
+        using var stream = entry.Open();
+        using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// 逐条把 zip 铺到目标目录，边铺边报进度。
+    ///
+    /// 【安全】条目名必须落在目标目录里：绝对路径、盘符、用 <c>..</c> 往上跑的，一律拒绝
+    ///（zip-slip）。<c>ZipFile.ExtractToDirectory</c> 内部有这层校验，自己解就得自己兜住。
+    ///
+    /// 【清单不铺进去】<c>package-manifest.json</c> 是"关于这个包"的说明，不属于工作区对象本身。
+    /// </summary>
+    private static void ExtractPackageEntries(
+        ZipArchive archive,
+        string rootPrefix,
+        string targetPath,
+        IProgress<FolderBackupProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var prefix = rootPrefix.Length == 0 ? string.Empty : rootPrefix + "/";
+        var entries = archive.Entries
+            .Where(entry => !entry.FullName.Replace('\\', '/').EndsWith('/'))
+            .Where(entry => prefix.Length == 0 ||
+                            entry.FullName.Replace('\\', '/').StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var totalBytes = entries.Sum(entry => entry.Length);
+        var targetRoot = Path.GetFullPath(targetPath);
+        var completedBytes = 0L;
+
+        for (var index = 0; index < entries.Count; index++)
         {
-            return extractedRootPath;
+            cancellationToken.ThrowIfCancellationRequested();
+            var entry = entries[index];
+            var name = entry.FullName.Replace('\\', '/');
+            var relative = prefix.Length == 0 ? name : name[prefix.Length..];
+            if (string.Equals(relative, WorkspacePackageManifest.FileName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var destination = Path.GetFullPath(Path.Combine(targetRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
+            if (!FileSystemUtility.IsPathInsideDirectory(destination, targetRoot))
+            {
+                throw new InvalidDataException($"包里的条目想写到目标目录之外，已拒绝：{entry.FullName}");
+            }
+
+            progress?.Report(new FolderBackupProgress(
+                $"正在解压 {index + 1}/{entries.Count}：{relative}",
+                entries.Count == 0
+                    ? 90
+                    : Math.Min(90, Math.Max(1, completedBytes * 90d / Math.Max(1, totalBytes))),
+                index,
+                entries.Count,
+                completedBytes,
+                totalBytes,
+                relative));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            using (var source = entry.Open())
+            using (var target = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024))
+            {
+                source.CopyTo(target);
+            }
+
+            completedBytes += entry.Length;
         }
 
-        return Directory
-            .EnumerateDirectories(extractedRootPath, "*", SearchOption.AllDirectories)
-            .FirstOrDefault(path => File.Exists(Path.Combine(path, ToolsFolderName, ProjectMetaFileName)));
+        progress?.Report(new FolderBackupProgress("解压完成。", 100, entries.Count, entries.Count, totalBytes, totalBytes, null));
+    }
+
+    private static void DeleteDirectoryQuietly(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch (Exception)
+        {
+            // 清不掉就算了：报错信息里已经带上真正的原因，别用一个清理异常把它盖掉。
+        }
     }
 
     private static void WriteProjectMeta(string projectPath, Action<ProjectMeta> update)
@@ -804,6 +887,27 @@ internal sealed class ProjectWorkspaceService
         try
         {
             return JsonSerializer.Deserialize<T>(File.ReadAllText(path));
+        }
+        catch
+        {
+            return default;
+        }
+    }
+
+    /// <summary>
+    /// 从**内存里的一段 JSON** 反序列化（导入时身份文件是从 zip 条目里直接读出来的，
+    /// 还没落盘）。容错口径和 <see cref="ReadJson{T}"/> 一致：读不动就当没有。
+    /// </summary>
+    private static T? ReadJsonText<T>(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return default;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json);
         }
         catch
         {

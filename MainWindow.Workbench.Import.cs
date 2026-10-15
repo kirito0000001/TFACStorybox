@@ -87,12 +87,24 @@ namespace GalExcleTools
                 {
                     GetGlobalProgressCancellationToken().ThrowIfCancellationRequested();
                     var archivePath = archivePaths[index];
-                    var percent = archivePaths.Count == 0 ? 0 : index * 100d / archivePaths.Count;
+                    var bandStart = archivePaths.Count == 0 ? 0 : index * 100d / archivePaths.Count;
+                    var bandSize = archivePaths.Count == 0 ? 100d : 100d / archivePaths.Count;
                     UpdateGlobalProgress(
                         $"正在导入项目包 {index + 1}/{archivePaths.Count}",
-                        percent,
+                        bandStart,
                         Path.GetFileName(archivePath));
-                    importedProjects.Add(await Task.Run(() => _projectWorkspaceService.ImportProjectArchive(_projectRootPath, archivePath, GetGlobalProgressCancellationToken())));
+                    // 解压过程按条目报进度（3 GB 的包也看得见动静）。Progress<T> 在 UI 线程建，
+                    // 回调会自动回到 UI 线程，所以下面那个 Task.Run 里放心用。
+                    var fileProgress = new Progress<FolderBackupProgress>(update =>
+                        UpdateGlobalProgress(
+                            $"导入项目包 {index + 1}/{archivePaths.Count}：{update.Message}",
+                            Math.Min(100, bandStart + update.Percent * bandSize / 100d),
+                            Path.GetFileName(archivePath)));
+                    importedProjects.Add(await Task.Run(() => _projectWorkspaceService.ImportProjectArchive(
+                        _projectRootPath,
+                        archivePath,
+                        fileProgress,
+                        GetGlobalProgressCancellationToken())));
                 }
                 CompleteGlobalProgress("项目导入完成", $"已导入 {importedProjects.Count} 个项目");
                 await HideGlobalProgressAfterDelayAsync();
@@ -172,12 +184,23 @@ namespace GalExcleTools
                 {
                     GetGlobalProgressCancellationToken().ThrowIfCancellationRequested();
                     var archivePath = archivePaths[index];
-                    var percent = archivePaths.Count == 0 ? 0 : index * 100d / archivePaths.Count;
+                    var bandStart = archivePaths.Count == 0 ? 0 : index * 100d / archivePaths.Count;
+                    var bandSize = archivePaths.Count == 0 ? 100d : 100d / archivePaths.Count;
                     UpdateGlobalProgress(
                         $"正在导入素材库包 {index + 1}/{archivePaths.Count}",
-                        percent,
+                        bandStart,
                         Path.GetFileName(archivePath));
-                    importedLibraries.Add(await Task.Run(() => _projectWorkspaceService.ImportAssetLibraryArchive(_projectRootPath, archivePath, GetGlobalProgressCancellationToken())));
+                    // 素材库包动辄几个 GB：进度按条目走，不然进度条会一直冻着。
+                    var fileProgress = new Progress<FolderBackupProgress>(update =>
+                        UpdateGlobalProgress(
+                            $"导入素材库包 {index + 1}/{archivePaths.Count}：{update.Message}",
+                            Math.Min(100, bandStart + update.Percent * bandSize / 100d),
+                            Path.GetFileName(archivePath)));
+                    importedLibraries.Add(await Task.Run(() => _projectWorkspaceService.ImportAssetLibraryArchive(
+                        _projectRootPath,
+                        archivePath,
+                        fileProgress,
+                        GetGlobalProgressCancellationToken())));
                 }
                 CompleteGlobalProgress("素材库导入完成", $"已导入 {importedLibraries.Count} 个素材库");
                 await HideGlobalProgressAfterDelayAsync();
