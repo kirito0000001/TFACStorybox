@@ -18,12 +18,15 @@ namespace GalExcleTools;
 ///
 /// 【为什么是"句"】
 /// 编辑器本来就按句走（「第 45 / 366 句」），跳转能力是现成的 ——
-/// 我们只要记住行号，跳回去这件事就能直接复用 <c>NavigateToStoryRow</c>。
-/// 挂在小节上反而跳不准。
+/// 记住是**哪一句**，跳回去直接复用 <c>NavigateToStoryRow</c>。挂在小节上反而跳不准。
 ///
-/// 【定位只认"章节 + 行号"】
-/// 这两样才是编辑器的稳定口径。小节会被重新拆分，拿它当键的话，
-/// 每拆一次小节那一章后面的备注就全成孤儿了 —— 所以小节只存下来当显示信息。
+/// 【定位认 StableId，行号只是显示】
+/// 这里原来写的是"定位只认章节 + 行号"，理由是"行号才是编辑器的稳定口径"—— **判断错了**：
+/// 在某一句前面插一句、或者删掉一句，它后面所有行的行号都会往前挪一位，
+/// 于是那条备注就贴到了别的句子上，而且一点异常都没有（最难发现的那一类）。
+/// 现在定位认 <c>StoryRow.StableId</c>；行号 / 小节退化成"最后知道的位置"，
+/// 每次重建列表时按 StableId 重算一遍，找不到行就明说「该句已删除」。
+/// 老备注（文件里还没有 StableId）在**打开它所属章节**时按行号就地迁移。
 /// </summary>
 public sealed partial class MainWindow
 {
@@ -46,6 +49,15 @@ public sealed partial class MainWindow
     private string _storyTodoEditingChapterCode = string.Empty;
 
     private int _storyTodoEditingRowNumber;
+
+    /// <summary>
+    /// 文本框里那份文字属于**哪一句** —— 和行号一起在载入时记下来。
+    ///
+    /// 和 <see cref="_storyTodoEditingRowNumber"/> 的分工：StableId 是**身份**（写回去认它），
+    /// 行号是**位置**（显示、以及老备注的兜底）。在它前面插一句，行号会变、身份不变 ——
+    /// 前者正是当初"备注贴错句子"的原因。
+    /// </summary>
+    private string _storyTodoEditingStableId = string.Empty;
 
     /// <summary>
     /// 用户在备注框里**实际打的字** —— 在 TextChanged 里直接从控件抓下来。
@@ -103,10 +115,62 @@ public sealed partial class MainWindow
             return null;
         }
 
-        var rowNumber = _currentStoryRowIndex + 1;
-        return _storyTodoNotes.FirstOrDefault(note =>
+        var index = FindStoryTodoIndex(
+            _currentStoryChapter.Code,
+            GetCurrentStoryRowStableId(),
+            _currentStoryRowIndex + 1);
+        return index < 0 ? null : _storyTodoNotes[index];
+    }
+
+    /// <summary>
+    /// 找某一句的备注在 <see cref="_storyTodoNotes"/> 里的下标（-1 = 没有）。
+    ///
+    /// **先认 StableId**；只有"还没有 StableId 的老备注"才退化成"章节 + 行号"。
+    /// 兜底那条特意要求对方也没有 StableId —— 否则一个行号就能把别人（按身份认的那条）
+    /// 的备注顶掉，等于又回到"贴错句子"。
+    /// </summary>
+    private int FindStoryTodoIndex(string chapterCode, string stableId, int rowNumber)
+    {
+        if (!string.IsNullOrWhiteSpace(stableId))
+        {
+            var byStableId = _storyTodoNotes.FindIndex(note =>
+                HasStoryTodoStableId(note) &&
+                string.Equals(note.ChapterCode, chapterCode, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(note.StableId, stableId, StringComparison.OrdinalIgnoreCase));
+            if (byStableId >= 0)
+            {
+                return byStableId;
+            }
+        }
+
+        return _storyTodoNotes.FindIndex(note =>
+            !HasStoryTodoStableId(note) &&
             note.RowNumber == rowNumber &&
-            string.Equals(note.ChapterCode, _currentStoryChapter.Code, StringComparison.OrdinalIgnoreCase));
+            string.Equals(note.ChapterCode, chapterCode, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasStoryTodoStableId(StoryTodoNote note)
+    {
+        return !string.IsNullOrWhiteSpace(note.StableId);
+    }
+
+    /// <summary>当前句的稳定身份；没有行（或行表还没载入）就给空串。</summary>
+    private string GetCurrentStoryRowStableId()
+    {
+        return _storyRows.Count == 0
+            ? string.Empty
+            : _storyRows[Math.Clamp(_currentStoryRowIndex, 0, _storyRows.Count - 1)].StableId;
+    }
+
+    /// <summary>在**当前章节**的行里找这个 StableId 的下标（-1 = 这一句已经不在了）。</summary>
+    private int FindStoryRowIndexByStableId(string stableId)
+    {
+        return string.IsNullOrWhiteSpace(stableId)
+            ? -1
+            : _storyRows.FindIndex(row => string.Equals(
+                row.StableId,
+                stableId,
+                StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>换项目 / 打开章节时调用：把备注整个读回来。</summary>
@@ -116,7 +180,44 @@ public sealed partial class MainWindow
         _storyTodoNotes.AddRange(StoryTodoStore.Load(_currentProject?.Path));
         _isStoryTodoDirty = false;
         _isStoryTodoLoaded = true;
+        // 老文件（只按行号定位）里的备注，趁这一章的文档刚载入，就地补上 StableId。
+        // 补不上的（行号越界之类）先留着空串：查找那边有行号兜底，
+        // 等它所属的章节被打开时再补 —— 别的章节的行表这会儿根本没载入。
+        // 标脏但不在这里存：下面 RefreshStoryTodoPanel 还没跑，
+        // 「这份文字属于哪一句」还是上一章的值，这时候存会把上一章的字写进这一章。
+        // 下一次真正的保存会顺手把迁移结果写下去。
+        if (MigrateStoryTodoStableIdsForCurrentChapter())
+        {
+            _isStoryTodoDirty = true;
+        }
+
         RefreshStoryTodoPanel();
+    }
+
+    /// <summary>给「本章还没有 StableId 的备注」按它们记着的行号补上 StableId。</summary>
+    private bool MigrateStoryTodoStableIdsForCurrentChapter()
+    {
+        if (_currentStoryChapter is null || _storyRows.Count == 0)
+        {
+            return false;
+        }
+
+        var changed = false;
+        for (var index = 0; index < _storyTodoNotes.Count; index++)
+        {
+            var note = _storyTodoNotes[index];
+            if (HasStoryTodoStableId(note) ||
+                note.RowNumber < 1 || note.RowNumber > _storyRows.Count ||
+                !string.Equals(note.ChapterCode, _currentStoryChapter.Code, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            _storyTodoNotes[index] = note with { StableId = _storyRows[note.RowNumber - 1].StableId };
+            changed = true;
+        }
+
+        return changed;
     }
 
     /// <summary>
@@ -148,6 +249,7 @@ public sealed partial class MainWindow
             // 先记下"这份文字属于哪一句"，再改 TodoText —— 顺序不能反。
             _storyTodoEditingChapterCode = _currentStoryChapter?.Code ?? string.Empty;
             _storyTodoEditingRowNumber = _storyRows.Count == 0 ? 0 : _currentStoryRowIndex + 1;
+            _storyTodoEditingStableId = GetCurrentStoryRowStableId();
 
             var note = FindStoryTodoForCurrentRow();
             _storyEditorViewModel.TodoText = note?.Text ?? string.Empty;
@@ -161,7 +263,13 @@ public sealed partial class MainWindow
         }
     }
 
-    /// <summary>重建备注列表。按章节 + 行号稳定排序，勾掉的只灰显、不重排。</summary>
+    /// <summary>
+    /// 重建备注列表。按章节 + 行号稳定排序，勾掉的只灰显、不重排。
+    ///
+    /// 列表上那个"第几句 / 第几小节"是**每次重建时按 StableId 重算**的
+    /// （只算得动本章 —— 别的章节的行表没载入）。备注自己记的行号只是"最后知道的位置"：
+    /// 在它前面插一句，那个数字就不对了，但备注仍然挂在原来那一句上。
+    /// </summary>
     private void RefreshStoryTodoList()
     {
         if (_storyEditorViewModel is null)
@@ -169,10 +277,11 @@ public sealed partial class MainWindow
             return;
         }
 
+        RefreshStoryTodoPositionsForCurrentChapter();
         var rows = _storyTodoNotes
             .OrderBy(note => note.ChapterCode, StringComparer.OrdinalIgnoreCase)
             .ThenBy(note => note.RowNumber)
-            .Select(note => new StoryTodoRowViewModel(note))
+            .Select(note => new StoryTodoRowViewModel(note, IsStoryTodoOrphaned(note)))
             .ToList();
 
         _storyEditorViewModel.TodoItems.Clear();
@@ -180,6 +289,63 @@ public sealed partial class MainWindow
         {
             _storyEditorViewModel.TodoItems.Add(row);
         }
+    }
+
+    /// <summary>
+    /// 本章备注的位置按 StableId 重算。
+    /// 找不到行的（这一句被删了）**保持原样** —— 那串数字就是"它当年在第几句"，
+    /// 列表上会带一句「该句已删除」，比硬改成别的句子诚实。
+    /// </summary>
+    private void RefreshStoryTodoPositionsForCurrentChapter()
+    {
+        if (_currentStoryChapter is null)
+        {
+            return;
+        }
+
+        for (var index = 0; index < _storyTodoNotes.Count; index++)
+        {
+            var note = _storyTodoNotes[index];
+            if (!HasStoryTodoStableId(note) ||
+                !string.Equals(note.ChapterCode, _currentStoryChapter.Code, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var rowIndex = FindStoryRowIndexByStableId(note.StableId);
+            if (rowIndex < 0)
+            {
+                continue;
+            }
+
+            var section = GetStorySectionAtRowIndex(rowIndex);
+            if (rowIndex + 1 == note.RowNumber && section == note.Section)
+            {
+                continue;
+            }
+
+            _storyTodoNotes[index] = note with
+            {
+                RowNumber = rowIndex + 1,
+                Section = section
+            };
+        }
+    }
+
+    /// <summary>
+    /// 这条备注的句子还在不在本章里。
+    /// 老备注（还没迁移出 StableId）无从判断，算它还在 —— 走行号那条老路。
+    /// </summary>
+    private bool IsStoryTodoOrphaned(StoryTodoNote note)
+    {
+        if (_currentStoryChapter is null ||
+            !HasStoryTodoStableId(note) ||
+            !string.Equals(note.ChapterCode, _currentStoryChapter.Code, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return FindStoryRowIndexByStableId(note.StableId) < 0;
     }
 
     /// <summary>
@@ -204,9 +370,9 @@ public sealed partial class MainWindow
 
         foreach (var row in _storyEditorViewModel.TodoItems)
         {
-            var index = _storyTodoNotes.FindIndex(note =>
-                note.RowNumber == row.RowNumber &&
-                string.Equals(note.ChapterCode, row.ChapterCode, StringComparison.OrdinalIgnoreCase));
+            // 按身份找回去（老备注才会走章节 + 行号那条兜底）。
+            // 不用 ReferenceEquals 比行里那份 Note：列表重建过之后它可能是旧快照。
+            var index = FindStoryTodoIndex(row.ChapterCode, row.StableId, row.RowNumber);
             if (index >= 0 && _storyTodoNotes[index].Done != row.Done)
             {
                 _storyTodoNotes[index] = _storyTodoNotes[index] with
@@ -278,9 +444,9 @@ public sealed partial class MainWindow
         var text = _pendingStoryTodoText ?? _storyEditorViewModel?.TodoText ?? string.Empty;
         var rowNumber = _storyTodoEditingRowNumber;
         var chapterCode = _storyTodoEditingChapterCode;
-        var index = _storyTodoNotes.FindIndex(note =>
-            note.RowNumber == rowNumber &&
-            string.Equals(note.ChapterCode, chapterCode, StringComparison.OrdinalIgnoreCase));
+        // 按**身份**找回去（StableId）；老备注才走章节 + 行号。在它前面插过句也不要紧。
+        var stableId = _storyTodoEditingStableId;
+        var index = FindStoryTodoIndex(chapterCode, stableId, rowNumber);
 
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -300,7 +466,10 @@ public sealed partial class MainWindow
         if (index >= 0)
         {
             var existing = _storyTodoNotes[index];
-            if (string.Equals(existing.Text, text, StringComparison.Ordinal))
+            if (string.Equals(existing.Text, text, StringComparison.Ordinal) &&
+                string.Equals(existing.StableId, stableId, StringComparison.OrdinalIgnoreCase) &&
+                existing.RowNumber == rowNumber &&
+                existing.Section == section)
             {
                 return;
             }
@@ -308,8 +477,11 @@ public sealed partial class MainWindow
             _storyTodoNotes[index] = existing with
             {
                 Text = text,
+                RowNumber = rowNumber,
                 Section = section,
-                UpdatedAt = DateTimeOffset.Now
+                UpdatedAt = DateTimeOffset.Now,
+                // 老备注正好趁这次编辑补上身份；已经有身份的不动。
+                StableId = HasStoryTodoStableId(existing) ? existing.StableId : stableId
             };
         }
         else
@@ -320,7 +492,10 @@ public sealed partial class MainWindow
                 section,
                 text,
                 Done: false,
-                UpdatedAt: DateTimeOffset.Now));
+                UpdatedAt: DateTimeOffset.Now)
+            {
+                StableId = stableId
+            });
         }
 
         _isStoryTodoDirty = true;
@@ -382,6 +557,9 @@ public sealed partial class MainWindow
             return;
         }
 
+        // 位置先按身份重算一次：插过 / 删过句子之后备注记的行号会过期，
+        // 不重算的话"上一条 / 下一条"会按旧号挑错邻居。
+        RefreshStoryTodoPositionsForCurrentChapter();
         var currentRowNumber = _currentStoryRowIndex + 1;
         var ordered = _storyTodoNotes
             .Where(note => string.Equals(note.ChapterCode, _currentStoryChapter.Code, StringComparison.OrdinalIgnoreCase))
@@ -429,7 +607,24 @@ public sealed partial class MainWindow
             await ShowStoryEditorPageAsync(chapter);
         }
 
-        var targetIndex = Math.Clamp(note.RowNumber - 1, 0, Math.Max(0, _storyRows.Count - 1));
+        // 落点按**身份**找行。找不到 = 这一句已经被删掉了。
+        // 旧行为是按行号硬跳 —— 那会跳到**别的句子**上，等于把备注指错了地方，比不跳更糟。
+        var targetIndex = FindStoryRowIndexByStableId(note.StableId);
+        if (targetIndex < 0)
+        {
+            if (HasStoryTodoStableId(note))
+            {
+                ShowStoryStatus(
+                    InfoBarSeverity.Informational,
+                    "这一句已经没有了",
+                    $"{note.HeaderText}：备注还留着，它原来那一句已经被删除，没有可跳的地方。");
+                return;
+            }
+
+            // 还没迁移出身份的老备注：只能照旧按行号走。
+            targetIndex = Math.Clamp(note.RowNumber - 1, 0, Math.Max(0, _storyRows.Count - 1));
+        }
+
         NavigateToStoryRow(targetIndex, rebuildPersistentState: true);
         RefreshStoryTodoPanel();
     }

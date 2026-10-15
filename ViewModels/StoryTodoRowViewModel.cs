@@ -17,10 +17,11 @@ internal sealed partial class StoryTodoRowViewModel : ObservableObject
 {
     private bool _done;
 
-    public StoryTodoRowViewModel(StoryTodoNote note)
+    public StoryTodoRowViewModel(StoryTodoNote note, bool isOrphaned = false)
     {
         Note = note;
         _done = note.Done;
+        IsOrphaned = isOrphaned;
     }
 
     /// <summary>当前这条备注。改动会通过 <see cref="Note"/> 的替换体现出来。</summary>
@@ -30,8 +31,20 @@ internal sealed partial class StoryTodoRowViewModel : ObservableObject
 
     public int RowNumber => Note.RowNumber;
 
-    /// <summary>列表标题：第几句、在哪一章、第几小节。</summary>
-    public string HeaderText => Note.HeaderText;
+    /// <summary>定位用的稳定身份（<see cref="StoryRow.StableId"/>）。空串 = 还没迁移的老备注。</summary>
+    public string StableId => Note.StableId;
+
+    /// <summary>
+    /// 这一句在本章里已经找不到了 —— 通常是那一句被删掉了。
+    ///
+    /// 备注本身**不删**（"我给这句写了备注，然后把这句删了"是正常操作，
+    /// 备注里往往还写着为什么要删），但要说清楚它没地方可跳，
+    /// 不能让它悄悄留着旧行号、点一下跳到别的句子上。
+    /// </summary>
+    public bool IsOrphaned { get; }
+
+    /// <summary>列表标题：第几句、在哪一章、第几小节；这一句已经没了就明说。</summary>
+    public string HeaderText => IsOrphaned ? $"{Note.HeaderText} · 该句已删除" : Note.HeaderText;
 
     /// <summary>备注正文。列表上显示的这个是**只读**的 —— 改内容在右边那个文本框里改。</summary>
     public string BodyText => Note.Text;
@@ -50,6 +63,6 @@ internal sealed partial class StoryTodoRowViewModel : ObservableObject
         }
     }
 
-    /// <summary>勾掉的那些在界面上灰显 —— 用透明度表达，不引新样式。</summary>
-    public double RowOpacity => _done ? 0.45 : 1.0;
+    /// <summary>勾掉的那些、以及已经无句可跳的那些，在界面上灰显 —— 用透明度表达，不引新样式。</summary>
+    public double RowOpacity => _done || IsOrphaned ? 0.45 : 1.0;
 }
