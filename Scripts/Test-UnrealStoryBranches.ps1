@@ -3,9 +3,11 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $issues = [System.Collections.Generic.List[string]]::new()
 
-function Require-Pattern([string]$path, [string]$pattern, [string]$message) {
-    if (-not (Test-Path -LiteralPath $path) -or
-        (Get-Content -Raw -Encoding UTF8 -LiteralPath $path) -notmatch $pattern) {
+function Require-Pattern([string]$path, [string]$pattern, [string]$message, [switch]$NotMatch) {
+    $matched = (Test-Path -LiteralPath $path) -and
+        ((Get-Content -Raw -Encoding UTF8 -LiteralPath $path) -match $pattern)
+    if ($NotMatch) { $matched = -not $matched }
+    if (-not $matched) {
         $issues.Add($message)
     }
 }
@@ -50,15 +52,31 @@ Require-Pattern `
     'StoryCustomBranchLogicToggle_Toggled[\s\S]*?SetCustomBranchSection[\s\S]*?QueueCurrentStoryDocumentSave' `
     'Changing custom AllRoad logic must be undoable and persisted.'
 
+# 原断言钉的是"报错话术里必须出现 TargetStory=" —— 而 count 那一步早就改成数**裸词**
+# TargetStory 了（摊平之后引号和等号都没了，见那段注释里 2026-10-13 的实测值）。
+# 改成钉**校验逻辑本身**：期望条数取自清单里的 routes，实际条数从导出的表里数出来，
+# 对不上就 add_error + return False（不是只写日志）。
 Require-Pattern `
     (Join-Path $root 'Services\UnrealSyncService.cs') `
-    'expected_route_count[\s\S]*?actual_route_count[\s\S]*?TargetStory=' `
+    'expected_route_count\s*=\s*len\(routes\)[\s\S]*?actual_route_count\s*=\s*matched_text\.count\("TargetStory"\)[\s\S]*?if actual_route_count != expected_route_count:[\s\S]*?add_error\([\s\S]*?return False' `
     'AllRoad verification must reject missing or stale extra routes.'
 
+# 【2026-10-12 回退点换了】原先这条钉的是"zip 备份清单里必须有 AllRoad"。
+# zip 那套已经退休（MainWindow.UnrealSync.Process.cs 里留了说明），
+# 回退点改成**同步前的全量本地提交**（Services/UnrealSync/UnrealSyncGitCommitService.cs）：
+#   - 覆盖范围不再是一份手写的清单，而是 `git add -A`（工作区里的全部改动），
+#     所以同步会改到的资产 —— AllRoad、MusicPlayer 蓝图、剧情表……天然都在里面；
+#   - 口径是**只提交、不推送**（同步是高频动作，替用户往远端推不是我们该做的事）。
+# 所以这里改成钉"全量"这一个性质本身。
 Require-Pattern `
-    (Join-Path $root 'MainWindow.UnrealSync.Process.cs') `
-    'StoryBranchDataTableAssetPath[\s\S]*?filesToBackup\.Add' `
-    'AllRoad must be included in the Unreal sync backup.'
+    (Join-Path $root 'Services\UnrealSync\UnrealSyncGitCommitService.cs') `
+    'CommitEverythingAsync[\s\S]*?\["add", "-A"\][\s\S]*?\["commit", "-m", commitMessage\][\s\S]*?TryReadHeadShaAsync' `
+    'The pre-sync rollback point must commit every local change (which covers AllRoad and the other synced assets).'
+
+Require-Pattern `
+    (Join-Path $root 'Services\UnrealSync\UnrealSyncGitCommitService.cs') `
+    '\["push"' `
+    'The pre-sync rollback commit must never push to a remote.' -NotMatch
 
 Require-Pattern `
     (Join-Path $root 'MainWindow.UnrealSync.cs') `
@@ -69,7 +87,6 @@ if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
     Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
     exit 1
-
 }
 
 $assemblyPath = Join-Path $root 'bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\TFAC剧情箱-轮椅版.dll'
