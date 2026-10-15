@@ -42,8 +42,6 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private bool _isUpdatingStoryCustomBranchLogicToggle;
-
         private void StorySectionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_isLoadingStoryRow || _isUpdatingStorySectionOptions || _currentStoryDocumentPath is null || _storyRows.Count == 0)
@@ -111,11 +109,7 @@ namespace GalExcleTools
             var nextSection = GetCurrentStorySection();
             EnsureStorySectionOptions(_storyRowSections.Values.DefaultIfEmpty(1).Max());
             SelectStorySection(nextSection);
-            // 拆分之后当前句属于**新**小节了，开关得跟着重算：
-            // 「自定义跳转逻辑」是跟着"小节第一行"记的，而新小节的第一行就是当前句。
-            // 不重算的话，原来那一节如果开着，开关会一直显示"保留手工设置"，
-            // 让人以为新拆出来这一节也保留着 —— 其实没有。
-            UpdateStoryCustomBranchLogicToggle(nextSection);
+            // （这里原来还要重算小节那边的「自定义跳转逻辑」开关，2026-10-15 随那个开关一起删了。）
             NormalizeStoryChoiceFunctionPrefixes(out var migratedChoiceNotes);
             QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
             UpdateStoryRowIndexInput();
@@ -144,9 +138,11 @@ namespace GalExcleTools
         /// 【两条容易漏掉的连带影响】
         /// 1. 小节号变了 → 嵌在小节号里的 Choice 函数名（<c>WHK-M6-06-Choice3</c>）
         ///    必须跟着迁移，不然那些选项会指到别的小节上。拆分走的是同一个迁移函数。
-        /// 2. 「自定义跳转逻辑」的语义是"这一节保留手工 AllRoad"。两节里**只要有一节开着**，
-        ///    合并后那一节就继续开着 —— 否则合并会把手工写的那套 AllRoad
+        /// 2. 「自定义跳转逻辑」（这一节保留手工 AllRoad）的标记：两节里**只要有一节标着**，
+        ///    合并后那一节就继续标着 —— 否则合并会把手工写的那套 AllRoad
         ///    变成"下次同步自动重建"，而且这一步不会有任何报错。
+        ///    注意这个标记现在只在**选项管理器**里能改（小节那边的开关 2026-10-15 封存了），
+        ///    但这里的行为必须留着：旧文档里可能就带着标记。
         ///
         /// 行一条都不动，所以小节锚点（选项目标 / 自定义标记存的都是行 StableId）不受影响。
         /// </summary>
@@ -207,7 +203,6 @@ namespace GalExcleTools
 
             EnsureStorySectionOptions(_storyRowSections.Values.DefaultIfEmpty(1).Max());
             SelectStorySection(precedingSection);
-            UpdateStoryCustomBranchLogicToggle(precedingSection);
             QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
             UpdateStoryRowIndexInput();
             UpdateStoryEditorHeader();
@@ -245,51 +240,11 @@ namespace GalExcleTools
             return _storyEditorViewModel.GetCurrentSection();
         }
 
-        private void UpdateStoryCustomBranchLogicToggle(int section)
-        {
-            _isUpdatingStoryCustomBranchLogicToggle = true;
-            try
-            {
-                StoryCustomBranchLogicToggle.IsOn = StoryBranchService.IsCustomBranchSection(
-                    _storyEditorViewModel.Document,
-                    section);
-            }
-            finally
-            {
-                _isUpdatingStoryCustomBranchLogicToggle = false;
-            }
-        }
-
-        private void StoryCustomBranchLogicToggle_Toggled(object sender, RoutedEventArgs e)
-        {
-            if (_isLoadingStoryRow || _isUpdatingStoryCustomBranchLogicToggle ||
-                _currentStoryDocumentPath is null || _storyRows.Count == 0)
-            {
-                return;
-            }
-
-            if (!CanEditStoryData())
-            {
-                UpdateStoryCustomBranchLogicToggle(GetCurrentStorySection());
-                return;
-            }
-
-            var section = GetCurrentStorySection();
-            var isCustom = StoryCustomBranchLogicToggle.IsOn;
-            CaptureStoryUndoState(isCustom ? "启用小节自定义跳转逻辑" : "恢复小节自动跳转同步");
-            StoryBranchService.SetCustomBranchSection(
-                _storyEditorViewModel.Document,
-                section,
-                isCustom);
-            QueueCurrentStoryDocumentSave();
-            _uiSoundService.Play(UiSoundKind.Selection);
-            ShowStoryStatus(
-                InfoBarSeverity.Success,
-                isCustom ? "已保留自定义跳转" : "已恢复自动同步",
-                isCustom
-                    ? $"{StorySectionDisplay.FormatName(section)}将在同步 AllRoad 时保持现有手工设置。"
-                    : $"{StorySectionDisplay.FormatName(section)}将重新由工具箱生成 AllRoad 跳转。");
-        }
+        // UpdateStoryCustomBranchLogicToggle / StoryCustomBranchLogicToggle_Toggled 已删除（2026-10-15）：
+        // 「自定义跳转逻辑」那个开关从小节这边封存了，详见
+        // Docs/2026-10-15-小节自定义跳转逻辑-封存说明.md。
+        // 数据本身没动：标记仍然是 StoryDocument.CustomBranchSectionFirstRowIds，
+        // 界面上剩下的入口在选项管理器（ChapterChoiceManagerCustomToggle）。
 
         private int GetStorySectionAtRowIndex(int rowIndex)
         {

@@ -602,14 +602,13 @@
                                             </StackPanel>
                                         </Expander>
                                         <Expander Header="行与小节" FontSize="13" Style="{StaticResource StoryInspectorExpanderStyle}">
+                                            <!--
+                                                这里原来还有一个「自定义跳转逻辑」开关（2026-10-15 删掉）。
+                                                它管的是 AllRoad 跳转，位置该在选项那边，而且它的承诺
+                                                （"同步时保留手工设置"）在当前"整表重建"的同步实现下并不成立；
+                                                功能暂时封存，详见 Docs/2026-10-15-小节自定义跳转逻辑-封存说明.md。
+                                            -->
                                             <StackPanel Spacing="10">
-                                                <ToggleSwitch
-                                                    x:Name="StoryCustomBranchLogicToggle"
-                                                    Header="自定义跳转逻辑"
-                                                    OffContent="自动同步"
-                                                    OnContent="保留手工设置"
-                                                    Toggled="StoryCustomBranchLogicToggle_Toggled"
-                                                    ToolTipService.ToolTip="开启后，同步 AllRoad 时跳过当前小节" />
                                                 <Button Content="创建新小节" Height="36" HorizontalAlignment="Stretch" Command="{Binding AddSectionCommand}" ToolTipService.ToolTip="从当前句开始拆分一个新小节" />
                                                 <Button Content="向前合并小节" Height="36" HorizontalAlignment="Stretch" Command="{Binding MergePreviousSectionCommand}" ToolTipService.ToolTip="把当前小节并进前面那一节（后面的小节号往前收一位）" />
                                                 <Button Content="向后合并小节" Height="36" HorizontalAlignment="Stretch" Command="{Binding MergeNextSectionCommand}" ToolTipService.ToolTip="把后面那一节并进当前小节（后面的小节号往前收一位）" />

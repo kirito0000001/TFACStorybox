@@ -42,15 +42,25 @@ Require-Pattern `
     'CustomBranchSectionFirstRowIds' `
     'StoryDocument must persist sections whose AllRoad logic stays manually managed.'
 
+# 【2026-10-15 封存】小节那边那个「自定义跳转逻辑」开关已经删掉：
+# 它管的是 AllRoad 跳转，位置该在选项那边；而且它的承诺（"同步时保留手工设置"）
+# 在当前"整表重建"的同步实现下并不成立。详见
+# Docs/2026-10-15-小节自定义跳转逻辑-封存说明.md。
+# 这里改成钉两件事：小节工具区不许再长回这个开关；选项管理器那个入口仍在。
 Require-Pattern `
     (Join-Path $root 'MainWindow.xaml') `
-    'x:Name="StoryCustomBranchLogicToggle"[\s\S]*?Toggled="StoryCustomBranchLogicToggle_Toggled"' `
-    'The right story workbench needs a current-section custom AllRoad logic toggle.'
+    'StoryCustomBranchLogicToggle' `
+    'The section-side custom-AllRoad toggle must stay removed while the feature is shelved.' -NotMatch
 
 Require-Pattern `
-    (Join-Path $root 'MainWindow.Story.Sections.cs') `
-    'StoryCustomBranchLogicToggle_Toggled[\s\S]*?SetCustomBranchSection[\s\S]*?QueueCurrentStoryDocumentSave' `
-    'Changing custom AllRoad logic must be undoable and persisted.'
+    (Join-Path $root 'MainWindow.xaml') `
+    'ChapterChoiceManagerCustomToggle[\s\S]*?OffContent="工具箱管理"[\s\S]*?OnContent="Unreal 手工管理"' `
+    'The choice manager must keep the single remaining custom-AllRoad switch.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Workbench.ChoiceManager.cs') `
+    'ChapterChoiceManagerCustomToggle_Toggled[\s\S]*?SetCustomSection[\s\S]*?RefreshChapterChoiceManagerSections' `
+    'Changing custom AllRoad logic must still go through the choice manager staged session.'
 
 # 原断言钉的是"报错话术里必须出现 TargetStory=" —— 而 count 那一步早就改成数**裸词**
 # TargetStory 了（摊平之后引号和等号都没了，见那段注释里 2026-10-13 的实测值）。
