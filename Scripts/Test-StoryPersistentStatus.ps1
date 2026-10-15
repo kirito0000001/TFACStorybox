@@ -35,9 +35,12 @@ Require-Pattern `
     'RefreshCurrentStoryPersistentStatus[\s\S]*?ClearStoryTransientTips\(\)[\s\S]*?TryParseBackgroundTransitionMode[\s\S]*?ShowPersistentStoryStatus' `
     'Refreshing current-row functions must replace the old persistent transition status.'
 
+# 断言的是"显式写了 BGLerpMode 的那种函数也要**出现在右栏函数列表里**"，
+# 而不是"必须是裸 Add(function) 这一种写法" —— 现在登记过的加原值、
+# 没登记的加「（未登记函数）」后缀，两种都算出现在列表里（所以钉 `? function`）。
 Require-Pattern `
     (Join-Path $root 'MainWindow.Story.Media.cs') `
-    'UpdateStoryFunctionInspector[\s\S]*?TryParseBackgroundTransitionMode[\s\S]*?functionNames\.Add\(function\)[\s\S]*?continue;' `
+    'UpdateStoryFunctionInspector[\s\S]*?TryParseBackgroundTransitionMode\(function, out var transitionMode\)[\s\S]*?functionNames\.Add\([\s\S]*?\? function\b[\s\S]*?continue;' `
     'The right-side function list must include the explicit BGLerpMode function code.'
 
 Require-Pattern `
@@ -69,7 +72,6 @@ if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
     Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
     exit 1
-
 }
 
 Write-Host 'Story persistent-status checks passed.'
