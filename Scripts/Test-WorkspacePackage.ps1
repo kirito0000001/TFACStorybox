@@ -75,6 +75,33 @@ Require-Pattern `
     'new Progress<FolderBackupProgress>' `
     'Importing must wire the extraction progress to the bottom progress bar.'
 
+# 进度文案里的名词由调用方给（"项目" / "素材库"）——
+# 写死会说错话，从清单里推断则没有清单的调用又会退回错的词。谁调用谁清楚。
+Require-Pattern `
+    (Join-Path $root 'Services\FolderBackupService.cs') `
+    'ExportToZip\(\s*string folderPath,\s*string exportPath,\s*string label' `
+    'ExportToZip must take the noun for its progress copy from the caller.'
+
+Require-Pattern `
+    (Join-Path $root 'Services\FolderBackupService.cs') `
+    '正在扫描要导出的\{noun\}文件' `
+    'Export progress copy must use the caller-provided noun.'
+
+Require-Pattern `
+    (Join-Path $root 'Services\FolderBackupService.cs') `
+    'GetPackageNoun' `
+    'The guessed noun helper must stay removed (it is what printed the wrong word).' -NotMatch
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Workbench.cs') `
+    'ExportProjectFromUiAsync[\s\S]*?_folderBackupService\.ExportToZip\([\s\S]*?"项目"[\s\S]*?manifest' `
+    'The project export must label its progress copy as 项目.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Workbench.cs') `
+    'ExportAssetLibraryFromUiAsync[\s\S]*?_folderBackupService\.ExportToZip\([\s\S]*?"素材库"[\s\S]*?manifest' `
+    'The asset-library export must label its progress copy as 素材库.'
+
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
     Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
@@ -136,13 +163,19 @@ if (Test-Path -LiteralPath $assemblyPath) {
             $manifest.AssetLibraryFolderName = '素材库-测试素材库'
 
             $exportMethod = $backupServiceType.GetMethod('ExportToZip')
-            if ($exportMethod.GetParameters().Count -ne 5) {
-                throw 'ExportToZip 应当有一个带清单的 5 参数重载（folderPath / exportPath / progress / token / manifest）。'
+            if ($exportMethod.GetParameters().Count -ne 6) {
+                throw 'ExportToZip 应当有 6 个参数（folderPath / exportPath / label / progress / token / manifest）—— 文案名词由调用方给。'
+            }
+
+            $labels = @()
+            foreach ($parameter in $exportMethod.GetParameters()) { $labels += $parameter.Name }
+            if ($labels -notcontains 'label') {
+                throw "ExportToZip 的第三个参数应当叫 label（实际：$($labels -join ' / ')）。"
             }
 
             [void]$exportMethod.Invoke(
                 $backupService,
-                @($projectRoot, $packagePath, $null, [System.Threading.CancellationToken]::None, $manifest))
+                @($projectRoot, $packagePath, '项目', $null, [System.Threading.CancellationToken]::None, $manifest))
 
             if (-not (Test-Path -LiteralPath $packagePath)) {
                 throw '导出应当产出 zip 文件。'

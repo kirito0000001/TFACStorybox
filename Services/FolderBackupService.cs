@@ -135,9 +135,18 @@ internal sealed class FolderBackupService
         return BuildEntry(backupPath);
     }
 
+    /// <summary>
+    /// 把一个工作区对象（项目 / 素材库）压成可以发出去的包。
+    ///
+    /// <paramref name="label"/> 是进度文案里的名词（"项目" / "素材库"），**由调用方给** ——
+    /// 原来这里是写死的"项目"，导出素材库时会说"正在扫描要导出的项目文件"；
+    /// 后来改成从清单里推断，但没清单的调用又会退回错的词。索性让调用方直接说，
+    /// 谁调用谁清楚，也就没有"猜错"这条路了。
+    /// </summary>
     public FolderBackupEntry ExportToZip(
         string folderPath,
         string exportPath,
+        string label,
         IProgress<FolderBackupProgress>? progress = null,
         CancellationToken cancellationToken = default,
         WorkspacePackageManifest? manifest = null)
@@ -161,8 +170,7 @@ internal sealed class FolderBackupService
         }
 
         var backupsPath = GetFolderBackupsPath(folderPath, ProjectBackupsFolderName);
-        // 文案跟着包里的清单说话（素材库导出不该说"项目文件"）。
-        var noun = GetPackageNoun(manifest);
+        var noun = string.IsNullOrWhiteSpace(label) ? "内容" : label.Trim();
         progress?.Report(new FolderBackupProgress($"正在扫描要导出的{noun}文件...", 0, 0, 0, 0, 0, null));
         cancellationToken.ThrowIfCancellationRequested();
         var files = EnumerateBackupFiles(folderPath, backupsPath, excludeLocalArtifacts: true)
@@ -209,17 +217,6 @@ internal sealed class FolderBackupService
 
         progress?.Report(new FolderBackupProgress($"{noun}导出完成。", 100, files.Count, files.Count, totalBytes, totalBytes, null));
         return BuildEntry(exportFullPath);
-    }
-
-    /// <summary>进度文案里的名词：有清单就按清单说，没有就沿用旧的"项目"。</summary>
-    private static string GetPackageNoun(WorkspacePackageManifest? manifest)
-    {
-        return manifest?.PackageType switch
-        {
-            WorkspacePackageManifest.AssetLibraryPackageTypeValue => "素材库",
-            WorkspacePackageManifest.ProjectPackageTypeValue => "项目",
-            _ => "项目"
-        };
     }
 
     private static void WriteManifestEntry(ZipArchive archive, WorkspacePackageManifest manifest)

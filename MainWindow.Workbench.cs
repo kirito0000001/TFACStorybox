@@ -245,6 +245,7 @@ namespace GalExcleTools
                     progress => Task.Run(() => _folderBackupService.ExportToZip(
                         project.Path,
                         exportFile.Path,
+                        "项目",
                         progress,
                         GetGlobalProgressCancellationToken(),
                         manifest)));
@@ -394,6 +395,7 @@ namespace GalExcleTools
                     progress => Task.Run(() => _folderBackupService.ExportToZip(
                         assetLibrary.Path,
                         exportFile.Path,
+                        "素材库",
                         progress,
                         GetGlobalProgressCancellationToken(),
                         manifest)));
