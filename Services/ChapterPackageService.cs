@@ -225,7 +225,9 @@ internal sealed class ChapterPackageService
         {
             Package = package,
             RowItems = BuildRowMergeItems(localRows, packageRows),
-            TodoItems = BuildTodoMergeItems(chapter, localTodos, package.Todos)
+            TodoItems = BuildTodoMergeItems(chapter, localTodos, package.Todos),
+            LocalRowCount = localRows.Count,
+            LocalSectionCount = localRows.Count == 0 ? 0 : localRows[^1].Section
         };
 
         if (!string.Equals(chapter.Code, package.Manifest.ChapterCode, StringComparison.OrdinalIgnoreCase))

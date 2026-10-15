@@ -179,6 +179,12 @@ internal sealed class ChapterMergePlan
 
     public List<ChapterTodoMergeItem> TodoItems { get; init; } = [];
 
+    /// <summary>本机这一章现在多少行（弹窗上"本机 X 行 / 包里 Y 行"用）。</summary>
+    public int LocalRowCount { get; init; }
+
+    /// <summary>本机这一章现在多少个小节。</summary>
+    public int LocalSectionCount { get; init; }
+
     /// <summary>不拦路、但必须让人看见的提醒（不同源 / 章码不一样 / 选项函数缺备注……）。</summary>
     public List<string> Warnings { get; init; } = [];
 

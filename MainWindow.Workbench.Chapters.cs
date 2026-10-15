@@ -58,6 +58,7 @@ namespace GalExcleTools
                 GridViewItemFactory.CreateMenuItem("AI 剧情填表", async (_, _) => await ShowAiStoryFillWorkflowAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("导入小节", async (_, _) => await ImportStorySectionsFromUiAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("导出章节", async (_, _) => await ExportChapterPackageFromUiAsync(chapter)),
+                GridViewItemFactory.CreateMenuItem("导入章节", async (_, _) => await ImportChapterPackageFromUiAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("备份", async (_, _) => await BackupChapterFromUiAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("还原", async (_, _) => await RestoreChapterFromUiAsync(chapter)),
                 GridViewItemFactory.CreateMenuItem("修复", async (_, _) => await RepairChapterIndexesFromUiAsync(chapter)),
@@ -404,7 +405,7 @@ namespace GalExcleTools
                 // ① 先把还没落盘的编辑写下去。导出的可能正是**当前打开的这一章**，
                 //    而自动保存有 900ms debounce —— 不 flush 的话包里会少最后一拍。
                 //    这一步必须在生成包**之前**：包直接搬磁盘上那份文档。
-                await FlushChapterEditsBeforeExportAsync(chapter);
+                await FlushChapterEditsBeforePackageAsync(chapter);
 
                 // ② 选保存位置（和项目 / 素材库的「导出」同一套手感）。
                 //    文件名是**章节中文名 + 日期序号**（例如 `第六章_20261015_1712.zip`）——
@@ -452,13 +453,13 @@ namespace GalExcleTools
         }
 
         /// <summary>
-        /// 导出前把"还没落盘的编辑"写下去。
+        /// 导出 / 导入章节包之前，把"还没落盘的编辑"写下去。
         ///
-        /// - 故事文档：只有导出的正好是**当前打开的那一章**才需要（保存走 900ms debounce 的
+        /// - 故事文档：只有"要处理的正好是**当前打开的那一章**"才需要（保存走 900ms debounce 的
         ///   <c>StorySaveCoordinator</c>，"改完最后一句 → 立刻导出"时磁盘上还是上一拍的样子）。
         /// - TODO 备注：项目级一个文件，无论是哪一章都先落一次；没脏就是空操作。
         /// </summary>
-        private async Task FlushChapterEditsBeforeExportAsync(ChapterInfo chapter)
+        private async Task FlushChapterEditsBeforePackageAsync(ChapterInfo chapter)
         {
             if (_currentStoryChapter is not null && PathsEqual(_currentStoryChapter.Path, chapter.Path))
             {
@@ -468,6 +469,122 @@ namespace GalExcleTools
             }
 
             SaveStoryTodosIfDirty();
+        }
+
+        /// <summary>
+        /// 「导入章节」：读对面发回来的编辑包，逐句对比，让人挑一边，然后合并。
+        ///
+        /// 【为什么要有这一步，而不是直接覆盖】两边是在同一份文档上分头改的（他写他的小节、
+        /// 我写我的），二方对比分不出"谁改的"，所以把差异全摆出来让人点名 ——
+        /// 默认一条都不动本机，弹窗上给了"只收对方的改动 / 全部用对方 / 全部用本机"三个批量档。
+        ///
+        /// 【合并前自动备份】在 <see cref="ChapterPackageService.ApplyMerge"/> 里做（走现成的
+        /// 「备份 / 还原」那一套），所以合并错了随时能在章节右键「还原」里退回来。
+        /// </summary>
+        private async Task ImportChapterPackageFromUiAsync(ChapterInfo chapter)
+        {
+            if (_currentProject is null)
+            {
+                ShowChapterStatus(InfoBarSeverity.Warning, "无法导入章节", "请先打开一个项目。");
+                return;
+            }
+
+            try
+            {
+                ChapterInfoBar.IsOpen = false;
+
+                var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+                picker.FileTypeFilter.Add(".zip");
+                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+                var packageFile = await picker.PickSingleFileAsync();
+                if (packageFile is null || string.IsNullOrWhiteSpace(packageFile.Path))
+                {
+                    return;
+                }
+
+                // 差异对比读的是磁盘上那份文档 —— 和导出一样，先把手上的改动落盘。
+                await FlushChapterEditsBeforePackageAsync(chapter);
+
+                var projectPath = _currentProject.Path;
+                var packagePath = packageFile.Path;
+                var (localDocument, plan) = await Task.Run(() =>
+                {
+                    var package = _chapterPackageService.LoadPackage(packagePath);
+                    var document = _storyDocumentRepository.Load(chapter);
+                    var todos = StoryTodoStore.Load(projectPath);
+                    return (document, _chapterPackageService.BuildMergePlan(chapter, package, document, todos));
+                });
+
+                if (!plan.HasAnyChange)
+                {
+                    ShowChapterStatus(
+                        InfoBarSeverity.Informational,
+                        "没有差异",
+                        $"包里的 {chapter.Name} 和本机这一章内容一致，不需要合并。");
+                    return;
+                }
+
+                var mergeContent = new ChapterMergeDialogContent(plan);
+                var result = await _dialogService.ShowContentAsync(new ContentDialogRequest(
+                    $"导入章节：{chapter.Name}（{chapter.Code}）",
+                    mergeContent.Content,
+                    mergeContent.PrimaryButtonText,
+                    "取消",
+                    // 默认落在"取消"上：合并会改本机数据，不该让一个回车就执行。
+                    DefaultButton: ContentDialogButton.Close,
+                    ConfigureDialog: dialog =>
+                    {
+                        mergeContent.SelectionChanged += () => dialog.PrimaryButtonText = mergeContent.PrimaryButtonText;
+                        dialog.PrimaryButtonClick += (_, args) =>
+                        {
+                            if (mergeContent.SelectedCount == 0)
+                            {
+                                args.Cancel = true;
+                                mergeContent.ShowValidation();
+                            }
+                        };
+                    }));
+                if (result != DialogResultKind.Primary || mergeContent.SelectedCount == 0)
+                {
+                    return;
+                }
+
+                var apply = await Task.Run(() => _chapterPackageService.ApplyMerge(chapter, plan, localDocument, projectPath));
+
+                // 刷新界面：章节卡（上次编辑时间变了）；如果这一章正开着，编辑器整份重新载入
+                //（行可能被插进 / 删掉了，沿用「索引同步之后刷新」那一套顺序）。
+                LoadChapters(_currentProject);
+                if (_currentStoryChapter is not null && PathsEqual(_currentStoryChapter.Path, chapter.Path))
+                {
+                    LoadStoryDocument(chapter);
+                    SynchronizeStorySectionState();
+                    ClearStoryUndoStack();
+                    LoadStoryTodos();
+                    _currentStoryRowIndex = Math.Clamp(_currentStoryRowIndex, 0, Math.Max(0, _storyRows.Count - 1));
+                    _storyEditorViewModel.RefreshCommandStates();
+                    if (StoryEditorPage.Visibility == Visibility.Visible)
+                    {
+                        RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
+                        LoadStoryRowIntoUi();
+                    }
+                }
+
+                ShowChapterStatus(
+                    InfoBarSeverity.Success,
+                    "章节已合并",
+                    $"{chapter.Name}（{chapter.Code}）\n"
+                    + $"改了 {apply.UpdatedRowCount} 句 · 插入 {apply.InsertedRowCount} 句 · 删除 {apply.DeletedRowCount} 句 · 备注 {apply.UpdatedTodoCount} 条\n"
+                    + "合并前的备份已保留，可用右键「还原」退回。");
+                AppendLog(
+                    LogKind.User,
+                    $"导入章节编辑包：{chapter.Name}（{chapter.Code}）<- {packagePath}"
+                    + $"（改 {apply.UpdatedRowCount} / 插 {apply.InsertedRowCount} / 删 {apply.DeletedRowCount} / 备注 {apply.UpdatedTodoCount}，合并前备份 {apply.BackupPath}）");
+            }
+            catch (Exception ex)
+            {
+                ShowChapterStatus(InfoBarSeverity.Error, "导入章节失败", ex.Message);
+                AppendLog(LogKind.Error, "导入章节失败。", ex);
+            }
         }
 
         private async Task<List<string>?> ShowStorySectionImportDialogAsync(ChapterInfo chapter)

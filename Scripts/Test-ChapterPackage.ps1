@@ -41,8 +41,30 @@ Require-Pattern `
 
 Require-Pattern `
     (Join-Path $root 'MainWindow.Workbench.Chapters.cs') `
-    'ExportChapterPackageFromUiAsync[\s\S]*?FlushChapterEditsBeforeExportAsync[\s\S]*?_chapterPackageService\.Export' `
+    'ExportChapterPackageFromUiAsync[\s\S]*?FlushChapterEditsBeforePackageAsync[\s\S]*?_chapterPackageService\.Export' `
     'Exporting a chapter must flush pending edits before the package is built.'
+
+# ── 导入侧：菜单项 + 流程 + 弹窗 ──
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Workbench.Chapters.cs') `
+    'CreateMenuItem\("导入章节"' `
+    'The chapter context menu needs the import entry.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Workbench.Chapters.cs') `
+    'ImportChapterPackageFromUiAsync[\s\S]*?FlushChapterEditsBeforePackageAsync[\s\S]*?LoadPackage[\s\S]*?BuildMergePlan[\s\S]*?ChapterMergeDialogContent[\s\S]*?ApplyMerge' `
+    'Importing a chapter must flush, load the package, build the diff, ask the user, then merge.'
+
+# 合并会改本机数据：默认按钮必须是「取消」，不能让一个回车就执行。
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Workbench.Chapters.cs') `
+    'ImportChapterPackageFromUiAsync[\s\S]*?DefaultButton: ContentDialogButton\.Close' `
+    'The merge dialog must default to cancel so a stray Enter cannot merge.'
+
+Require-Pattern `
+    (Join-Path $root 'Views\ChapterMergeDialogContent.cs') `
+    'SelectPackageEditsOnly[\s\S]*?SelectAllFromPackage[\s\S]*?SelectAllLocal[\s\S]*?IsChecked = item\.Choice == ChapterMergeChoice\.UsePackage' `
+    'The diff dialog must start from "keep local" and offer the three bulk choices.'
 
 # 包名 = 章节中文名 + 日期序号（`第六章_20261015_1712.zip`）：这东西是发给别人的，
 # 收件人要看一眼就知道是哪一章、哪一次导的 —— 用代号（WHK-M6-00）反而要靠记忆去对。
@@ -53,8 +75,8 @@ Require-Pattern `
 
 Require-Pattern `
     (Join-Path $root 'MainWindow.Workbench.Chapters.cs') `
-    'FlushChapterEditsBeforeExportAsync[\s\S]*?SaveCurrentStoryRow[\s\S]*?FlushAsync[\s\S]*?SaveStoryTodosIfDirty' `
-    'The pre-export flush must cover both the story document and the project-wide todo file.'
+    'FlushChapterEditsBeforePackageAsync[\s\S]*?SaveCurrentStoryRow[\s\S]*?FlushAsync[\s\S]*?SaveStoryTodosIfDirty' `
+    'The pre-package flush must cover both the story document and the project-wide todo file.'
 
 # ── 导入 / 合并侧 ──
 Require-Pattern `
