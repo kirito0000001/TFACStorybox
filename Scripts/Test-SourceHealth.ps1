@@ -161,8 +161,12 @@ Require-MethodPattern "MainWindow.Story.Functions.cs" "ChooseStoryAssetIndexAsyn
 Require-SourcePattern "Models/UnrealSyncModels.cs" 'bool IsFullSync[\s\S]*?List<string> ChangeItems[\s\S]*?List<string> UnchangedItems' "Unreal sync preview copy must separate mode, changes, and unchanged items."
 Require-SourcePattern "Services/UnrealSyncService.cs" '本次同步将处理' "Unreal sync summary must clearly state what will be processed."
 Require-SourcePattern "Services/UnrealSyncService.cs" '新增或更新素材[\s\S]*?清理虚幻中的多余素材[\s\S]*?更新剧情表[\s\S]*?更新素材索引表' "Unreal sync summary must use clear action-oriented copy."
-Require-MethodPattern "MainWindow.UnrealSync.cs" "ApplyUnrealSyncChangePlan" '同步方式[\s\S]*?本次同步[\s\S]*?无需处理' "Unreal sync preview must render readable information groups."
-Require-MethodPattern "MainWindow.UnrealSync.cs" "AppendUnrealSyncDiffDetails" 'GetUnrealSyncDestinationDisplayName[\s\S]*?目标位置：' "Unreal sync details must show friendly asset names before technical paths."
+# 【2026-10-12 同步台重建】预览从"把每个文件名列出来"（几百行）改成**一张对比表**：
+# 一行 = 一个类别变了多少，"无变化"时明说不会启动 Unreal。
+# 另外 AppendUnrealSyncDiffDetails 已经并进这个方法了（改名 + 合流），
+# 所以下面两条都锚在 ApplyUnrealSyncChangePlan 上。
+Require-MethodPattern "MainWindow.UnrealSync.cs" "ApplyUnrealSyncChangePlan" 'ClearDiffRows[\s\S]*?!changePlan\.HasChanges[\s\S]*?AddDiffRow\("（无变化）"[\s\S]*?changePlan\.ImportGroups[\s\S]*?GetUnrealSyncDestinationDisplayName[\s\S]*?changePlan\.DeleteGroups[\s\S]*?changePlan\.StoryBranchesChanged' "Unreal sync preview must render readable information groups."
+Require-MethodPattern "MainWindow.UnrealSync.cs" "ApplyUnrealSyncChangePlan" 'AddDiffRow\(\s*GetUnrealSyncDestinationDisplayName\([\s\S]*?group\.Destination\);' "Unreal sync details must show friendly asset names before technical paths."
 Require-SourcePattern "Models/UnrealSyncModels.cs" 'Dictionary<string, string> SourceHashes' "Unreal sync state must persist source SHA-256 hashes."
 Require-SourcePattern "Models/UnrealSyncModels.cs" 'UnrealSyncExecutionReport[\s\S]*?Completed[\s\S]*?Success[\s\S]*?Errors[\s\S]*?Warnings' "Unreal sync must expose a structured execution report."
 Require-MethodPattern "Services/UnrealSyncService.cs" "WriteManifest" 'ProtocolVersion[\s\S]*?ProgressPath[\s\S]*?ResultPath' "Unreal sync manifest must include structured progress and result paths."
@@ -172,20 +176,33 @@ Require-MethodPattern "Services/UnrealSyncService.cs" "WritePythonScript" 'def s
 Require-MethodPattern "Services/UnrealSyncService.cs" "WritePythonScript" 'if save_loaded_asset_with_retry\(data_table, table_asset_path\):[\s\S]*?story_table_count \+= 1' "Story tables must only be confirmed after the package is saved."
 Require-SourcePattern "Models/UnrealSyncModels.cs" 'int StateVersion' "Unreal sync state must include a migration version."
 Require-MethodPattern "Services/UnrealSyncService.cs" "BuildChangePlan" 'requiresVerifiedTableSync[\s\S]*?storyTables[\s\S]*?assetIndexTablesChanged' "Older sync state must force a verified table refresh."
-Require-MethodPattern "Services/UnrealSyncService.cs" "Run" 'ReadProgressUpdate[\s\S]*?ReadExecutionReport' "Unreal sync runner must consume structured progress and result files."
+Require-MethodPattern "Services/UnrealSyncService.cs" "RunAsync" 'UnrealSyncProcessRunner\.RunAsync\([\s\S]*?progressPath[\s\S]*?ReadExecutionReport\(resultPath\)' "Unreal sync runner must consume structured progress and result files."
 Require-MethodPattern "Services/UnrealSyncService.cs" "ReadProgressUpdate" 'ReadSharedText' "Unreal progress polling must use replace-safe shared file reads."
 Require-MethodPattern "Services/UnrealSyncService.cs" "ReadSharedText" 'FileShare\.ReadWrite\s*\|\s*FileShare\.Delete' "Structured Unreal sync JSON reads must allow atomic replacement on Windows."
-Require-MethodPattern "Services/UnrealSyncService.cs" "Run" 'elapsed\.TotalSeconds' "Unreal sync runner still uses elapsed time to estimate progress." -NotMatch
+Require-MethodPattern "Services/UnrealSyncService.cs" "RunAsync" 'elapsed\.TotalSeconds' "Unreal sync runner still uses elapsed time to estimate progress." -NotMatch
 Require-MethodPattern "Services/UnrealSyncService.cs" "BuildChangePlan" 'ComputeSourceHashes[\s\S]*?SourceHashes' "Unreal sync planning must compare source SHA-256 hashes."
 Require-MethodPattern "Services/UnrealSyncService.cs" "BuildAssetObjectPath" 'NormalizeImportedAssetName' "Imported Unreal object paths must use the same sanitized asset name as Unreal."
 Require-MethodPattern "Services/UnrealSyncService.cs" "BuildTextureReference" 'NormalizeImportedAssetName' "Unreal texture references must use sanitized imported asset names."
 Require-MethodPattern "Services/UnrealSyncService.cs" "BuildSoundWaveReference" 'NormalizeImportedAssetName' "Unreal sound references must use sanitized imported asset names."
 Require-MethodPattern "Services/UnrealSyncService.cs" "NormalizeImportedAssetName" 'char\.IsWhiteSpace[\s\S]*?InvalidUnrealObjectNameCharacters' "Imported asset-name normalization must cover Unreal invalid object-name characters."
 Require-MethodPattern "Services/UnrealSyncService.cs" "SourceFileNeedsImport" 'BuildLegacyAssetObjectPath[\s\S]*?SourceFileNeedsAnyAssetUpdate' "Source hash checks must recognize state keys written before asset-name normalization."
-Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncButton_Click" 'result\.Report[\s\S]*?reportSuccess[\s\S]*?Success:\s*true' "Unreal sync completion must use the structured report."
-Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncButton_Click" 'GalExcleTools updated|GalExcleTools failed' "Unreal sync UI still parses fixed English log messages." -NotMatch
-Require-MethodPattern "MainWindow.UnrealSync.Process.cs" "GetRunningUnrealEditorProcesses" 'UnrealSyncContext[\s\S]*?Win32_Process[\s\S]*?CommandLine' "Unreal process detection must be limited to the bound .uproject."
-Require-MethodPattern "MainWindow.UnrealSync.Process.cs" "CreateUnrealSyncBackup" 'Config[\s\S]*?TargetContentFolderPath[\s\S]*?Take\(5\)' "Unreal sync backup must cover the affected scope and retain only five archives."
+# 同步的入口方法 2026-10-12 改名：RunUnrealSyncButton_Click → RunUnrealSyncFlowAsync
+# （检测、全量重同步各有自己的入口）。下面这几条原来锚的是旧名字，
+# 方法找不到 → Require-MethodPattern 直接判失败，于是**正反两条一起红**（-NotMatch 那条也是）。
+Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncFlowAsync" 'reportSuccess\s*=\s*report is \{ ProtocolVersion: 1, Completed: true, Success: true \}[\s\S]*?verificationPassed;' "Unreal sync completion must use the structured report."
+Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncFlowAsync" 'GalExcleTools updated|GalExcleTools failed' "Unreal sync UI still parses fixed English log messages." -NotMatch
+# 进程检测那套（WMI 找别的工程的编辑器 + 建议先关掉它）2026-10-12 整个删掉了：
+# 在线执行上线之后，"编辑器开着"才是要的状态 —— 那条建议正好是反的。
+# 所以不再钉"检测要限定在绑定的 .uproject 上"，改钉两件现在为真的事：
+#   · 工具箱不会再去杀/关别人的编辑器（连 WMI 查询都没有了）；
+#   · 编辑器开着仍是首选路径（在线执行），这才是那段建议退休的原因。
+Require-SourcePattern "MainWindow.UnrealSync.Process.cs" 'Win32_Process|CloseMainWindow' "Unreal sync must never hunt for or close the editor processes of another project." -NotMatch
+Require-SourcePattern "Services/UnrealSyncService.cs" 'launch\.UsesRunningEditor[\s\S]*?RunWithOfflineFallbackAsync' "Keeping the editor open must stay the preferred online execution path."
+# 回退点 2026-10-12 从"给工程打 zip（留最近 5 份）"改成"同步前全量本地提交"，
+# 见 MainWindow.UnrealSync.Process.cs 里的退休说明与 Services/UnrealSync/UnrealSyncGitCommitService.cs。
+# 覆盖范围不再是一份手写清单（AllRoad / MusicPlayer / 剧情表天然都在 `git add -A` 里），
+# 口径是只提交、不推送。
+Require-SourcePattern "Services/UnrealSync/UnrealSyncGitCommitService.cs" 'CommitEverythingAsync[\s\S]*?\["add", "-A"\][\s\S]*?\["commit", "-m", commitMessage\][\s\S]*?TryReadHeadShaAsync' "The pre-sync rollback point must commit every local change and record the revision."
 Require-SourcePattern "MainWindow.xaml" 'x:Name="AppTitleVersionText"' "The title bar version must be populated from the shared version service."
 Require-SourcePattern "MainWindow.xaml" 'x:Name="SettingsAppVersionText"' "The settings version must be populated from the shared version service."
 Require-SourcePattern "MainWindow.xaml.cs" 'AppVersionService\.GetDisplayVersion\(\)[\s\S]*?AppTitleVersionText\.Text[\s\S]*?SettingsAppVersionText\.Text' "The title bar and settings page must use the same resolved app version."
@@ -201,9 +218,9 @@ Require-MethodPattern "Services/UnrealSyncService.cs" "BuildChangePlan" 'VoiceMa
 Require-MethodPattern "Services/UnrealSyncService.cs" "WriteManifest" 'VoiceMap[\s\S]*?BlueprintAsset[\s\S]*?MapProperty[\s\S]*?ShouldUpdate[\s\S]*?Entries' "The Unreal manifest must carry the MusicPlayer voice-map update."
 Require-MethodPattern "Services/UnrealSyncService.cs" "WritePythonScript" 'load_blueprint_class[\s\S]*?get_default_object[\s\S]*?unreal\.TableVoices[\s\S]*?save_loaded_asset_with_retry[\s\S]*?verify_voice_map' "Unreal Python must update, verify, and save the MusicPlayer class defaults."
 Require-SourcePattern "Models/UnrealSyncModels.cs" 'bool VoiceMapsUpdated' "Structured Unreal results must report whether MusicPlayer voice maps were saved."
-Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncButton_Click" '!changePlan\.VoiceMapsChanged \|\| report\.VoiceMapsUpdated' "The UI must not record a voice-map sync as successful unless Unreal confirms it."
+Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncFlowAsync" '!changePlan\.VoiceMapsChanged \|\| report\.VoiceMapsUpdated' "The UI must not record a voice-map sync as successful unless Unreal confirms it."
 Require-MethodPattern "Services/UnrealSyncService.cs" "WriteState" 'VoiceMapsHash\s*=\s*changePlan\.VoiceMapsHash' "Successful sync state must persist the voice-map hash."
-Require-MethodPattern "MainWindow.UnrealSync.Process.cs" "CreateUnrealSyncBackup" 'UnrealObjectPathToContentFilePath[\s\S]*?MusicPlayerBlueprintAssetPath[\s\S]*?filesToBackup\.Add' "Unreal sync backups must include the MusicPlayer blueprint modified by voice-map synchronization."
+Require-SourcePattern "Services/UnrealSync/UnrealSyncGitCommitService.cs" 'filesToBackup|\["push"' "The pre-sync rollback point must stay a whole-workspace local commit (no hand-kept file list, no push)." -NotMatch
 Require-SourcePattern "Models/StoryModels.cs" 'StoryAssetChoice\(int Index, string Name, string\? PreviewPath = null\)' "Story asset choices must support an optional image preview path."
 Require-MethodPattern "MainWindow.Story.Assets.cs" "GetStoryBackgroundChoices" 'new StoryAssetChoice\(index, Path\.GetFileNameWithoutExtension\(path\), path\)' "Story background choices must retain their source image path for hover previews."
 Require-MethodPattern "Services/StoryDialogService.cs" "SelectAssetChoiceAsync" 'CreateLazyImagePreviewToolTip\(choice\.PreviewPath' "Story asset selection must attach lazy image previews when a preview path is available."
@@ -231,7 +248,7 @@ Require-SourcePattern "MainWindow.xaml" 'Grid\.Row="0" Grid\.RowSpan="2" Backgro
 Require-SourcePattern "MainWindow.Story.Interaction.cs" '《F12打开快捷键提示》' "Large story preview slots must not show the old intrusive F12 tooltip." -NotMatch
 Require-SourcePattern "MainWindow.xaml" 'Canvas\.ZIndex="100"[\s\S]*?x:Name="StoryEditorCanvasHost"[\s\S]*?SizeChanged="StoryEditorCanvasHost_SizeChanged"' "The story toolbar must stay above a clipped preview canvas."
 Require-MethodPattern "MainWindow.Story.Preview.cs" "StoryEditorCanvasHost_SizeChanged" 'RectangleGeometry[\s\S]*?e\.NewSize\.Width[\s\S]*?e\.NewSize\.Height' "The story preview canvas must clip oversized character art to its bounds."
-Require-SourcePattern "MainWindow.xaml" 'StoryInspectorTitleStyle[\s\S]*?FontSize" Value="22"[\s\S]*?StoryInspectorSectionTitleStyle[\s\S]*?FontSize" Value="13"[\s\S]*?StoryInspectorLabelStyle[\s\S]*?TextFillColorSecondaryBrush[\s\S]*?StoryInspectorValueStyle[\s\S]*?FontSize" Value="14"' "The story inspector must use a readable Apple-style typographic hierarchy."
+Require-SourcePattern "App.xaml" 'StoryInspectorTitleStyle[\s\S]*?FontSize" Value="22"[\s\S]*?StoryInspectorSectionTitleStyle[\s\S]*?FontSize" Value="13"[\s\S]*?StoryInspectorLabelStyle[\s\S]*?TextFillColorSecondaryBrush[\s\S]*?StoryInspectorValueStyle[\s\S]*?FontSize" Value="14"' "The story inspector must use a readable Apple-style typographic hierarchy."
 Require-SourcePattern "MainWindow.xaml" 'Text="素材状态"[\s\S]*?Text="背景"[\s\S]*?CurrentBackgroundValue[\s\S]*?Text="BGM"[\s\S]*?CurrentBgmValue[\s\S]*?Text="环境音"[\s\S]*?CurrentSceneValue' "Story inspector asset values must use aligned label/value rows."
 Require-SourcePattern "MainWindow.xaml" 'Text="函数"[\s\S]*?CurrentFunctionCountText[\s\S]*?ItemsSource="\{Binding CurrentFunctionItems\}"' "Story inspector functions must expose count and ordered values with separate hierarchy."
 Require-SourcePattern "MainWindow.xaml" 'StoryInspectorStateTabButton[\s\S]*?StoryInspectorToolsTabButton[\s\S]*?x:Name="StorySidePanelContent"[\s\S]*?x:Name="StoryInspectorToolsScrollViewer"' "Story state and editing tools must use separate inspector tabs."
@@ -292,7 +309,7 @@ Require-MethodPattern "MainWindow.Story.Persistence.cs" "QueueCurrentStoryDocume
 Require-MethodPattern "Services/ProjectTextDataService.cs" "LoadTextRows" 'StoryDocumentRepository[\s\S]*?Load' "Text, voice, and localization views must read canonical story documents."
 Require-MethodPattern "Services/ChapterRepairService.cs" "Scan" 'StoryDocumentRepository[\s\S]*?Save' "Chapter repair must update canonical story documents."
 Require-SourcePattern "Services/StoryAssetIndexSyncService.cs" 'StoryDocumentRepository[\s\S]*?Save' "Asset-index repairs must update canonical story documents."
-Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncButton_Click" 'PrepareStoryCsvForUnrealSyncAsync[\s\S]*?BuildUnrealSyncChangePlan' "Unreal sync must flush story JSON and export CSV before computing differences."
+Require-MethodPattern "MainWindow.UnrealSync.cs" "RunUnrealSyncFlowAsync" 'PrepareStoryCsvForUnrealSyncAsync[\s\S]*?BuildUnrealSyncChangePlan' "Unreal sync must flush story JSON and export CSV before computing differences."
 Require-SourcePattern "MainWindow.Story.TextEditing.cs" 'StoryCsvExporter|StoryCsvService|WriteRows' "Text editing must never generate CSV." -NotMatch
 Require-SourcePattern "MainWindow.Story.Persistence.cs" 'StoryCsvExporter|ExportChapter' "Normal story persistence must never generate CSV." -NotMatch
 
@@ -307,7 +324,6 @@ if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
     Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
     exit 1
-
 }
 
 Write-Host "Source health checks passed."
