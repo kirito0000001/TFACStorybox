@@ -14,6 +14,11 @@ internal sealed class ApplicationViewModel : ObservableObject
         AssetLibrary = new AssetLibraryViewModel();
         StoryEditor = new StoryEditorViewModel();
         UnrealSync = new UnrealSyncViewModel();
+
+        // 热更新面板：ViewModel 自己不发请求、不起进程，只把用户动作翻成对
+        // Services/Update/UpdateService 的一次调用。进度条与「退出前收尾」由窗口提供
+        // （窗口构造完调 AttachUpdateHost 把它自己接上）。
+        Update = new UpdateViewModel(settings);
     }
 
     public SettingsViewModel Settings { get; }
@@ -27,6 +32,8 @@ internal sealed class ApplicationViewModel : ObservableObject
     public StoryEditorViewModel StoryEditor { get; }
 
     public UnrealSyncViewModel UnrealSync { get; }
+
+    public UpdateViewModel Update { get; }
 
     public IReadOnlyList<ToolboxModuleDefinition> Modules { get; } =
     [

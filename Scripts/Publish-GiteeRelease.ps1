@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ReleaseAssetRoot = "",
 
     [string]$TargetCommitish = "main"

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GalExcleTools.Controls.UpdateSettingsPanel"
+    x:Name="UpdateSettingsPanelRoot"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        热更新面板（设计 §11.2）。这里只有显示与绑定：流程在 UpdateViewModel，
+        网络与文件在 Services/Update。宿主是 MainWindow.xaml 设置页里的一行 <controls:UpdateSettingsPanel />。
+        x:Name 留着是为了按名字取控件（比按文案猜稳）。
+    -->
+    <Expander x:Name="UpdateSettingsExpander" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+        <Expander.Header>
+            <TextBlock Text="热更新" Style="{StaticResource SectionTitleStyle}" />
+        </Expander.Header>
+        <StackPanel Padding="18,16,18,18" Spacing="14">
+            <!--
+                2026-10-06：按用户要求精简 —— 说明只留"通道"这一句，其余行只留标题；
+                "回滚保障"（内部机制）与"上次检查"（没人看的历史）整块删掉。
+                行距靠外层 Spacing=14 + 每行 MinHeight=40 撑开，不再是 44 挤成一片。
+            -->
+            <Grid MinHeight="40" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <TextBlock Text="更新通道" />
+                    <TextBlock
+                        Style="{StaticResource SubtleTextStyle}"
+                        Text="正式版走 Release；测试版走预发布版本。"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <ComboBox
+                    x:Name="UpdateChannelComboBox"
+                    Grid.Column="1"
+                    MinWidth="160"
+                    VerticalAlignment="Center"
+                    SelectedIndex="{Binding Settings.UpdateChannelIndex, Mode=OneWay}"
+                    SelectionChanged="UpdateChannelComboBox_SelectionChanged">
+                    <ComboBoxItem Content="正式版 / Release" />
+                    <ComboBoxItem Content="测试版 / Beta" />
+                </ComboBox>
+            </Grid>
+
+            <Grid MinHeight="40" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" Text="自动检查更新" />
+                <ToggleSwitch
+                    x:Name="UpdateAutoCheckToggle"
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    IsOn="{Binding Settings.UpdateAutoCheckEnabled, Mode=TwoWay}" />
+            </Grid>
+
+            <Grid MinHeight="40" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" Text="最长连接时间（秒）" />
+                <NumberBox
+                    x:Name="UpdateTimeoutNumberBox"
+                    Grid.Column="1"
+                    Width="140"
+                    VerticalAlignment="Center"
+                    Minimum="10"
+                    Maximum="600"
+                    SmallChange="10"
+                    SpinButtonPlacementMode="Inline"
+                    ValidationMode="InvalidInputOverwritten"
+                    VerticalContentAlignment="Center"
+                    Value="{Binding Settings.UpdateConnectionTimeoutSeconds, Mode=TwoWay}" />
+            </Grid>
+
+            <Grid MinHeight="40" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" Text="当前版本" />
+                <TextBlock
+                    x:Name="UpdateCurrentVersionText"
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Text="{Binding Update.CurrentVersionText}" />
+            </Grid>
+
+            <StackPanel Spacing="2">
+                <TextBlock Text="{Binding Update.StatusText}" TextWrapping="Wrap" />
+                <TextBlock Style="{StaticResource SubtleTextStyle}" Text="{Binding Update.DetailText}" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="UpdateCheckButton" Command="{Binding Update.CheckUpdateCommand}" Content="检查更新" />
+                <Button x:Name="UpdateDownloadButton" Command="{Binding Update.DownloadAndInstallCommand}" Content="下载并更新" />
+                <Button x:Name="UpdateTestConnectionButton" Command="{Binding Update.TestConnectionCommand}" Content="测试 Gitee 连接" />
+                <Button x:Name="UpdateOpenReleasePageButton" Command="{Binding Update.OpenReleasePageCommand}" Content="打开 Release 页面" />
+            </StackPanel>
+        </StackPanel>
+    </Expander>
+</UserControl>

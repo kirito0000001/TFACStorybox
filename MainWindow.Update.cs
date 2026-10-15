@@ -1,245 +1,233 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using GalExcleTools.Services;
+using GalExcleTools.Services.Update;
+using GalExcleTools.ViewModels;
+using GalExcleTools.Views;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 
 namespace GalExcleTools;
 
-public sealed partial class MainWindow
+/// <summary>
+/// 热更新在界面壳上的接线：把进度条、取消令牌、打开网页、起覆盖器交给
+/// <c>UpdateViewModel</c>，外加启动 5 秒后的那一次自动检查、以及上一轮的延迟清理。
+///
+/// 为什么起进程 / 开网页这类动作必须走壳：<c>Services</c> 层只允许「准备与等待」
+/// （<see cref="UpdateLaunchService"/> 就是那条线），真正 <c>Process.Start</c> 只出现在窗口里。
+/// 顺带把这个类实现成 <see cref="IToolboxLogSink"/>，让更新链路的日志落进底部输出框。
+/// </summary>
+public sealed partial class MainWindow : IUpdateHost, IUpdaterProcessLauncher, IToolboxLogSink
 {
-    private void SyncUpdateControls()
+    /// <summary>启动后延时多久做那一次自动检查（每次启动只做一次，没有定时器）。</summary>
+    private static readonly TimeSpan UpdateStartupCheckDelay = TimeSpan.FromSeconds(5);
+
+    private UpdateViewModel Update => _applicationViewModel.Update;
+
+    /// <summary>
+    /// 把窗口接成更新流程的宿主。必须在 <c>_applicationViewModel</c> 建好之后调，
+    /// 且要早于 <see cref="CheckUpdateOnStartupAsync"/> —— 没有壳的话启动检查只会记日志。
+    /// </summary>
+    internal void AttachUpdateHost()
     {
-        if (UpdateChannelComboBox is not null)
-        {
-            UpdateChannelComboBox.SelectedIndex = Settings.UpdateChannel == UpdateChannel.Beta ? 1 : 0;
-        }
+        Update.AttachHost(this);
+        ToolboxLog.SetSink(this);
     }
 
-    private void UpdateChannelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (UpdateChannelComboBox.SelectedIndex < 0)
-        {
-            return;
-        }
+    void IUpdateHost.ShowGlobalProgress(string title, string detail) => ShowGlobalProgress(title, detail);
 
-        Settings.UpdateChannel = UpdateChannelComboBox.SelectedIndex == 1
-            ? UpdateChannel.Beta
-            : UpdateChannel.Stable;
-    }
+    void IUpdateHost.UpdateGlobalProgress(string message, double percent, string? detail) =>
+        UpdateGlobalProgress(message, percent, detail);
 
-    private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
-    {
-        await CheckForUpdatesAsync(showProgress: true, showNoUpdateTip: true);
-    }
+    void IUpdateHost.CompleteGlobalProgress(string message, string? detail) => CompleteGlobalProgress(message, detail);
 
-    private async void TestUpdateConnectionButton_Click(object sender, RoutedEventArgs e)
+    Task IUpdateHost.HideGlobalProgressAfterDelayAsync(int delayMilliseconds) =>
+        HideGlobalProgressAfterDelayAsync(delayMilliseconds);
+
+    CancellationToken IUpdateHost.GetGlobalProgressCancellationToken() => GetGlobalProgressCancellationToken();
+
+    void IUpdateHost.OpenReleasePage(string url) => OpenUrlInBrowser(url);
+
+    bool IUpdaterProcessLauncher.TryStart(UpdaterLaunchRequest request, out int processId, out string error) =>
+        TryStartUpdaterProcess(request, out processId, out error);
+
+    /// <summary>
+    /// 收尾并退出主程序，把安装目录让给已经在等的那份覆盖器。
+    /// <b>只能在覆盖器写出 READY 之后调用</b>：反过来（先退出再预检）一旦预检失败，
+    /// 用户就只剩一个关掉的窗口和一个没更新的目录。
+    ///
+    /// 这里只把待落盘的章节刷下去 —— 语音播放的释放与协调器的 Dispose 交给
+    /// <c>AppWindow.Closing</c> 那条正常关窗路径做（<c>Application.Exit()</c> 会触发它），
+    /// 免得同一套收尾跑两遍。
+    /// </summary>
+    void IUpdateHost.ExitForUpdate()
     {
-        ShowGlobalProgress("测试更新连接", "正在访问 Gitee，失败时自动尝试 GitHub。");
-        UpdateGlobalProgress("正在测试更新源...", 10, Settings.UpdateChannelText, true);
+        ToolboxLog.Info("主程序即将退出以完成热更新。");
         try
         {
-            var result = await _updateService.TestConnectionAsync(
-                Settings.UpdateChannel,
-                Settings.UpdateConnectionTimeoutSecondsValue,
-                GetGlobalProgressCancellationToken());
-            var message = $"{result.Message} 耗时 {result.Elapsed.TotalSeconds:0.0} 秒。";
-            Settings.SetUpdateStatus(message);
-            CompleteGlobalProgress(result.IsSuccess ? "更新连接正常" : "更新连接不可用", message);
-            ShowFloatingTip(
-                result.IsSuccess ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
-                result.IsSuccess ? "更新连接正常" : "更新连接不可用",
-                message);
+            _storySaveCoordinator.FlushAsync().GetAwaiter().GetResult();
         }
-        catch (OperationCanceledException)
+        catch (Exception error)
         {
-            CompleteGlobalProgress("连接测试已取消", "没有下载或替换任何文件。");
+            // 退出前的最后一次保存失败也要留痕，但绝不能因此卡住更新。
+            ToolboxLog.Warn("退出前刷写章节保存失败，仍然继续退出。", error);
         }
-        catch (Exception ex)
-        {
-            Settings.SetUpdateStatus($"更新连接失败：{ex.Message}");
-            CompleteGlobalProgress("更新连接失败", ex.Message);
-            ShowFloatingTip(InfoBarSeverity.Warning, "更新连接失败", ex.Message, ex, $"更新连接测试失败：{ex}");
-        }
-        finally
-        {
-            await HideGlobalProgressAfterDelayAsync();
-        }
+
+        Application.Current.Exit();
     }
 
-#if DEBUG
-    private Task CheckUpdateOnStartupAsync()
+    /// <summary>
+    /// 下载前的确认对话框。只有用户点「下载并更新」才会返回 true；
+    /// 点关闭、按 Esc 都算「继续使用旧版」。
+    /// </summary>
+    async Task<bool> IUpdateHost.ConfirmUpdateAsync(UpdatePromptInfo info)
     {
-        return Task.CompletedTask;
-    }
-#else
-    private async Task CheckUpdateOnStartupAsync()
-    {
-        if (!Settings.UpdateAutoCheckEnabled)
-        {
-            return;
-        }
-
-        await Task.Delay(TimeSpan.FromSeconds(5));
-        await CheckForUpdatesAsync(showProgress: false, showNoUpdateTip: false);
-    }
-#endif
-
-    private async Task CheckForUpdatesAsync(bool showProgress, bool showNoUpdateTip)
-    {
-        try
-        {
-            if (showProgress)
-            {
-                ShowGlobalProgress("检查应用更新", "优先访问 Gitee，失败时自动尝试 GitHub。");
-                UpdateGlobalProgress("正在检查新版本...", 10, Settings.UpdateChannelText, true);
-            }
-
-            var result = await _updateService.CheckAsync(
-                Settings.UpdateChannel,
-                Settings.UpdateConnectionTimeoutSecondsValue,
-                showProgress ? GetGlobalProgressCancellationToken() : CancellationToken.None);
-            Settings.SetUpdateStatus(result.Message);
-            if (showProgress)
-            {
-                CompleteGlobalProgress("更新检查完成", result.Message);
-                await HideGlobalProgressAfterDelayAsync();
-            }
-
-            if (!result.HasUpdate || result.Manifest is null || result.Asset is null)
-            {
-                if (showNoUpdateTip)
-                {
-                    ShowFloatingTip(InfoBarSeverity.Success, "更新检查完成", result.Message);
-                }
-
-                return;
-            }
-
-            await PromptAndInstallUpdateAsync(result);
-        }
-        catch (OperationCanceledException)
-        {
-            if (showProgress)
-            {
-                CompleteGlobalProgress("更新检查已取消", "没有下载或替换任何文件。");
-                await HideGlobalProgressAfterDelayAsync();
-            }
-        }
-        catch (Exception ex)
-        {
-            Settings.SetUpdateStatus($"更新检查失败：{ex.Message}");
-            if (showProgress)
-            {
-                CompleteGlobalProgress("更新检查失败", ex.Message);
-                await HideGlobalProgressAfterDelayAsync();
-            }
-
-            ShowFloatingTip(InfoBarSeverity.Warning, "更新检查失败", ex.Message, ex, $"更新检查失败：{ex}");
-        }
-    }
-
-    private async Task PromptAndInstallUpdateAsync(UpdateCheckResult result)
-    {
-#if DEBUG
-        ShowFloatingTip(
-            InfoBarSeverity.Informational,
-            "开发版检测到更新",
-            $"发现 {result.LatestVersion}，Debug 开发版不会覆盖自身；请通过 AX 工具箱启动或打包正式版。");
-        await Task.CompletedTask;
-        return;
-#else
-        var manifest = result.Manifest!;
-        var asset = result.Asset!;
-        var content = new StackPanel
-        {
-            Width = 460,
-            Spacing = 8
-        };
-        content.Children.Add(new TextBlock { Text = $"当前版本：{result.CurrentVersion}" });
-        content.Children.Add(new TextBlock { Text = $"新版本：{result.LatestVersion}" });
-        content.Children.Add(new TextBlock { Text = $"更新来源：{UpdateService.GetSourceDisplayName(result.Source)}" });
-        content.Children.Add(new TextBlock { Text = $"更新包：{asset.FileName}" });
-        content.Children.Add(new TextBlock { Text = $"包大小：{UpdateService.FormatBytes(asset.SizeBytes)}" });
-        content.Children.Add(new TextBlock
-        {
-            Margin = new Thickness(0, 6, 0, 0),
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Text = "更新公告"
-        });
-        content.Children.Add(new Border
-        {
-            MaxHeight = 180,
-            Padding = new Thickness(12),
-            Background = Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] as Brush,
-            BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            Child = new ScrollViewer
-            {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Content = new TextBlock
-                {
-                    Text = string.IsNullOrWhiteSpace(result.ReleaseNotes) ? "本次更新没有填写公告。" : result.ReleaseNotes,
-                    TextWrapping = TextWrapping.Wrap
-                }
-            }
-        });
-        content.Children.Add(new TextBlock
-        {
-            Text = "更新包会先完成大小、SHA-256 和程序身份校验；校验通过后工具箱退出，由外部更新器覆盖并重新启动。",
-            TextWrapping = TextWrapping.Wrap
-        });
-
-        var dialogResult = await _dialogService.ShowContentAsync(new ContentDialogRequest(
+        var request = new ContentDialogRequest(
             "发现新版本",
-            content,
+            DialogContentFactory.CreateUpdatePromptBody(
+                info.CurrentVersion,
+                info.NewVersion,
+                info.ChannelText,
+                info.PackageName,
+                info.PackageSize,
+                info.ReleaseNotes),
             "下载并更新",
-            "继续使用当前版本"));
-        if (dialogResult != DialogResultKind.Primary)
+            "继续使用旧版",
+            DefaultButton: ContentDialogButton.Primary);
+        var result = await _dialogService.ShowContentAsync(request);
+        return result == DialogResultKind.Primary;
+    }
+
+    /// <summary>
+    /// 启动时那一次自动检查。延时是为了让主界面先画出来；**失败绝不弹窗、绝不影响启动**。
+    ///
+    /// 检查之前先做一次**延迟一轮的清理**：只有上一轮那个版本确实启动过，
+    /// 才轮到删 <c>*.old-{版本号}</c> 与待清理清单。它跑在后台线程上、自己也从不抛异常。
+    ///
+    /// AX 编译的 Debug 开发版**不做**自动检查（设置页那句说明就是这么写的）：
+    /// 开发版跑在 <c>bin\</c> 下，静默把 Release 包铺进去会把开发目录搅乱。
+    /// 手动点「检查更新 / 下载并更新」不受影响。
+    /// </summary>
+    internal async Task CheckUpdateOnStartupAsync()
+    {
+#if DEBUG
+        await Task.CompletedTask;
+#else
+        try
+        {
+            await Task.Run(RunStartupCleanup);
+            await Task.Delay(UpdateStartupCheckDelay);
+            await Update.CheckOnStartupAsync();
+        }
+        catch (Exception error)
+        {
+            // 自动检查失败不能牵动启动流程：这里吞掉，但一定留痕。
+            ToolboxLog.Warn("启动时的自动检查更新失败，已忽略。", error);
+        }
+#endif
+    }
+
+    /// <summary>
+    /// 启动清理：回滚窗口的延迟删除 + 待清理清单 + 过期包。
+    /// 放在后台线程上是因为它要递归扫一遍程序目录；<c>UpdateCleanup</c> 自己吞掉所有异常，
+    /// 这里再兜一层，保证「清理」这件事永远不可能影响启动。
+    /// </summary>
+    private static void RunStartupCleanup()
+    {
+        try
+        {
+            var cleanup = new UpdateCleanup();
+            var outcome = cleanup.Run(ApplicationVersionReader.ReadCurrentVersionText());
+            if (outcome.PreviousRunProven)
+            {
+                // 留一行「为什么这轮清了 / 没清」，出问题时能一眼看出回滚窗口还在不在。
+                ToolboxLog.Info($"启动清理：{outcome.Message}");
+            }
+        }
+        catch (Exception error)
+        {
+            ToolboxLog.Warn("启动清理回滚文件失败，已忽略（回滚窗口多留一轮，方向是安全的）。", error);
+        }
+    }
+
+    /// <summary>用系统默认浏览器打开 Release 页面。</summary>
+    private void OpenUrlInBrowser(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
         {
             return;
         }
 
-        await DownloadAndLaunchUpdaterAsync(manifest, asset);
-#endif
-    }
-
-    private async Task DownloadAndLaunchUpdaterAsync(UpdateManifest manifest, UpdateAssetManifest asset)
-    {
-        ShowGlobalProgress("下载应用更新", asset.FileName);
         try
         {
-            var progress = new Progress<ProgressUpdate>(update =>
-                UpdateGlobalProgress(update.Message, update.Percent, update.Detail, update.IsIndeterminate));
-            var download = await _updateService.DownloadAndVerifyAsync(
-                manifest,
-                asset,
-                progress,
-                GetGlobalProgressCancellationToken());
-            CompleteGlobalProgress("更新包已校验", "正在启动外部更新器。");
-            await _updateService.LaunchUpdaterAsync(
-                download.PackagePath,
-                manifest,
-                progress,
-                GetGlobalProgressCancellationToken());
-            Application.Current.Exit();
+            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
         }
-        catch (OperationCanceledException)
+        catch (Exception error)
         {
-            CompleteGlobalProgress("更新已取消", "没有替换任何程序文件。");
-            ShowFloatingTip(InfoBarSeverity.Warning, "更新已取消", "没有替换任何程序文件。");
-            await HideGlobalProgressAfterDelayAsync();
+            AppendLog(LogKind.Warning, $"打开更新页面失败：{url}", error);
+            ShowFloatingTip(InfoBarSeverity.Warning, "打不开更新页面", error.Message, error, $"打开更新页面失败：{url}");
+        }
+    }
+
+    /// <summary>
+    /// 起那份覆盖器（powershell 跑 <c>UpdateRunners\热更新覆盖.ps1</c>）。
+    /// 全程 <c>ArgumentList</c>：程序名里有全角冒号、安装路径可能带中文，
+    /// 自己拼引号或者过一层 <c>cmd.exe</c> 都会在这些字符上翻车。
+    /// </summary>
+    private bool TryStartUpdaterProcess(UpdaterLaunchRequest request, out int processId, out string error)
+    {
+        processId = 0;
+        error = string.Empty;
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = request.ExecutablePath,
+                WorkingDirectory = request.WorkingDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            };
+            foreach (var argument in request.Arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                error = "进程没有起来（Process.Start 返回空）。";
+                return false;
+            }
+
+            using (process)
+            {
+                processId = process.Id;
+            }
+
+            return true;
         }
         catch (Exception ex)
         {
-            Settings.SetUpdateStatus($"应用更新失败：{ex.Message}");
-            CompleteGlobalProgress("应用更新失败", ex.Message);
-            ShowFloatingTip(InfoBarSeverity.Error, "应用更新失败", ex.Message, ex, $"应用更新失败：{ex}");
-            await HideGlobalProgressAfterDelayAsync();
+            error = ex.Message;
+            return false;
         }
+    }
+
+    /// <summary>
+    /// 更新链路（Services/Update）的日志出口。它可能从任何线程被调进来，
+    /// <see cref="AppendLog"/> 自己会把动作排队回 UI 线程。
+    /// </summary>
+    void IToolboxLogSink.Write(ToolboxLogLevel level, string message, Exception? error)
+    {
+        var kind = level switch
+        {
+            ToolboxLogLevel.Warning => LogKind.Warning,
+            ToolboxLogLevel.Error => LogKind.Error,
+            _ => LogKind.Info,
+        };
+        AppendLog(kind, message, error);
     }
 }

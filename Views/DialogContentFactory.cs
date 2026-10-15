@@ -81,6 +81,57 @@ internal static class DialogContentFactory
         return panel;
     }
 
+    /// <summary>
+    /// 「发现新版本」确认对话框的正文：版本对照 + 包信息 + 更新公告。
+    /// 公告为空时给一句兜底文案，不留空白区（空白会被误读成「公告没加载出来」）。
+    /// </summary>
+    public static UIElement CreateUpdatePromptBody(
+        string currentVersion,
+        string newVersion,
+        string channelText,
+        string packageName,
+        long packageSize,
+        string? releaseNotes)
+    {
+        var panel = CreateResultPanel();
+        panel.Width = 520;
+
+        var summary = new StackPanel { Spacing = 4 };
+        summary.Children.Add(new TextBlock { Text = $"当前版本：{currentVersion}" });
+        summary.Children.Add(new TextBlock { Text = $"新版本：{newVersion}" });
+        summary.Children.Add(new TextBlock { Text = $"更新通道：{channelText}" });
+        summary.Children.Add(new TextBlock { Text = $"更新包：{packageName}" });
+        summary.Children.Add(new TextBlock
+        {
+            Text = $"包大小：{UpdateDownloadProgress.FormatSize(packageSize)}"
+        });
+        panel.Children.Add(summary);
+
+        panel.Children.Add(CreateResultHeading("更新公告"));
+        panel.Children.Add(new Border
+        {
+            MaxHeight = 200,
+            Padding = new Thickness(12),
+            CornerRadius = new CornerRadius(6),
+            Background = Application.Current.Resources["LayerFillColorAltBrush"] as Brush,
+            Child = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = new TextBlock
+                {
+                    Text = string.IsNullOrWhiteSpace(releaseNotes) ? "本次 Release 没有填写更新公告。" : releaseNotes,
+                    TextWrapping = TextWrapping.Wrap
+                }
+            }
+        });
+
+        panel.Children.Add(CreateSubtleParagraph(
+            "更新包会先完成大小、SHA-256 与包结构校验；校验通过后工具箱退出，由外部的热更新程序覆盖安装目录并自动重新打开。"));
+
+        return panel;
+    }
+
     private static ScrollViewer CreateHelpScrollViewer(UIElement content)
     {
         return new ScrollViewer

@@ -58,7 +58,6 @@ namespace GalExcleTools
         private readonly ProjectWorkspaceService _projectWorkspaceService = new();
         private readonly ProjectRootMigrationService _projectRootMigrationService = new();
         private readonly AudioAssetService _audioAssetService = new();
-        private readonly UpdateService _updateService = new();
         private readonly ImageSetService _imageSetService = new();
         private readonly CharacterLayerAssetService _characterLayerAssetService = new();
         private readonly CharacterFilterService _characterFilterService = new();
@@ -592,7 +591,7 @@ namespace GalExcleTools
 
             Settings.Load();
             ApplyThemeSettings();
-            SyncUpdateControls();
+            AttachUpdateHost();
             _uiSoundService.IsEnabled = Settings.UiSoundEnabled;
             UpdateLogOptionEnabledState();
             UpdateAuxiliaryDisplayVisibility();

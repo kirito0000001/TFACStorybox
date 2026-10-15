@@ -1,0 +1,35 @@
+﻿{
+  "schemaVersion": 1,
+  "toolboxStableKey": "GalExcleTools",
+  "note": "热更新镜像白名单（设计 §9.6）。这是 C# 与 updater 脚本共用的约定：客户端 Services/Update/UpdateWhitelist.cs 与 Scripts/热更新覆盖.ps1 读同一份规则，避免两边各写一套而漂移（回归用例「镜像白名单两侧同判定」会拿探针路径逐条比对）。客户端启动 updater 前会把自己这份规则写进 %LOCALAPPDATA%\\GalExcleTools\\UpdateRunners\\update-whitelist.json，所以安装目录里这份丢了也不影响更新（C# 侧还有同内容的 Default 兜底）。改这里之前先读 §9.6 的三条理由。",
+  "extensions": [
+    "exe",
+    "dll",
+    "pri",
+    "xbf",
+    "winmd",
+    "json",
+    "config",
+    "pdb",
+    "xml",
+    "ico",
+    "png"
+  ],
+  "directories": [
+    "Assets",
+    "Tools",
+    "Scripts"
+  ],
+  "excludedDirectories": [
+    "__pycache__"
+  ],
+  "excludedExtensions": [
+    "pyc"
+  ],
+  "excludedNameFragments": [
+    ".old-"
+  ],
+  "excludedNameSuffixes": [
+    ".download"
+  ]
+}

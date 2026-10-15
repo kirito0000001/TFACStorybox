@@ -274,10 +274,14 @@ internal sealed class SettingsViewModel : ObservableObject
             {
                 _settings.UpdateChannel = value;
                 OnPropertyChanged(nameof(UpdateChannelText));
+                OnPropertyChanged(nameof(UpdateChannelIndex));
                 SaveUnlessLoading();
             }
         }
     }
+
+    /// <summary>通道下拉框的选中下标（0 = 正式版 / 1 = 测试版），热更新面板直接绑它。</summary>
+    public int UpdateChannelIndex => UpdateChannel == UpdateChannel.Beta ? 1 : 0;
 
     public string UpdateChannelText => UpdateChannel == UpdateChannel.Beta
         ? "测试版 / Beta"
@@ -319,6 +323,12 @@ internal sealed class SettingsViewModel : ObservableObject
         ? "最近检查：尚未检查"
         : $"最近检查：{_settings.UpdateLastCheckAt.Value.LocalDateTime:yyyy-MM-dd HH:mm}";
 
+    /// <summary>
+    /// 上次检查更新的时间（<c>settings.json</c> 里那一份）。热更新的「请求预算」靠它判断
+    /// 「手一抖点两下」——10 秒内重复手点直接复用上次结果，不再发请求。
+    /// </summary>
+    public DateTimeOffset? UpdateLastCheckAt => _settings.UpdateLastCheckAt;
+
     public string UpdateLastStatus => string.IsNullOrWhiteSpace(_settings.UpdateLastStatus)
         ? "更新状态：尚未检查。"
         : _settings.UpdateLastStatus;
@@ -330,6 +340,17 @@ internal sealed class SettingsViewModel : ObservableObject
         Save();
         OnPropertyChanged(nameof(UpdateLastCheckText));
         OnPropertyChanged(nameof(UpdateLastStatus));
+    }
+
+    /// <summary>
+    /// 记下这一次检查更新的时间。只写时间、不写结论：结论走
+    /// <c>UpdateViewModel.StatusText</c>（那一句是设计里定死的文案，不该由设置页改写）。
+    /// </summary>
+    public void RecordUpdateCheckResult(DateTimeOffset checkedAt)
+    {
+        _settings.UpdateLastCheckAt = checkedAt;
+        Save();
+        OnPropertyChanged(nameof(UpdateLastCheckText));
     }
 
     public void Load()
