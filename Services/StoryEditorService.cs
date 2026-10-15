@@ -13,11 +13,6 @@ internal sealed class StoryEditorService
         _storyCsvService = storyCsvService;
     }
 
-    public static List<StoryRow> CloneRows(IEnumerable<StoryRow> rows)
-    {
-        return rows.Select(row => row.Clone()).ToList();
-    }
-
     public List<int> GetSectionsInRowOrder(IReadOnlyList<StoryRow> rows, IReadOnlyDictionary<string, int> rowSections)
     {
         var sections = new List<int>();
@@ -43,28 +38,6 @@ internal sealed class StoryEditorService
         {
             var section = i < sections.Count ? sections[i] : 1;
             rowSections[rows[i].Get("Name")] = Math.Max(1, section);
-        }
-    }
-
-    public void SynchronizeSections(IReadOnlyList<StoryRow> rows, Dictionary<string, int> rowSections)
-    {
-        var synchronized = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var previousSection = 1;
-        foreach (var row in rows)
-        {
-            var rowName = row.Get("Name");
-            if (rowSections.TryGetValue(rowName, out var section))
-            {
-                previousSection = Math.Max(1, section);
-            }
-
-            synchronized[rowName] = previousSection;
-        }
-
-        rowSections.Clear();
-        foreach (var pair in synchronized)
-        {
-            rowSections[pair.Key] = pair.Value;
         }
     }
 

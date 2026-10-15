@@ -609,35 +609,4 @@ internal sealed class StoryEditorViewModel : ObservableObject
         var rowName = Rows[rowIndex].Get("Name");
         return RowSections.TryGetValue(rowName, out var section) ? Math.Max(1, section) : 1;
     }
-
-    public void SetCurrentSection(int section)
-    {
-        if (Rows.Count == 0)
-        {
-            return;
-        }
-
-        RowSections[Rows[CurrentRowIndex].Get("Name")] = Math.Max(1, section);
-        OnPropertyChanged(nameof(RowSections));
-    }
-
-    public bool SetCurrentSectionIfChanged(int section)
-    {
-        if (Rows.Count == 0)
-        {
-            return false;
-        }
-
-        section = Math.Max(1, section);
-        var rowName = Rows[CurrentRowIndex].Get("Name");
-        if (RowSections.TryGetValue(rowName, out var currentSection) &&
-            Math.Max(1, currentSection) == section)
-        {
-            return false;
-        }
-
-        RowSections[rowName] = section;
-        OnPropertyChanged(nameof(RowSections));
-        return true;
-    }
 }

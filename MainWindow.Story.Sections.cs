@@ -197,42 +197,9 @@ namespace GalExcleTools
             return _storyEditorViewModel.GetSectionAtRowIndex(rowIndex);
         }
 
-        private void SetCurrentStorySection(int section)
-        {
-            if (_storyRows.Count == 0)
-            {
-                return;
-            }
-
-            _storyEditorViewModel.SetCurrentSection(section);
-            EnsureStorySectionOptions(section);
-        }
-
-        private bool SetCurrentStorySectionIfChanged(int section)
-        {
-            if (_storyRows.Count == 0)
-            {
-                return false;
-            }
-
-            var changed = _storyEditorViewModel.SetCurrentSectionIfChanged(section);
-            EnsureStorySectionOptions(section);
-            return changed;
-        }
-
         private bool SynchronizeStorySectionState()
         {
             return _storyEditorService.NormalizeContiguousSections(_storyRows, _storyRowSections);
-        }
-
-        private List<int> GetStorySectionsInRowOrder()
-        {
-            return _storyEditorService.GetSectionsInRowOrder(_storyRows, _storyRowSections);
-        }
-
-        private void ApplyStorySectionsInRowOrder(IReadOnlyList<int> sections)
-        {
-            _storyEditorService.ApplySectionsInRowOrder(_storyRows, _storyRowSections, sections);
         }
 
         private string BuildNextStoryChoiceFunctionIndicator()

@@ -39,6 +39,19 @@ Require-Pattern `
     'GetChapterStoryCsvPathsForSync[\s\S]*?GroupBy\(item => item\.Section\)[\s\S]*?mainCsvPath' `
     'One story table per section: the chapter-named CSV must win over stray -00 style files.'
 
+# 小节下拉框只负责**导航**（跳到该节第一句），不是"把当前句改成第几节"的编辑器。
+# 后者那半个方案（SetCurrentStorySection / 视图模型里的 SetCurrentSection）已经删掉了，
+# 这里钉住它别又长回来 —— 长回来的话，选一次下拉框就会悄悄改数据。
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Story.Sections.cs') `
+    'StorySectionComboBox_SelectionChanged[\s\S]*?NavigateToStoryRow' `
+    'The section combo box must navigate to the section, not edit the current row.'
+
+Require-Pattern `
+    (Join-Path $root 'MainWindow.Story.Sections.cs') `
+    'SetCurrentStorySection' `
+    'The unwired section-editing path must stay removed.' -NotMatch
+
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Error $_ }
     exit 1
