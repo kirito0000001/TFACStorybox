@@ -78,7 +78,12 @@ if (Test-Path -LiteralPath $assemblyPath) {
 }
 '@
             [System.IO.File]::WriteAllText($todoPath, $legacyJson, [System.Text.UTF8Encoding]::new($false))
-            $loaded = @($storeType.GetMethod('Load').Invoke($null, @($tempRoot)))
+            # ⚠️ 传给反射 Invoke 之前，路径必须**显式转成 string**：
+            # Join-Path 的输出是 PSObject 包装的字符串，而 Invoke(object, object[]) 不拆这层包装，
+            # 直接传会报 "Object of type 'System.Management.Automation.PSObject' cannot be converted to type 'System.String'"。
+            # 2026-10-15 编译之后这段头一次真跑就撞上了（在那之前 DLL 是旧的，一直走 skip 分支）。
+            [string]$projectPath = $tempRoot
+            $loaded = @($storeType.GetMethod('Load').Invoke($null, @($projectPath)))
             if ($loaded.Count -ne 1 -or
                 $loaded[0].RowNumber -ne 3 -or
                 $loaded[0].Text -ne '老备注' -or
@@ -91,7 +96,7 @@ if (Test-Path -LiteralPath $assemblyPath) {
             $noteListType = [System.Collections.Generic.List``1].MakeGenericType($noteType)
             $noteList = [System.Activator]::CreateInstance($noteListType)
             foreach ($item in $loaded) { [void]$noteList.Add($item) }
-            $saved = $storeType.GetMethod('Save').Invoke($null, @($tempRoot, $noteList))
+            $saved = $storeType.GetMethod('Save').Invoke($null, @($projectPath, $noteList))
             $savedText = Get-Content -Raw -Encoding UTF8 -LiteralPath $todoPath
             if (-not $saved -or $savedText -notmatch '"StableId"' -or $savedText -notmatch '"Version":\s*2') {
                 throw 'Saving todo notes must persist the StableId field and version 2.'
@@ -115,7 +120,7 @@ if (Test-Path -LiteralPath $assemblyPath) {
 }
 '@
             [System.IO.File]::WriteAllText($todoPath, $modernJson, [System.Text.UTF8Encoding]::new($false))
-            $reloaded = @($storeType.GetMethod('Load').Invoke($null, @($tempRoot)))
+            $reloaded = @($storeType.GetMethod('Load').Invoke($null, @($projectPath)))
             if ($reloaded.Count -ne 1 -or
                 $reloaded[0].StableId -ne '0123456789abcdef0123456789abcdef' -or
                 -not $reloaded[0].Done) {
