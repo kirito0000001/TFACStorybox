@@ -244,7 +244,7 @@ namespace GalExcleTools
         // 「自定义跳转逻辑」那个开关从小节这边封存了，详见
         // Docs/2026-10-15-小节自定义跳转逻辑-封存说明.md。
         // 数据本身没动：标记仍然是 StoryDocument.CustomBranchSectionFirstRowIds，
-        // 界面上剩下的入口在选项管理器（ChapterChoiceManagerCustomToggle）。
+        // 而且选项管理器那个入口也一起收了 —— 现在界面上没有任何地方能改它。
 
         private int GetStorySectionAtRowIndex(int rowIndex)
         {

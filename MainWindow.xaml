@@ -2262,7 +2262,13 @@
                                      <TextBlock Text="选择后进入" Style="{StaticResource SectionTitleStyle}" />
                                      <ComboBox x:Name="ChapterChoiceManagerTargetComboBox" DisplayMemberPath="DisplayName" HorizontalAlignment="Stretch" SelectionChanged="ChapterChoiceManagerTargetComboBox_SelectionChanged" />
                                  </StackPanel>
-                                 <ToggleSwitch x:Name="ChapterChoiceManagerCustomToggle" Header="同步方式" OffContent="工具箱管理" OnContent="Unreal 手工管理" Toggled="ChapterChoiceManagerCustomToggle_Toggled" />
+                                 <!--
+                                     这里原来还有一个「同步方式」开关（工具箱管理 ↔ Unreal 手工管理，2026-10-15 删掉）。
+                                     它是「自定义跳转逻辑」那个标记的另一个入口 —— 同一个标记、同一段没修的
+                                     同步行为（AllRoad 整表重建会把被标 Custom 的条目清掉）。
+                                     功能暂时封存，标记本身与它的读法都还在（下面「同步结果」里会照旧显示
+                                     "保留 Unreal 手工设置"），详见 Docs/2026-10-15-小节自定义跳转逻辑-封存说明.md。
+                                 -->
                                  <Rectangle Height="1" Fill="{ThemeResource CardStrokeColorDefaultBrush}" />
                                  <TextBlock Text="同步结果" Style="{StaticResource SectionTitleStyle}" />
                                  <StackPanel Spacing="8">

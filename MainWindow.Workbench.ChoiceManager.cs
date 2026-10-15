@@ -122,12 +122,9 @@ public sealed partial class MainWindow
                 ChapterChoiceManagerDetailTitle.Text = "未选择小节";
                 ChapterChoiceManagerOptionTextBox.IsEnabled = false;
                 ChapterChoiceManagerTargetComboBox.IsEnabled = false;
-                ChapterChoiceManagerCustomToggle.IsEnabled = false;
                 return;
             }
 
-            ChapterChoiceManagerCustomToggle.IsEnabled = true;
-            ChapterChoiceManagerCustomToggle.IsOn = section.Flow.Kind == StoryBranchSectionKind.Custom;
             ChapterChoiceManagerSectionInfo.Text = $"开始于{StorySectionDisplay.FormatName(section.Section)}";
             ChapterChoiceManagerSourcePreview.Text = $"触发文本：{section.Flow.FirstSentencePreview}";
             if (ChapterChoiceManagerOptionList.SelectedItem is StoryChoiceManagerOptionItem { FlowOption: { } flowOption } option)
@@ -242,16 +239,13 @@ public sealed partial class MainWindow
     private void ChapterChoiceManagerOptionTextBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyChapterChoiceManagerOptionEdit();
     private void ChapterChoiceManagerTargetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => ApplyChapterChoiceManagerOptionEdit();
 
-    private void ChapterChoiceManagerCustomToggle_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (_isUpdatingChapterChoiceManager || _chapterChoiceManagerSession is null ||
-            ChapterChoiceManagerSectionList.SelectedItem is not StoryChoiceManagerSectionItem section)
-        {
-            return;
-        }
-        _storyChoiceManagerService.SetCustomSection(_chapterChoiceManagerSession, section.Section, ChapterChoiceManagerCustomToggle.IsOn);
-        RefreshChapterChoiceManagerSections();
-    }
+    // ChapterChoiceManagerCustomToggle_Toggled 已删除（2026-10-15）：
+    // 「同步方式」那个开关和「自定义跳转逻辑」是同一个标记的两个入口，一起封存了 ——
+    // 现在界面上没有任何地方能改这个标记。
+    // 标记本身、以及 StoryChoiceManagerService.SetCustomSection 这个服务层操作都留着
+    //（Test-StoryChoiceManager 还在直接调它验证存盘），解封时只需要重新摆一个入口。
+    // 只读的地方照旧：详情面板仍会显示「下一步：保留 Unreal 手工设置」。
+    // 详见 Docs/2026-10-15-小节自定义跳转逻辑-封存说明.md。
 
     private void ChapterChoiceManagerSaveButton_Click(object sender, RoutedEventArgs e)
     {
