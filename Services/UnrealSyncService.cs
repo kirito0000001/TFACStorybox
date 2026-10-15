@@ -2034,12 +2034,22 @@ internal sealed class UnrealSyncService
             return [];
         }
 
-        var tablesBySection = chapterTables.ToDictionary(table => table.Section);
-        return StoryBranchFlowService.Build(document).Sections
-            .Where(section => section.Kind != StoryBranchSectionKind.Custom)
-            .Select(section => new UnrealStoryBranchSourceSyncEntry(
+        var tablesBySection = BuildChapterTablesBySection(chapterTables, chapterCode);
+        var result = new List<UnrealStoryBranchSourceSyncEntry>();
+        foreach (var section in StoryBranchFlowService.Build(document).Sections)
+        {
+            // Custom = 这一节的 AllRoad 交给手工，本来就不生成；没有对应表 = 文档里有小节、
+            // 磁盘上却没有它的 CSV。后者正常不该出现，但真出现时少生成一条路线，
+            // 也好过整次同步崩在 KeyNotFoundException 上（原先是 tablesBySection[...] 直取）。
+            if (section.Kind == StoryBranchSectionKind.Custom ||
+                !tablesBySection.TryGetValue(section.Section, out var sourceTable))
+            {
+                continue;
+            }
+
+            result.Add(new UnrealStoryBranchSourceSyncEntry(
                 managerRow,
-                tablesBySection[section.Section].TableAsset,
+                sourceTable.TableAsset,
                 section.Options.Count > 0
                     ? section.Options
                         .Where(option => option.EffectiveTargetSection is not null &&
@@ -2061,8 +2071,42 @@ internal sealed class UnrealSyncService
                                 TargetTable: tablesBySection[section.DefaultTargetSection.Value].TableAsset,
                                 RequiresChoiceCondition: false)
                         ]
-                        : []))
-            .ToList();
+                        : []));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 按小节号把章节的剧情表归组。
+    ///
+    /// 一个章节号只该有一张表，直接 ToDictionary 本来也行 —— 但章节目录里可能同时躺着
+    /// `WHK-M6-06.csv`（导出器给第 1 节写的正式文件，名字就是章节号）和 `WHK-M6-00.csv`
+    /// 这类**都能被解析成同一节**的历史文件（老的 -00 命名、手工拷贝……）。
+    /// 那种情况下 ToDictionary 会抛「已添加了具有相同键的项」，整条同步链就断在这里，
+    /// 而且报出来的异常跟真正的原因（多了一个 csv）毫无关系。
+    /// 所以这里按节号归组，组内优先取**文件名就是章节号**的那一张，其余丢掉。
+    /// </summary>
+    private static Dictionary<int, UnrealStoryTableSyncEntry> BuildChapterTablesBySection(
+        IReadOnlyList<UnrealStoryTableSyncEntry> chapterTables,
+        string chapterCode)
+    {
+        var result = new Dictionary<int, UnrealStoryTableSyncEntry>();
+        foreach (var group in chapterTables.GroupBy(table => table.Section))
+        {
+            result[group.Key] = group.FirstOrDefault(table => IsChapterMainStoryTable(table, chapterCode))
+                                ?? group.First();
+        }
+
+        return result;
+    }
+
+    private static bool IsChapterMainStoryTable(UnrealStoryTableSyncEntry table, string chapterCode)
+    {
+        return string.Equals(
+            Path.GetFileNameWithoutExtension(table.CsvPath),
+            chapterCode,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     public List<UnrealVoiceMapSyncEntry> BuildVoiceMapSyncEntries(
@@ -3254,7 +3298,16 @@ internal sealed class UnrealSyncService
         }
 
         var hasMultipleSections = activeSections.Count > 1 || activeSections.Any(item => item.Section > 1);
+        var mainCsvPath = _storyCsvService.GetChapterCsvPath(chapter);
         return activeSections
+            // 同一节只留一张表：正牌文件是**文件名就是章节号**的那份（导出器给第 1 节写的就是它）。
+            // 目录里多出来的 `-00.csv` 这类历史文件同样能被解析成第 1 节，放过去的话
+            // 计划里会出现两个算出来同名（都是 `章节基名-00`）的目标资产，而且会让按节号
+            // 建索引的 AllRoad 生成直接撞重复键。
+            .GroupBy(item => item.Section)
+            .Select(group => group.FirstOrDefault(item => PathsEqual(item.Path, mainCsvPath)) ?? group.First())
+            .OrderBy(item => item.Section)
+            .ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
             .Select(item => new StoryTableCsvEntry(
                 item.Path,
                 hasMultipleSections ? StoryCsvService.BuildSectionCsvFileBaseName(chapter.Code, item.Section) : StoryCsvService.BuildSectionCsvBaseName(chapter.Code),

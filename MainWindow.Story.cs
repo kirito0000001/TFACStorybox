@@ -634,14 +634,35 @@ namespace GalExcleTools
             var replacementRowId = _storyRows.Count == 0
                 ? null
                 : _storyRows[Math.Clamp(_currentStoryRowIndex, 0, _storyRows.Count - 1)].StableId;
+            // ① 小节锚点顺延。**必须排在补编号空洞之前** —— 那一步会重排小节号，
+            //    而「接替行还在不在被删行那一节里」要拿删除前这套号来比。
             // 选项目标和「自定义跳转逻辑」标记存的是小节第一行的 StableId，行没了引用就悬空。
-            // 这一步必须在 QueueCurrentStoryDocumentSave 之前做完 —— 存档 + 撤销事务都以那一刻为准。
             var sectionAnchorsRepointed = StoryBranchService.RepointSectionAnchorsAfterRowDelete(
                 _storyEditorViewModel.Document,
                 deletedRowId,
                 deletedRowSection,
                 replacementRowId);
-            var migratedChoiceNotes = RemoveUnusedStoryChoiceNotes(result.RemovedChoiceValues);
+            // ② 剪掉被删句子上那些再没人用的选项备注（顺带摘掉它们的 AllRoad 路线）。
+            //    要赶在前缀迁移之前：它认的是**迁移前**那套函数名。
+            var prunedChoiceNotes = RemoveUnusedStoryChoiceNotes(result.RemovedChoiceValues);
+            if (prunedChoiceNotes is not null)
+            {
+                // 先落进文档。前缀迁移是从**文档当前状态**克隆的 —— 不先落这一步，
+                // 刚剪掉的备注会在迁移结果里复活（迁移的产物后面会整个覆盖 ChoiceNotes）。
+                _storyEditorViewModel.Document.ChoiceNotes = prunedChoiceNotes.Clone();
+            }
+
+            // ③ 删掉「只有一句的小节」会在小节号里留下空洞（1,2,4,5）：小节下拉框会多出一个
+            //    点不动的空小节，「跳转小节」的函数候选里也会多一节根本不存在的小节。
+            //    补法和打开章节时同一套：重排连续号 → 号真变了就迁移嵌着小节号的 Choice 函数名
+            //    （函数名长这样：WHK-M6-06-Choice3，不迁移就全指到别的小节去了）。
+            StoryChoiceNoteState? migratedChoiceNotes = null;
+            var sectionsRenumbered = SynchronizeStorySectionState();
+            if (sectionsRenumbered)
+            {
+                NormalizeStoryChoiceFunctionPrefixes(out migratedChoiceNotes);
+            }
+
             QueueCurrentStoryDocumentSave(choiceNotes: migratedChoiceNotes);
             SaveCurrentChapterProgress();
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
@@ -653,6 +674,13 @@ namespace GalExcleTools
                     InfoBarSeverity.Informational,
                     "小节锚点已顺延",
                     "选项跳转 / 自定义跳转原来指向这一句，已改指向接替的那一句。");
+            }
+            else if (sectionsRenumbered)
+            {
+                ShowStoryStatus(
+                    InfoBarSeverity.Informational,
+                    "小节已重排",
+                    "这一节被删空了，后面的小节号往前补了一位，Choice 函数名已跟着更新。");
             }
         }
 
