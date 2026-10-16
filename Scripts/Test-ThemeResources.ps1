@@ -1,9 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
-# 主题画笔：代码里取画笔（Application.Current.Resources["…Brush"]）按**应用/系统**主题解析，
-# 而工具的主题是 RootGrid.RequestedTheme（夜间模式开关）。两者不一致时，
-# XAML 的 {ThemeResource} 是对的、代码取的是另一套 → 浅色卡片上出现浅色文字。
-# 修法：把当前主题那份字典里的画笔盖到应用级（值一样时是空操作）。
+# 主题画笔：代码里取画笔（Application.Current.Resources["…Brush"]）按**应用主题**
+# （Application.RequestedTheme）解析，跟界面主题（RootGrid.RequestedTheme / 夜间模式）
+# 是两回事。实测那条路会落在跟界面不一致的那套上（系统白天、界面浅色，它却取深色）→
+# 浅色卡片上出现浅色文字。两层修法：启动时钉应用主题 + 运行中切换时盖画笔。
 $root = Split-Path -Parent $PSScriptRoot
 $issues = [System.Collections.Generic.List[string]]::new()
 
@@ -18,6 +18,11 @@ function Require-Pattern([string]$path, [string]$pattern, [string]$message, [swi
 
 $settingsPath = Join-Path $root 'MainWindow.Settings.cs'
 
+# 根治：启动、第一个窗口之前，把应用主题钉成用户设置的那个。
+Require-Pattern (Join-Path $root 'App.xaml.cs') `
+    'ApplySavedThemeBeforeFirstWindow\(\)[\s\S]*?InitializeComponent\(\);[\s\S]*?RequestedTheme = settings\.NightModeEnabled[\s\S]*?ApplicationTheme\.Dark[\s\S]*?ApplicationTheme\.Light' `
+    'App must pin Application.RequestedTheme (the theme code-side brush lookups use) to the saved setting before the first window.'
+
 Require-Pattern $settingsPath `
     'ApplyThemeResourceOverride\(bool isDark\)[\s\S]*?ThemeDictionaries\.TryGetValue\(themeKey[\s\S]*?foreach \(var entry in themeDictionary\)[\s\S]*?entry\.Value is Brush[\s\S]*?Application\.Current\.Resources\[entry\.Key\] = brush' `
     'The theme override must copy every brush of the active theme dictionary into the application resources.'
@@ -26,8 +31,13 @@ Require-Pattern $settingsPath `
     'new\[\]\s*\{[^}]*TextFillColorSecondaryBrush' `
     'The theme override must not enumerate keys by hand (a missed key means an invisible label again).' -NotMatch
 
+# 取不到画笔要留痕（否则"切换主题不生效"会成为一个查不出来的哑巴问题）。
 Require-Pattern $settingsPath `
-    'ApplyThemeSettings\(\)[\s\S]*?ApplyThemeResourceOverride\(isDark\);[\s\S]*?RootGrid\.RequestedTheme' `
+    'ApplyThemeResourceOverride\(isDark\) == 0[\s\S]*?AppendLog\(' `
+    'The override must log when it copied nothing, so a silent no-op is diagnosable.'
+
+Require-Pattern $settingsPath `
+    'ApplyThemeSettings\(\)[\s\S]*?ApplyThemeResourceOverride\(isDark\)[\s\S]*?RootGrid\.RequestedTheme' `
     'The brush override must be applied before the element theme is switched.'
 
 Require-Pattern (Join-Path $root 'MainWindow.xaml.cs') `

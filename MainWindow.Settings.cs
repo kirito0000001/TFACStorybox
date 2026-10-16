@@ -123,7 +123,15 @@ namespace GalExcleTools
             var isDark = Settings.NightModeEnabled;
             // 先盖画笔再换元素主题：这一页之后建出来的东西（卡片、对比表那些**在代码里**
             // 取画笔的地方）都得取到"工具正在显示的那一套"。
-            ApplyThemeResourceOverride(isDark);
+            // 返回 0 表示一个画笔都没取到 —— 那条路这次没兜住，留一行日志好排查。
+            if (ApplyThemeResourceOverride(isDark) == 0)
+            {
+                AppendLog(
+                    LogKind.Warning,
+                    $"主题画笔覆盖没取到任何画笔（themeKey={(isDark ? "Dark" : "Light")}）："
+                    + "应用级那条查找路可能摸不到系统主题字典，切换主题后颜色也许不会立刻跟上，重启即可。");
+            }
+
             RootGrid.RequestedTheme = isDark
                 ? ElementTheme.Dark
                 : ElementTheme.Light;
@@ -134,38 +142,48 @@ namespace GalExcleTools
         /// 把**当前主题那一套画笔**提到应用级资源里。
         ///
         /// 【为什么非有这一步】代码里取画笔只能写 <c>Application.Current.Resources["…Brush"]</c>，
-        /// 而那个索引器按**应用主题**解析 —— 应用主题就是系统深浅色（WinUI 不允许运行时改它，
-        /// 也没打算改）；可本工具的主题是 <c>RootGrid.RequestedTheme</c>，
-        /// 由「整体设置 → 夜间模式」定。两者不一致时（比如系统深色 + 工具浅色，
-        /// 2026-10-16 用户就是这个状态）：
+        /// 而那个索引器按**应用主题**解析（<c>Application.RequestedTheme</c>），
+        /// 跟 <c>RootGrid.RequestedTheme</c>（「整体设置 → 夜间模式」定的界面主题）**是两回事**：
         ///   · XAML 里的 <c>{ThemeResource}</c> 跟着**元素**主题走 → 对；
-        ///   · 代码里取的却是**另一套** → 错。
-        /// 症状就是浅色卡片上出现浅色的名字、同步对比表整片看不见。
+        ///   · 代码里取的却是那条应用级的路 → 另一套 → 错。
+        /// 2026-10-16 实测（系统白天、界面也浅色）那条路落在**深色**那套上：素材库里图片名字
+        /// 取到 <c>TextFillColorSecondaryBrush</c> 的深色值（#C5FFFFFF，压在浅色卡片上就是
+        /// 看不见的白字），同步对比表的行取到纯白（整片空白）。截图取样核过：
+        /// 文字像素比底色**更亮**，正是深色主题那套笔画上去的结果。
         ///
-        /// 【做法】把当前主题那份字典里的画笔逐个盖到应用级：之后无论 XAML 还是代码，
-        /// 取到的都是同一套（工具真正在显示的那套）。**值本来就相同时是空操作** ——
-        /// 系统深浅色与工具设置一致（绝大多数情况）时这一步什么都不改，所以它很安全。
+        /// 【根治在别处】启动时 <c>App.ApplySavedThemeBeforeFirstWindow</c> 已经把
+        /// <c>Application.RequestedTheme</c> 钉成用户设置的主题了，所以开机那次本来就是对的。
+        /// 这里是**运行中切换开关**的兜底：那个属性过时就设不动，只能把目标主题的画笔盖上来。
+        ///
+        /// 【做法】把目标主题那份字典里的画笔逐个盖到应用级：之后无论 XAML 还是代码，
+        /// 取到的都是同一套（工具真正在显示的那套）。**值本来就相同时是空操作**，所以安全。
         ///
         /// ⚠️ 只覆盖 Brush：样式（AccentButtonStyle 之类）在应用级没有这个主题差异问题，
         /// 复制一份出来反而会和控件模板打架。
         /// ⚠️ 高对比度主题不受这里影响（工具本来就强制 Light/Dark，这是既有行为，没动它）。
+        /// ⚠️ 万一这份字典摸不到系统主题画笔（返回 0），调用方会记一条警告 —— 那种情况下
+        /// 切换主题得重启才彻底生效。
         /// </summary>
-        private static void ApplyThemeResourceOverride(bool isDark)
+        private static int ApplyThemeResourceOverride(bool isDark)
         {
             var themeKey = isDark ? "Dark" : "Light";
             if (!Application.Current.Resources.ThemeDictionaries.TryGetValue(themeKey, out var value) ||
                 value is not ResourceDictionary themeDictionary)
             {
-                return;
+                return 0;
             }
 
+            var copied = 0;
             foreach (var entry in themeDictionary)
             {
                 if (entry.Value is Brush brush)
                 {
                     Application.Current.Resources[entry.Key] = brush;
+                    copied++;
                 }
             }
+
+            return copied;
         }
 
         // 最小化/最大化/关闭这三个按钮是系统画的，不跟 RootGrid.RequestedTheme 走，
