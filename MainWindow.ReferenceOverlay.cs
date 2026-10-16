@@ -37,6 +37,11 @@ namespace GalExcleTools
         /// </summary>
         private void RegisterReferenceOverlayShortcuts()
         {
+            // 加速器挂在 RootGrid 上有个副作用：WinUI 会把它的键位当成"提示"画在光标旁
+            //（用户 2026-10-16 截图里那个跟着鼠标跑的 F1 就是它）。RootGrid 是整页，
+            // 于是全屏到处都在显示 —— 关掉。键位说明走 F1 那份表就够，不需要到处飘一个角标。
+            RootGrid.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
+
             var shortcutGuideAccelerator = new KeyboardAccelerator { Key = VirtualKey.F1 };
             shortcutGuideAccelerator.ScopeOwner = RootGrid;
             shortcutGuideAccelerator.Invoked += ReferenceShortcutGuideAccelerator_Invoked;
