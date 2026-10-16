@@ -71,9 +71,16 @@ if (Test-Path -LiteralPath $assemblyPath) {
 
         # 每个分类的 getter 必须落在清单里的某个目录上 —— 这正是当初分叉的地方：
         # 同步读目录用的是这些 getter，建目录用的是另一份手写清单。
+        # （构造 AssetLibraryInfo 走 GetConstructors()[0].Invoke 并逐个显式转型：
+        #   Activator.CreateInstance 对 record 的可空参数/PSObject 包装不买账，会报"找不到构造函数"。）
         $infoType = $assembly.GetType('GalExcleTools.AssetLibraryInfo', $true)
-        $info = [System.Activator]::CreateInstance($infoType, @(
-            '测试素材库', '素材库-测试', (Join-Path $env:TEMP 'gal-lib-probe'), $null, $false, [datetime]::Now))
+        $info = $infoType.GetConstructors()[0].Invoke(@(
+            [string]'测试素材库',
+            [string]'素材库-测试',
+            [string](Join-Path $env:TEMP 'gal-lib-probe'),
+            [string]'',
+            [bool]$false,
+            [datetime]::Now))
         foreach ($getter in @(
             'GetBackgroundFolderPath', 'GetPropImageFolderPath', 'GetCharacterFolderPath',
             'GetMusicFolderPath', 'GetAmbientSoundFolderPath', 'GetSoundEffectFolderPath',
