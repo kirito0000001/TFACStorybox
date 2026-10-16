@@ -148,15 +148,21 @@ if (Test-Path -LiteralPath $assemblyPath) {
                 'Chapters\WHK-M1-00\ai-story-import-state.json',
                 '.story-csv-export-transaction\staged.csv'
             )
+            # 身份文件得写**真 JSON**：导入要靠它认项目名/代号与素材库关联，
+            # 随便塞一个字符的话会退回"用 zip 文件名当项目名"（那是它的兜底路径）。
+            $projectMetaJson = '{ "ProjectName": "测试项目", "ProjectCode": "TEST", ' +
+                '"AssetLibraryName": "测试素材库", "AssetLibraryFolderName": "素材库-测试素材库" }'
             foreach ($relative in ($keep + $drop)) {
                 $full = Join-Path $projectRoot $relative
                 New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force | Out-Null
-                [System.IO.File]::WriteAllText($full, "x", [System.Text.UTF8Encoding]::new($false))
+                $content = if ($relative -eq 'Tools\project.meta.json') { $projectMetaJson } else { 'x' }
+                [System.IO.File]::WriteAllText($full, $content, [System.Text.UTF8Encoding]::new($false))
             }
 
             $manifest = [System.Activator]::CreateInstance($manifestType, $true)
             $manifest.PackageType = 'TFAC.Project'
             $manifest.PackageId = '0123456789abcdef0123456789abcdef'
+            $manifest.ToolVersion = '9.9.9'
             $manifest.Name = '测试项目'
             $manifest.Code = 'TEST'
             $manifest.FolderName = '项目-测试项目'
