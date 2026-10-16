@@ -191,9 +191,11 @@ namespace GalExcleTools
 
         private async void StoryEditorPage_KeyDown(object sender, KeyRoutedEventArgs e)
         {
+            // F12 是老的快捷键提示入口，现在直接开 F1 那层参考浮层（内容同一份）——
+            // 原来它弹的是一个内容写死在服务里的英文对话框，2026-10-16 并进参考层。
             if (e.Key == Windows.System.VirtualKey.F12)
             {
-                await ShowStoryShortcutHelpDialogAsync();
+                ShowShortcutGuideOverlay();
                 e.Handled = true;
                 return;
             }
@@ -402,11 +404,6 @@ namespace GalExcleTools
             }
 
             await RefreshStoryPreviewAsync();
-        }
-
-        private async Task ShowStoryShortcutHelpDialogAsync()
-        {
-            await _shortcutService.ShowShortcutHelpAsync();
         }
 
         private async Task CycleStoryCharacterLayerAsync(int slotIndex, CharacterLayerKind layerKind, int delta)

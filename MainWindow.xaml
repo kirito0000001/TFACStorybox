@@ -2105,6 +2105,68 @@
             </Grid>
         </NavigationView>
 
+        <!--
+            参考层（F1 快捷键大全 / 设置页 Tips、F2 当前章节参考）。
+            形态照 ChapterChoiceManagerHost：满屏半透明底 + 居中卡片 + Esc / 右键 / 关闭按钮关。
+            内容全是只读文本，所以卡片比选择管理器窄；文本可选中，方便把路径或命令抄走。
+            （这套是照隔壁零境工具箱的 F1/F2 移植的，见 MainWindow.ReferenceOverlay.cs。）
+        -->
+        <Grid
+            x:Name="ReferenceOverlayHost"
+            Grid.RowSpan="2"
+            Background="#99000000"
+            Canvas.ZIndex="560"
+            IsTabStop="True"
+            KeyDown="ReferenceOverlayHost_KeyDown"
+            RightTapped="ReferenceOverlayHost_RightTapped"
+            Tapped="ReferenceOverlayHost_Tapped"
+            Visibility="Collapsed">
+            <Border
+                x:Name="ReferenceOverlayCard"
+                Width="880"
+                Height="680"
+                MaxWidth="{Binding ActualWidth, ElementName=RootGrid}"
+                MaxHeight="{Binding ActualHeight, ElementName=RootGrid}"
+                Margin="36"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Tapped="ReferenceOverlayCard_Tapped">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="72" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock
+                        x:Name="ReferenceOverlayTitleText"
+                        Margin="24,0,96,0"
+                        VerticalAlignment="Center"
+                        FontSize="20"
+                        FontWeight="SemiBold"
+                        TextTrimming="CharacterEllipsis" />
+                    <Button
+                        Margin="0,0,20,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Click="ReferenceOverlayCloseButton_Click"
+                        Content="关闭" />
+                    <ScrollViewer
+                        Grid.Row="1"
+                        Padding="24,0,24,20"
+                        VerticalScrollBarVisibility="Auto">
+                        <TextBlock
+                            x:Name="ReferenceOverlayTextBlock"
+                            IsTextSelectionEnabled="True"
+                            LineHeight="22"
+                            TextWrapping="Wrap" />
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
         <Grid
             x:Name="ChapterChoiceManagerHost"
             Grid.RowSpan="2"

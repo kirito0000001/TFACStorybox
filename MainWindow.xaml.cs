@@ -78,7 +78,6 @@ namespace GalExcleTools
         private readonly ChapterRepairService _chapterRepairService;
         private readonly StoryAssetIndexSyncService _storyAssetIndexSyncService;
         private readonly IDialogService _dialogService;
-        private readonly IShortcutService _shortcutService;
         private readonly IUiSoundService _uiSoundService;
         private readonly StoryDialogService _storyDialogService;
         private readonly FunctionDialogService _functionDialogService;
@@ -449,7 +448,6 @@ namespace GalExcleTools
             _folderBackupService = new FolderBackupService(_jsonOptions);
             _uiSoundService = new UiSoundService();
             _dialogService = new WinUiDialogService(() => Content.XamlRoot, _uiSoundService);
-            _shortcutService = new ShortcutService(_dialogService);
             _storyDialogService = new StoryDialogService(_dialogService);
             _functionDialogService = new FunctionDialogService(_dialogService, _uiSoundService);
             _applicationViewModel.Settings.AuxiliaryDisplayChanged += (_, _) => UpdateAuxiliaryDisplayVisibility();
@@ -588,6 +586,8 @@ namespace GalExcleTools
             _globalProgressElapsedTimer.Tick += GlobalProgressElapsedTimer_Tick;
             RegisterAssetLibraryExpanderLazyLoading();
             RegisterCharacterDetailExpanderLazyLoading();
+            // 参考层（F1/F2）：加速器挂在 RootGrid 上，所以任何页面都按得动。
+            RegisterReferenceOverlayShortcuts();
 
             Settings.Load();
             ApplyThemeSettings();
