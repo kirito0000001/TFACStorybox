@@ -1021,40 +1021,10 @@ namespace GalExcleTools
         /// </summary>
         private static string GetUnrealSyncDestinationDisplayName(string destination)
         {
-            var normalized = destination.Replace('\\', '/').TrimEnd('/');
-
-            if (normalized.StartsWith(UnrealSyncPathPolicy.BackgroundFolder, StringComparison.OrdinalIgnoreCase))
-            {
-                return "背景图";
-            }
-            if (normalized.StartsWith(UnrealSyncPathPolicy.BgmFolder, StringComparison.OrdinalIgnoreCase))
-            {
-                return "BGM";
-            }
-            if (normalized.StartsWith(UnrealSyncPathPolicy.SceneEffectFolder, StringComparison.OrdinalIgnoreCase))
-            {
-                return "环境音与特殊音效";
-            }
-            if (normalized.StartsWith(UnrealSyncPathPolicy.LustrationPreviewRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return "小预览";
-            }
-            if (normalized.StartsWith(UnrealSyncPathPolicy.LustrationRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return "立绘素材";
-            }
-            if (normalized.StartsWith(UnrealSyncPathPolicy.ExcelTextsRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return "剧情表";
-            }
-            if (normalized.StartsWith(UnrealSyncPathPolicy.VoiceFolder, StringComparison.OrdinalIgnoreCase))
-            {
-                var chapter = normalized[UnrealSyncPathPolicy.VoiceFolder.Length..].Trim('/');
-                return string.IsNullOrEmpty(chapter) ? "语音" : $"章节语音：{chapter}";
-            }
-
-            var separatorIndex = normalized.LastIndexOf('/');
-            return separatorIndex >= 0 ? normalized[(separatorIndex + 1)..] : normalized;
+            // 中文名跟着落点走：映射表在 UnrealSyncPathPolicy 里（落点常量的唯一出处），
+            // 这里只是转调。原来这张表在这儿另写了一份，2026-10-14 加了道具图片之后
+            // 就漏了一项；同步前检测更是压根用不上它（那边在服务层，够不着窗口）。
+            return UnrealSyncPathPolicy.GetDestinationDisplayName(destination);
         }
 
         private static string GetUnrealAssetFolderPath(string assetPath)

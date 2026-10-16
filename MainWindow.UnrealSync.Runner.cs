@@ -130,7 +130,13 @@ namespace GalExcleTools
                         .ToList();
                     if (missingFolders.Count > 0)
                     {
-                        warnings.Add($"目标工程缺少参考结构：{string.Join(", ", missingFolders)}。请在 Unreal 内容浏览器里先建好，工具不会替你创建。");
+                        // 提示里两个都写：中文名让人一眼知道缺的是哪一类，
+                        // 相对路径是"去内容浏览器里建在哪"的答案。
+                        var described = string.Join(
+                            "、",
+                            missingFolders.Select(relative =>
+                                $"{UnrealSyncPathPolicy.GetDestinationDisplayName(relative)}（{relative}）"));
+                        warnings.Add($"目标工程缺少参考结构：{described}。请在 Unreal 内容浏览器里先建好，工具不会替你创建。");
                     }
                 }
             }

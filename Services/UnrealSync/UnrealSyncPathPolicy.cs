@@ -309,4 +309,72 @@ internal static class UnrealSyncPathPolicy
 
         return result;
     }
+
+    /// <summary>
+    /// 落点目录的**中文名**（「背景图」「道具图片」「BGM」…）。
+    ///
+    /// 【为什么放在这儿】落点常量和那张"新旧对照表"都在这一个文件里，中文名跟着落点走才不会漂 ——
+    /// 原来同步台的对比表在 MainWindow 里**另写了一份**，于是 2026-10-14 加了道具图片之后
+    /// 那边就漏了（少一个「道具图片」），同步前检测更是直接拿英文相对路径当标题。
+    /// 现在两边都调这里。
+    ///
+    /// 【匹配规则】长前缀优先（子目录要排在父目录前面，否则 `AssetMaterial` 会把它们全吃掉）；
+    /// 认不出来就退回叶子名，别把一整条 `/Game/...` 甩到标题上。
+    /// </summary>
+    /// <param name="destination">
+    /// 两种形态都认：对象路径 <c>/Game/AssetMaterial/...</c>，
+    /// 和相对 Content 的 <c>AssetMaterial/...</c>（同步前检测给的就是后者）。
+    /// </param>
+    public static string GetDestinationDisplayName(string destination)
+    {
+        var normalized = (destination ?? string.Empty).Replace('\\', '/').Trim().Trim('/');
+        if (normalized.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var gameRootPrefix = GameRoot.TrimStart('/') + "/";
+        if (normalized.StartsWith(gameRootPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[gameRootPrefix.Length..];
+        }
+
+        var full = $"{GameRoot}/{normalized}";
+        foreach (var (prefix, displayName) in DestinationDisplayNames)
+        {
+            if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // 语音底下还有章节段：把章节号带上，比只说"剧情语音"有用。
+            if (string.Equals(prefix, VoiceFolder, StringComparison.Ordinal))
+            {
+                var chapter = full[prefix.Length..].Trim('/');
+                return chapter.Length == 0 ? displayName : $"{displayName}：{chapter}";
+            }
+
+            return displayName;
+        }
+
+        var separatorIndex = normalized.LastIndexOf('/');
+        return separatorIndex >= 0 ? normalized[(separatorIndex + 1)..] : normalized;
+    }
+
+    /// <summary>落点 → 中文名。**长前缀必须排在它的父目录前面**。</summary>
+    private static readonly (string Prefix, string DisplayName)[] DestinationDisplayNames =
+    [
+        (BackgroundFolder, "背景图"),
+        (PropImageFolder, "道具图片"),
+        (PlotImageRoot, "剧情用图目录"),
+        (BgmFolder, "BGM"),
+        (SceneEffectFolder, "环境音与特殊音效"),
+        (VoiceFolder, "剧情语音"),
+        (LustrationPreviewRoot, "小预览"),
+        (LustrationRoot, "立绘素材"),
+        (ExcelTextsRoot, "剧情表"),
+        (AssetMaterialRoot, "素材总目录"),
+        (GameRoot + "/UIWidget/PlotUIs", "剧情 UI 蓝图目录"),
+        (GameRoot + "/BaseC/EXActor", "MusicActor 蓝图目录")
+    ];
 }

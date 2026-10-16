@@ -232,17 +232,28 @@ internal static class UnrealSyncPreflightCheck
             Kind: UnrealSyncCheckKind.File);
     }
 
+    /// <summary>
+    /// 查一个落点目录在不在。
+    ///
+    /// 【三行怎么分工】（2026-10-15 调过）
+    /// 标题：**中文名**（「背景图」「道具图片」…）—— 原来直接把英文相对路径当标题，
+    ///       十几项排下来是一屏 ASCII，看不出哪项是哪项。
+    /// 第二行：**相对路径**（`AssetMaterial/ImageS/PlotUse/Background`）——
+    ///       这本来就是"该建在哪"的答案，用户在内容浏览器里看到的就是这一段，不能丢。
+    /// 第三行：**磁盘实况**（`目录已经存在：D:\...`）—— 原来它占着第二行。
+    /// </summary>
     private static UnrealSyncCheckItem CheckFolder(string contentPath, string relative)
     {
         var diskPath = Path.Combine(contentPath, relative.Replace('/', Path.DirectorySeparatorChar));
         var exists = Directory.Exists(diskPath);
         return new UnrealSyncCheckItem(
+            UnrealSyncPathPolicy.GetDestinationDisplayName(relative),
             relative,
-            diskPath,
             exists ? diskPath : string.Empty,
             exists,
             exists ? string.Empty : "目录不存在",
-            Kind: UnrealSyncCheckKind.Directory);
+            Kind: UnrealSyncCheckKind.Directory,
+            DetailOverride: exists ? $"目录已经存在：{diskPath}" : $"没有这个目录：{diskPath}");
     }
 
     /// <summary>
