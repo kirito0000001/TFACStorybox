@@ -159,8 +159,9 @@ internal sealed record UnrealSyncCheckItem(
     /// <summary>
     /// 卡片第二行。
     ///
-    /// 资产类**必须拆成"建在 / 名称 / 类型"三段** —— 直接甩对象路径就是上面
+    /// 资产类**必须拆成"建在 / 名称"** —— 直接甩对象路径就是上面
     /// <see cref="FolderPath"/> 说的那个坑。目录和文件照原样显示路径就够了。
+    /// 期望类型按需附在后面，规则见实现里那段注释（合规时第三行已经报了类型，不重复）。
     /// </summary>
     public string ExpectedSummaryText
     {
@@ -172,10 +173,19 @@ internal sealed record UnrealSyncCheckItem(
             }
 
             var folder = FolderPath;
-            var type = string.IsNullOrWhiteSpace(ExpectedType) ? string.Empty : $" · 类型 {ExpectedType}";
-            return string.IsNullOrWhiteSpace(folder)
-                ? $"名称 {CorrectName}{type}"
-                : $"建在 {folder} · 名称 {CorrectName}{type}";
+            var summary = string.IsNullOrWhiteSpace(folder)
+                ? $"名称 {CorrectName}"
+                : $"建在 {folder} · 名称 {CorrectName}";
+            // 期望类型只在**第三行没说类型**的时候才跟在后面：
+            //   · 合规且类型读到了 → 第三行就是「资产类型：X」，再说一遍是重复（用户 2026-10-16 指出的）；
+            //   · 不合规（尤其"类型不对"）→ 第三行报的是**实际**类型，期望值必须留在这儿，
+            //     否则最难看懂的那类错（期望 WidgetBlueprint / 实际 Blueprint）就没有对照了。
+            if (IsCompliant && !string.IsNullOrWhiteSpace(ActualType))
+            {
+                return summary;
+            }
+
+            return string.IsNullOrWhiteSpace(ExpectedType) ? summary : $"{summary} · 类型 {ExpectedType}";
         }
     }
 

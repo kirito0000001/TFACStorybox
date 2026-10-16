@@ -50,6 +50,18 @@ Require-Pattern `
     'GetDestinationDisplayName\(relative\)[\s\S]*?（\{relative\}）' `
     'The missing-folder warning must name each folder in Chinese and keep its relative path.'
 
+# 卡片第二行：期望类型只在第三行**没说类型**的时候才附上 ——
+# 合规时第三行就是「资产类型：X」，再说一遍是重复（2026-10-16 用户指出）。
+Require-Pattern `
+    (Join-Path $root 'Services\UnrealSync\UnrealSyncCheckItem.cs') `
+    'IsCompliant && !string\.IsNullOrWhiteSpace\(ActualType\)[\s\S]*?return summary;' `
+    'The expected type must be dropped from the summary line exactly when the detail line already reports it.'
+
+Require-Pattern `
+    (Join-Path $root 'Services\UnrealSync\UnrealSyncCheckItem.cs') `
+    '· 名称 \{CorrectName\}\{type\}' `
+    'The old unconditional "type on the summary line" shape must stay removed.' -NotMatch
+
 if ($issues.Count -gt 0) {
     $issues | ForEach-Object { Write-Host "  · $_" -ForegroundColor Red }
     Write-Error "$($issues.Count) 个检查未通过（明细见上面列出的条目）。"
@@ -121,6 +133,72 @@ if (Test-Path -LiteralPath $assemblyPath) {
         # 认不出来就退回叶子名，别把整条 /Game 路径甩出来。
         if ($displayNameMethod.Invoke($null, @('/Game/SomethingElse/LeafName')) -ne 'LeafName') {
             throw '认不出的落点应当退回叶子名。'
+        }
+    }
+
+    # ── 卡片那三行怎么写（2026-10-16：合规时第二行不许再重复报类型）──
+    $itemType = $assembly.GetType('GalExcleTools.Services.UnrealSyncCheckItem', $true)
+    $kindEnum = $assembly.GetType('GalExcleTools.Services.UnrealSyncCheckKind', $true)
+    $severityEnum = $assembly.GetType('GalExcleTools.Services.UnrealSyncCheckSeverity', $true)
+    $replaceEnum = $assembly.GetType('GalExcleTools.Services.UnrealSyncCheckReplaceTarget', $true)
+    $itemCtor = $itemType.GetConstructors()[0]
+
+    function New-CheckItem(
+        [string]$DisplayName,
+        [string]$ExpectedPath,
+        [string]$ActualPath,
+        [bool]$Compliant,
+        [string]$Problem,
+        [string]$ExpectedType,
+        [string]$ActualType,
+        [string]$Kind) {
+        return $itemCtor.Invoke(@(
+            $DisplayName, $ExpectedPath, $ActualPath, $Compliant, $Problem, $ExpectedType, $ActualType,
+            [System.Enum]::Parse($severityEnum, 'Error'),
+            [System.Enum]::Parse($replaceEnum, 'None'),
+            [System.Enum]::Parse($kindEnum, $Kind),
+            ''))
+    }
+
+    # 用**行为**当门槛，而不是猜版本：老 DLL 里合规资产第二行仍带着「· 类型 X」。
+    $probe = New-CheckItem '测试资产' '/Game/X/Y.Y' 'D:\Content\X\Y.uasset' $true '' 'WidgetBlueprint' 'WidgetBlueprint' 'Asset'
+    if ($probe.ExpectedSummaryText -match '类型') {
+        Write-Host '(skip check-item line reflection: 当前 DLL 还没有「合规时第二行不重复报类型」这条改动，重新编译后再跑。)'
+    }
+    else {
+        # ① 合规且类型读到了：第二行不再重复，第三行报类型（用户指出的那处重复）。
+        if ($probe.ExpectedSummaryText -ne '建在 /Game/X · 名称 Y') {
+            throw "合规资产的第二行不对：$($probe.ExpectedSummaryText)"
+        }
+        if ($probe.DetailText -ne '资产类型：WidgetBlueprint') {
+            throw "合规资产的第三行应当报类型，实际：$($probe.DetailText)"
+        }
+
+        # ② 不合规（类型不对）：第二行**必须**留着期望类型，否则没法跟第三行的实际类型对着看。
+        $mismatch = New-CheckItem '测试资产' '/Game/X/Y.Y' 'D:\Content\X\Y.uasset' $false '类型不对' 'WidgetBlueprint' 'Blueprint' 'Asset'
+        if ($mismatch.ExpectedSummaryText -notmatch '类型 WidgetBlueprint') {
+            throw "不合规资产的第二行必须留着期望类型，实际：$($mismatch.ExpectedSummaryText)"
+        }
+        if ($mismatch.DetailText -notmatch 'Blueprint') {
+            throw "不合规资产的第三行应当报实际类型，实际：$($mismatch.DetailText)"
+        }
+
+        # ③ 合规但类型读不到：第三行只说"资产已经存在。"，期望类型这时还得靠第二行。
+        $unreadable = New-CheckItem '测试资产' '/Game/X/Y.Y' 'D:\Content\X\Y.uasset' $true '' 'WidgetBlueprint' '' 'Asset'
+        if ($unreadable.ExpectedSummaryText -notmatch '类型 WidgetBlueprint') {
+            throw "读不到类型的合规资产，第二行应当留着期望类型，实际：$($unreadable.ExpectedSummaryText)"
+        }
+        if ($unreadable.DetailText -ne '资产已经存在。') {
+            throw "读不到类型的合规资产，第三行应当是「资产已经存在。」，实际：$($unreadable.DetailText)"
+        }
+
+        # ④ 目录那一类没有类型可言：第二行就是路径。
+        $folder = New-CheckItem '背景图' 'AssetMaterial/ImageS/PlotUse/Background' '' $false '目录不存在' '' '' 'Directory'
+        if ($folder.ExpectedSummaryText -ne 'AssetMaterial/ImageS/PlotUse/Background') {
+            throw "目录项的第二行应当是相对路径，实际：$($folder.ExpectedSummaryText)"
+        }
+        if ($folder.DetailText -notmatch '没有这个目录') {
+            throw "目录项的第三行应当说清磁盘实况，实际：$($folder.DetailText)"
         }
     }
 }
