@@ -25,7 +25,7 @@ internal sealed class StoryDialogService
     public async Task<object?> SelectPreviewChoiceAsync(string title, IReadOnlyList<StoryObjectChoice> choices)
     {
         var selected = await _dialogService.SelectAsync(
-            StoryDialogContentFactory.CreateStoryPreviewChoiceRequest(title, choices));
+            await StoryDialogContentFactory.CreateStoryPreviewChoiceRequestAsync(title, choices));
         return selected?.Value;
     }
 
@@ -41,9 +41,9 @@ internal sealed class StoryDialogService
                 .Select(choice => new SelectionDialogItem<StoryAssetChoice>(
                     $"{choice.Index}: {choice.Name}",
                     choice,
-                    // 有预览图就走图片条带（判据在 WinUiDialogService 里）。
-                    // 原来这里是给每一项挂一个 ToolTip 当预览 —— 那是系统弹层，会飘在对话框外面。
-                    ImagePath: choice.PreviewPath))
+                    string.IsNullOrWhiteSpace(choice.PreviewPath)
+                        ? null
+                        : StoryDialogContentFactory.CreateLazyImagePreviewToolTip(choice.PreviewPath)))
                 .ToList(),
             "确定",
             "取消",
