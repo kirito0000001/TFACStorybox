@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -54,7 +54,16 @@ public sealed record ContentDialogRequest(
     Style? PrimaryButtonStyle = null,
     Action<ContentDialog>? ConfigureDialog = null);
 
-public sealed record SelectionDialogItem<T>(string Label, T Value, ToolTip? ToolTip = null);
+/// <summary>
+/// 选择框里的一项。<paramref name="ImagePath"/> 给了图，这个选择框就会走
+/// <c>Controls/ImageStripPicker</c>（上方大图 + 下方横向缩略图条）——
+/// 判据在 WinUiDialogService 里，就是"有没有图"。
+/// </summary>
+public sealed record SelectionDialogItem<T>(
+    string Label,
+    T Value,
+    ToolTip? ToolTip = null,
+    string? ImagePath = null);
 
 public sealed record SelectionDialogRequest<T>(
     string Title,

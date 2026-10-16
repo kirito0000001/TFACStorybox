@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using GalExcleTools.Controls;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -98,6 +100,16 @@ internal sealed class WinUiDialogService : IDialogService
 
     public async Task<T?> SelectAsync<T>(SelectionDialogRequest<T> request, CancellationToken cancellationToken = default)
     {
+        // 带预览图的选择走「图片条带」（上方大图 + 下方横向缩略图），
+        // 纯文字的选择保持 ListView（函数、说话人那些）—— 判据就是"有没有图"，不需要调用方多传开关。
+        foreach (var candidate in request.Items)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate.ImagePath))
+            {
+                return await SelectWithImageStripAsync(request, cancellationToken);
+            }
+        }
+
         var listView = new ListView
         {
             SelectionMode = ListViewSelectionMode.Single,
@@ -154,6 +166,63 @@ internal sealed class WinUiDialogService : IDialogService
             listView.SelectedItem is ListViewItem { Tag: T selectedValue }
                 ? selectedValue
                 : default;
+    }
+
+    /// <summary>
+    /// 带预览图的选择：图片条带形态。
+    ///
+    /// 形态本身（大图 + 横向条带 + 选中态 + 方向键）在 <c>Controls/ImageStripPicker</c> 里，
+    /// 这里只负责把请求喂进去、把选中值带出来 —— 以后改条带只动那个控件。
+    /// </summary>
+    private async Task<T?> SelectWithImageStripAsync<T>(
+        SelectionDialogRequest<T> request,
+        CancellationToken cancellationToken)
+    {
+        var items = new List<ImageStripPickerItem>(request.Items.Count);
+        var initialIndex = 0;
+        for (var index = 0; index < request.Items.Count; index++)
+        {
+            var item = request.Items[index];
+            if (request.IsSelected?.Invoke(item.Value) == true)
+            {
+                initialIndex = index;
+            }
+
+            items.Add(new ImageStripPickerItem(item.Label, item.ImagePath, item.Value));
+        }
+
+        // 大图要占地方：条带那点高度不够看细节（请求里的 MaxHeight 是给列表用的）。
+        var picker = new ImageStripPicker
+        {
+            Width = request.Width,
+            Height = Math.Max(420, request.MaxHeight)
+        };
+        picker.SetItems(items, initialIndex);
+        picker.SelectionChanged += (_, _) => _uiSoundService?.Play(UiSoundKind.Selection);
+
+        var panel = new StackPanel
+        {
+            Spacing = 12
+        };
+        panel.Children.Add(new TextBlock
+        {
+            Text = request.Message,
+            TextWrapping = TextWrapping.Wrap
+        });
+        panel.Children.Add(picker);
+
+        var dialog = CreateDialog(
+            request.Title,
+            panel,
+            request.PrimaryButtonText,
+            request.CloseButtonText);
+        AttachButtonSounds(dialog, DialogSoundIntent.Positive, DialogSoundIntent.Negative);
+        AttachCancelShortcuts(dialog, DialogSoundIntent.Negative);
+
+        var result = await ShowDialogAsync(dialog, cancellationToken);
+        return result == ContentDialogResult.Primary && picker.SelectedValue is T selectedValue
+            ? selectedValue
+            : default;
     }
 
     private ContentDialog CreateDialog(

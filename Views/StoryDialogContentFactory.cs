@@ -133,23 +133,50 @@ internal static class StoryDialogContentFactory
             choices.Select(choice => new SelectionDialogItem<StoryObjectChoice>(choice.DisplayName, choice)).ToList());
     }
 
-    public static async Task<SelectionDialogRequest<StoryObjectChoice>> CreateStoryPreviewChoiceRequestAsync(
+    /// <summary>
+    /// 带预览图的选择请求。
+    ///
+    /// 【2026-10-16 改】原来这里给每一项挂一个 ToolTip 当预览（悬停弹一张图），
+    /// 而 ToolTip 是系统弹层 —— 会画到对话框**外面**，一次也只能看一个。
+    /// 现在只把"这一项的代表图"塞进 <see cref="SelectionDialogItem{T}.ImagePath"/>，
+    /// 由通用选择框走图片条带（Controls/ImageStripPicker）：条带负责一眼看全，大图负责看细节。
+    ///
+    /// 代表图取**最后一个**可预览的路径：立绘那些候选给的是一摞"叠起来"的路径
+    ///（身体 + 已有图层 + 这一项），最后那个正是**这一项本身**，也正好是缩略图该显示的东西。
+    /// </summary>
+    public static SelectionDialogRequest<StoryObjectChoice> CreateStoryPreviewChoiceRequest(
         string title,
         IReadOnlyList<StoryObjectChoice> choices)
     {
         var items = new List<SelectionDialogItem<StoryObjectChoice>>();
         foreach (var choice in choices)
         {
-            ToolTip? toolTip = null;
-            if (choice.PreviewPaths is { Count: > 0 })
-            {
-                toolTip = await CreateStoryChoicePreviewToolTipAsync(choice.PreviewPaths);
-            }
-
-            items.Add(new SelectionDialogItem<StoryObjectChoice>(choice.DisplayName, choice, toolTip));
+            items.Add(new SelectionDialogItem<StoryObjectChoice>(
+                choice.DisplayName,
+                choice,
+                ImagePath: GetChoiceRepresentativeImagePath(choice)));
         }
 
         return CreateStoryChoiceRequestCore(title, items);
+    }
+
+    /// <summary>这一项拿哪张图当缩略图：从后往前找第一个能当预览的路径。</summary>
+    private static string? GetChoiceRepresentativeImagePath(StoryObjectChoice choice)
+    {
+        if (choice.PreviewPaths is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        for (var index = choice.PreviewPaths.Count - 1; index >= 0; index--)
+        {
+            if (IsPreviewableImagePath(choice.PreviewPaths[index]))
+            {
+                return choice.PreviewPaths[index];
+            }
+        }
+
+        return null;
     }
 
     private static SelectionDialogRequest<StoryObjectChoice> CreateStoryChoiceRequestCore(
