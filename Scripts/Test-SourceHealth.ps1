@@ -256,6 +256,10 @@ Require-SourcePattern "MainWindow.xaml" 'StoryInspectorStateTabButton[\s\S]*?Hor
 Require-SourcePattern "MainWindow.xaml" 'HasCurrentTransitionFunction[\s\S]*?Text="转场"' "Transition state must appear only when the current row explicitly contains a transition function."
 Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryInspectorTabButton_Click" 'StorySidePanelContent\.Visibility[\s\S]*?StoryInspectorToolsScrollViewer\.Visibility' "Story inspector tabs must switch between state and tools without a shared long scroll."
 Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryEditorPage_PreviewKeyDown" 'IsControlKeyDown\(\)[\s\S]*?VirtualKey\.Z[\s\S]*?UndoStoryEditorOperation\(\)[\s\S]*?e\.Handled\s*=\s*true' "The story editor preview key handler must route Ctrl+Z to the unified undo stack."
+# Tab 是焦点导航键：挂在冒泡的 KeyDown 上永远执行不到（会被焦点管理器先吃掉），
+# 表现就是"按 Tab 没清空立绘，反而跳焦点"（用户 2026-10-16 报的）。所以它必须在隧道层。
+Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryEditorPage_PreviewKeyDown" 'VirtualKey\.Tab[\s\S]*?ClearStoryCharacterSlot\(hoveredSlotIndex\)[\s\S]*?e\.Handled = true' "Tab must clear the hovered character slot from the tunneling handler."
+Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryEditorPage_KeyDown" 'case Windows\.System\.VirtualKey\.Tab' "The dead Tab case must not come back to the bubbling handler." -NotMatch
 # ── 热更新（2026-10-16 重新对锚）─────────────────────────────────────────────
 # 这块被**整体重做过**：`Services/UpdateService.cs` 拆成了 `Services/Update/` 一整套
 # （Gitee 客户端 / 通道选择 / 下载器 / 校验器 / 覆盖计划 / 启动交接 / 白名单），

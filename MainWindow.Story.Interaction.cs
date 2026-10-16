@@ -145,6 +145,29 @@ namespace GalExcleTools
 
         private void StoryEditorPage_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
         {
+            // Tab = 清空鼠标停着的那个立绘位（快捷键说明里就是这么写的）。
+            //
+            // 【为什么必须放在**隧道**这一层】Tab 是**焦点导航键**：它在冒泡到
+            // StoryEditorPage_KeyDown 之前就被焦点管理器吃掉了，所以挂在那边的那条
+            // `case Tab` 永远执行不到 —— 表现是"鼠标停在立绘上按 Tab 没清空，
+            // 反而跳到左边导航的第一个按钮"（用户 2026-10-16 报的）。
+            // Preview 先于焦点导航到场，再 handled = true 把导航摁住。
+            //
+            // 只认**不带修饰键**的 Tab：Shift+Tab 仍然走焦点导航 —— 鼠标压在立绘上时
+            // 留一个"还能把焦点挪走"的出口（Ctrl+Tab 同理不动）。
+            if (e.Key == Windows.System.VirtualKey.Tab &&
+                !IsControlKeyDown() &&
+                !IsShiftKeyDown() &&
+                _currentStoryDocumentPath is not null &&
+                _storyRows.Count > 0 &&
+                !_isStoryDebugModeEnabled &&
+                _hoveredStoryCharacterSlotIndex is int hoveredSlotIndex)
+            {
+                ClearStoryCharacterSlot(hoveredSlotIndex);
+                e.Handled = true;
+                return;
+            }
+
             if (_currentStoryDocumentPath is null ||
                 _storyRows.Count == 0 ||
                 _isStoryDebugModeEnabled ||
@@ -255,9 +278,8 @@ namespace GalExcleTools
                 case Windows.System.VirtualKey.Down:
                     await CycleStoryCharacterLayerAsync(slotIndex, CharacterLayerKind.Vfx, -1);
                     break;
-                case Windows.System.VirtualKey.Tab:
-                    ClearStoryCharacterSlot(slotIndex);
-                    break;
+                // Tab（清空这一位）不在这儿 —— 它是焦点导航键，冒泡到这里之前就被吃掉了，
+                // 所以那条在 StoryEditorPage_PreviewKeyDown 里。别把它加回来。
                 default:
                     handled = false;
                     break;
