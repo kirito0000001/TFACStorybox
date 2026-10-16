@@ -320,7 +320,13 @@ if (Test-Path -LiteralPath $assemblyPath) {
             $onlyInPackage = @($rowItems | Where-Object { $_.Kind.ToString() -eq 'OnlyInPackage' })
             $onlyLocal = @($rowItems | Where-Object { $_.Kind.ToString() -eq 'OnlyLocal' })
             if ($modified.Count -ne 1 -or $onlyInPackage.Count -ne 1 -or $onlyLocal.Count -ne 1) {
-                throw "差异分类不对：Modified=$($modified.Count) OnlyInPackage=$($onlyInPackage.Count) OnlyLocal=$($onlyLocal.Count)"
+                throw "差异分类不对：Modified=$($modified.Count) OnlyInPackage=$($onlyInPackage.Count) OnlyLocal=$($onlyLocal.Count)。" +
+                      "（提示：数字列的空串和 0 表达的是同一件事 —— 不归一化的话，共有的每一句都会被判成有差异。这一步的夹带故意只写了 Tesxt 列来钉住它。）"
+            }
+
+            # 只改了一句：变化字段应当只有"文本"，那十几个数字列不该冒出来。
+            if ($modified[0].ChangedFields.Count -ne 1) {
+                throw "变化字段应当只有 1 个（文本），实际 $($modified[0].ChangedFields.Count) 个：$($modified[0].ChangedFields -join '、')"
             }
 
             if ($modified[0].StableId -ne '11111111111111111111111111111111' -or

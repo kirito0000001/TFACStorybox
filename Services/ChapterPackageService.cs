@@ -878,7 +878,14 @@ internal sealed class ChapterPackageService
     private static List<string> CollectChangedFields(RowSnapshot local, RowSnapshot package)
     {
         return GetDiffColumns()
-            .Where(column => !string.Equals(local.Get(column), package.Get(column), StringComparison.Ordinal))
+            // 数字列先归一化再比：缺列（空串）和 "0" 表达的是同一件事 ——
+            // "这一句没配这个素材"。不归一化的话，只要有一边是"工具早期写的文档"
+            //（那些数字列没落盘），**共有的每一句都会被判成有差异** ✗
+            // —— 那正是这个功能最怕的假红（用户会以为整章都被改过）。
+            .Where(column => !string.Equals(
+                NormalizeCellValue(column, local.Get(column)),
+                NormalizeCellValue(column, package.Get(column)),
+                StringComparison.Ordinal))
             .Select(GetFieldDisplayName)
             .ToList();
     }
