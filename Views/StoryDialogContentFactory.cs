@@ -149,7 +149,21 @@ internal static class StoryDialogContentFactory
         var items = new List<SelectionDialogItem<StoryObjectChoice>>();
         foreach (var choice in choices)
         {
-            var toolTip = await CreateStoryChoicePreviewToolTipAsync(choice.PreviewPaths);
+            // ⚠️ 这个守卫**不能省**：角色的选择框、滤镜的选择框都不带预览图
+            //（PreviewPaths 是 null），直接喂给 CreateStoryChoicePreviewToolTipAsync
+            // 就会在它里面的 previewPaths.Where(...) 上抛 ArgumentNullException。
+            //
+            // 【2026-10-16】回退「图片条带」那次把这个守卫弄丢了，表现是
+            // **右键→角色点不开面板**（滤镜那条同理），异常还被菜单的 async void 吃掉、
+            // 只留在 crash.log 里（当晚 18:57 连报 4 次）。
+            // 注意：菜单项没有图时应该给**空 ToolTip**（null），不是给一个空的预览框 ——
+            // 所以守卫放这里，而不是让下面那个方法返回一个空框。
+            ToolTip? toolTip = null;
+            if (choice.PreviewPaths is { Count: > 0 })
+            {
+                toolTip = await CreateStoryChoicePreviewToolTipAsync(choice.PreviewPaths);
+            }
+
             items.Add(new SelectionDialogItem<StoryObjectChoice>(choice.DisplayName, choice, toolTip));
         }
 
