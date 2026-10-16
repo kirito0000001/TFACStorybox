@@ -151,13 +151,14 @@ if (Test-Path -LiteralPath $assemblyPath) {
         [string]$Problem,
         [string]$ExpectedType,
         [string]$ActualType,
-        [string]$Kind) {
+        [string]$Kind,
+        [string]$DetailOverride = '') {
         return $itemCtor.Invoke(@(
             $DisplayName, $ExpectedPath, $ActualPath, $Compliant, $Problem, $ExpectedType, $ActualType,
             [System.Enum]::Parse($severityEnum, 'Error'),
             [System.Enum]::Parse($replaceEnum, 'None'),
             [System.Enum]::Parse($kindEnum, $Kind),
-            ''))
+            $DetailOverride))
     }
 
     # 用**行为**当门槛，而不是猜版本：老 DLL 里合规资产第二行仍带着「· 类型 X」。
@@ -192,12 +193,17 @@ if (Test-Path -LiteralPath $assemblyPath) {
             throw "读不到类型的合规资产，第三行应当是「资产已经存在。」，实际：$($unreadable.DetailText)"
         }
 
-        # ④ 目录那一类没有类型可言：第二行就是路径。
-        $folder = New-CheckItem '背景图' 'AssetMaterial/ImageS/PlotUse/Background' '' $false '目录不存在' '' '' 'Directory'
+        # ④ 目录那一类没有类型可言：第二行就是相对路径。
+        #    第三行由 CheckFolder 传的 DetailOverride 定（磁盘实况）—— 这里照着它的形状造，
+        #    别拿"裸记录"去断言那句 override（第一版就是这么写错的）。
+        $folderDiskPath = 'D:\Unreal\Content\AssetMaterial\ImageS\PlotUse\Background'
+        $folder = New-CheckItem `
+            '背景图' 'AssetMaterial/ImageS/PlotUse/Background' $folderDiskPath $true '' '' '' 'Directory' `
+            "目录已经存在：$folderDiskPath"
         if ($folder.ExpectedSummaryText -ne 'AssetMaterial/ImageS/PlotUse/Background') {
             throw "目录项的第二行应当是相对路径，实际：$($folder.ExpectedSummaryText)"
         }
-        if ($folder.DetailText -notmatch '没有这个目录') {
+        if ($folder.DetailText -notmatch '目录已经存在：') {
             throw "目录项的第三行应当说清磁盘实况，实际：$($folder.DetailText)"
         }
     }
