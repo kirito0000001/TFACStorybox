@@ -7,8 +7,14 @@ using GalExcleTools.Views;
 
 namespace GalExcleTools.Controls;
 
-/// <summary>条带里的一项。<see cref="ImagePath"/> 为空时这一格退化成文字块。</summary>
-internal sealed record ImageStripPickerItem(string Label, string? ImagePath, object? Value);
+/// <summary>
+/// 条带里的一项。<see cref="ImagePath"/> 为空时这一格退化成文字块。
+///
+/// ⚠️ 必须 public：<see cref="ImageStripPicker"/> 是 public（XAML 控件那半边要求），
+/// 而 public 方法不能拿 internal 类型当参数（CS0051，2026-10-16 编译时踩到）。
+/// 这边的口径和 DialogContracts 里的 SelectionDialogItem 一致 —— 对话框契约类是 public。
+/// </summary>
+public sealed record ImageStripPickerItem(string Label, string? ImagePath, object? Value);
 
 /// <summary>
 /// 图片条带选择器：上面大图看细节，下面横向条带一眼看全部。
