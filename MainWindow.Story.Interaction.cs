@@ -338,12 +338,58 @@ namespace GalExcleTools
                 return;
             }
 
-            CaptureStoryUndoState($"粘贴{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}立绘数据");
+            // 和「更换角色」走同一条路（MainWindow.Story.Assets.cs 那套三段式）：
+            // 先问一句"要不要连续到后面"，再落地。
+            // ⚠️ 顺序不能反：先改当前句再问的话，「取消」就退不回去了。
+            var slotDisplayName = StoryCharacterSlotService.GetSlotDisplayName(slotIndex);
+            var displayName = $"{slotDisplayName}角色";
+            var characterField = StoryCharacterSlotService.GetCharacterColumn(slotIndex);
+            var replacementPlan = StoryAssetFieldService.BuildForwardContiguousValuePlan(
+                _storyRows,
+                _currentStoryRowIndex,
+                characterField,
+                _storyCharacterSlotClipboard.Character);
+            var replacementChoice = await ConfirmStoryValueReplacementAsync(
+                replacementPlan,
+                displayName,
+                value => ResolveStoryCharacter(value)?.Name ?? value);
+            if (replacementChoice is DialogResultKind.None or DialogResultKind.Cancel)
+            {
+                return;
+            }
+
+            if (replacementChoice == DialogResultKind.Secondary)
+            {
+                // 「只换一句」：把范围压成当前这一句，下面那段一行都不用改。
+                replacementPlan = replacementPlan with
+                {
+                    EndIndex = replacementPlan.StartIndex,
+                    Count = 1
+                };
+            }
+
+            CaptureStoryUndoState(replacementPlan.Count > 1
+                ? $"连续粘贴{displayName}立绘数据"
+                : $"粘贴{slotDisplayName}立绘数据");
+            var changedCount = StoryAssetFieldService.ApplyForwardContiguousValuePlan(_storyRows, replacementPlan);
+            // 换了角色，后面那些句已有的图层分层就不一定配得上了 —— 和「连续更换角色」同一个口径：清掉。
+            for (var index = replacementPlan.StartIndex; index <= replacementPlan.EndIndex; index++)
+            {
+                StoryCharacterSlotService.ResetLayerColumns(_storyRows[index], slotIndex);
+            }
+
+            // 当前这一句还要按剪贴板把**图层**一起写上（这正是"粘贴立绘数据"和"只换角色"的区别）；
+            // 连续段里的其它句只跟角色，图层留给归一逻辑收拾。
             StoryCharacterSlotService.ApplyClipboard(row, slotIndex, _storyCharacterSlotClipboard);
             NormalizeStoryDetachedCharacterLayers(row);
-            SyncStorySpeakerTextIfNeeded(slotIndex, row.Get(StoryCharacterSlotService.GetCharacterColumn(slotIndex)));
+            SyncStorySpeakerTextIfNeeded(slotIndex, row.Get(characterField));
             QueueCurrentStoryDocumentSave();
-            ShowStoryStatus(InfoBarSeverity.Success, "已粘贴立绘数据", $"{StoryCharacterSlotService.GetSlotDisplayName(slotIndex)}：{StoryCharacterSlotService.FormatClipboard(_storyCharacterSlotClipboard)}");
+            ShowStoryStatus(
+                InfoBarSeverity.Success,
+                changedCount > 1 ? $"{displayName}已连续粘贴" : "已粘贴立绘数据",
+                changedCount > 1
+                    ? $"共修改 {changedCount} 句（第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句）。"
+                    : $"{slotDisplayName}：{StoryCharacterSlotService.FormatClipboard(_storyCharacterSlotClipboard)}");
             await RefreshStoryPreviewAsync();
         }
 
@@ -389,11 +435,41 @@ namespace GalExcleTools
                 return;
             }
 
-            CaptureStoryUndoState($"粘贴{StoryAssetFieldService.GetDisplayName(fieldName)}");
-            StoryAssetFieldService.ApplyClipboard(row, fieldName, _storyAssetClipboard);
+            // 同样走「连续更换」那一套（和「更换背景图 / BGM / 环境音」共用确认框与计划）。
+            var displayName = StoryAssetFieldService.GetDisplayName(fieldName);
+            var replacementPlan = StoryAssetFieldService.BuildForwardContiguousValuePlan(
+                _storyRows,
+                _currentStoryRowIndex,
+                fieldName,
+                _storyAssetClipboard.Value);
+            var replacementChoice = await ConfirmStoryValueReplacementAsync(
+                replacementPlan,
+                displayName,
+                value => value);
+            if (replacementChoice is DialogResultKind.None or DialogResultKind.Cancel)
+            {
+                return;
+            }
+
+            if (replacementChoice == DialogResultKind.Secondary)
+            {
+                replacementPlan = replacementPlan with
+                {
+                    EndIndex = replacementPlan.StartIndex,
+                    Count = 1
+                };
+            }
+
+            CaptureStoryUndoState(replacementPlan.Count > 1 ? $"连续粘贴{displayName}" : $"粘贴{displayName}");
+            var changedCount = StoryAssetFieldService.ApplyForwardContiguousValuePlan(_storyRows, replacementPlan);
             QueueCurrentStoryDocumentSave();
             UpdateStoryToolbarCurrentInfo();
-            ShowStoryStatus(InfoBarSeverity.Success, "已粘贴基础素材", $"{StoryAssetFieldService.GetDisplayName(fieldName)}：{_storyAssetClipboard.Value}");
+            ShowStoryStatus(
+                InfoBarSeverity.Success,
+                changedCount > 1 ? $"{displayName}已连续粘贴" : "已粘贴基础素材",
+                changedCount > 1
+                    ? $"共修改 {changedCount} 句（第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句）。"
+                    : $"{displayName}：{_storyAssetClipboard.Value}");
             if (fieldName == "BGM")
             {
                 await ApplyCurrentStoryRowMediaAndFunctionAsync();
