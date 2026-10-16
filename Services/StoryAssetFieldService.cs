@@ -297,12 +297,16 @@ internal static class StoryAssetFieldService
     }
 
     /// <summary>
-    /// 立绘位（角色 + 服装/表情/装饰/滤镜）的连续粘贴计划：从起点往后，**只要还是同一个角色**就算这一段。
+    /// 立绘位（角色 + 服装/表情/装饰/滤镜）的连续粘贴计划。
     ///
-    /// 【为什么锚在角色列上，而不是锚在"整份立绘数据"上】
-    /// 锚在整份数据上的话，第一步"当前这一位 == 剪贴板"就会成立 → 范围永远只有当前这一句。
-    /// 而 Ctrl+V 真正的用法是"这一位长这样，后面同角色的几句也都刷成这样"，
-    /// 变的往往只是服装/表情 —— 所以范围按角色划，载荷才是整份数据。
+    /// 【范围怎么划】从起点往后，**整份立绘数据（五列）都和起点这一句一样**才算这一段：
+    /// 角色、服装、表情、装饰、滤镜，任何一列不同就停在那句之前，并记下是哪一列不同的。
+    ///
+    /// 【为什么不是只比角色】前两版的范围都只看角色列：第一版算出来是 0 句
+    /// （同角色、只是服装/表情不同时等于没反应）；改成"同一个角色就算一段"之后又太宽 ——
+    /// 会一路刷过服装/表情已经变了的句子，把后面手改的表情覆盖
+    ///（日志里 20:31 那次 49 句、改完就撤回；用户原话「服装或者表情有变化也得停下」）。
+    /// 现在口径改成"只改和当前句一模一样的句子"，任何手改过的列都会自动成为边界。
     /// </summary>
     public static StoryCharacterSlotReplacementPlan BuildForwardContiguousCharacterSlotPlan(
         IReadOnlyList<StoryRow> rows,
@@ -319,28 +323,26 @@ internal static class StoryAssetFieldService
             throw new ArgumentOutOfRangeException(nameof(slotIndex));
         }
 
-        var characterFieldName = StoryCharacterSlotService.GetCharacterColumn(slotIndex);
-        var originalCharacter = rows[startIndex].Get(characterFieldName);
+        var anchor = StoryCharacterSlotService.CreateClipboard(rows[startIndex], slotIndex);
         var endIndex = startIndex;
         int? stoppingIndex = null;
+        string? stoppingFieldLabel = null;
         for (var index = startIndex; index < rows.Count; index++)
         {
-            if (!string.Equals(
-                    rows[index].Get(characterFieldName),
-                    originalCharacter,
-                    StringComparison.OrdinalIgnoreCase))
+            if (StoryCharacterSlotService.MatchesClipboard(rows[index], slotIndex, anchor))
             {
-                stoppingIndex = index;
-                break;
+                endIndex = index;
+                continue;
             }
 
-            endIndex = index;
+            stoppingIndex = index;
+            stoppingFieldLabel = StoryCharacterSlotService.DescribeSlotDifference(rows[index], slotIndex, anchor);
+            break;
         }
 
         return new StoryCharacterSlotReplacementPlan(
             slotIndex,
-            characterFieldName,
-            originalCharacter,
+            anchor,
             clipboard,
             startIndex,
             endIndex,
@@ -348,7 +350,8 @@ internal static class StoryAssetFieldService
             stoppingIndex is null
                 ? StoryAssetReplacementStopReason.EndOfChapter
                 : StoryAssetReplacementStopReason.DifferentContext,
-            stoppingIndex);
+            stoppingIndex,
+            stoppingFieldLabel);
     }
 
     /// <summary>这一份计划里有没有**真正会被改到**的句（整段都和剪贴板一样就是没有）。</summary>
@@ -379,13 +382,11 @@ internal static class StoryAssetFieldService
             throw new InvalidOperationException("连续粘贴立绘的范围无效。");
         }
 
-        // 建计划和落地之间可能切了句/改了角色 —— 和另外两套一样，整段重校验一遍再写。
+        // 建计划和落地之间可能切了句/改了列 —— 和另外两套一样，整段重校验一遍再写。
+        // 口径是 Anchor（整份立绘数据），不再只比角色。
         for (var index = plan.StartIndex; index <= plan.EndIndex; index++)
         {
-            if (!string.Equals(
-                    rows[index].Get(plan.CharacterFieldName),
-                    plan.OriginalCharacter,
-                    StringComparison.OrdinalIgnoreCase))
+            if (!StoryCharacterSlotService.MatchesClipboard(rows[index], plan.SlotIndex, plan.Anchor))
             {
                 throw new InvalidOperationException("连续粘贴立绘的范围已经变化，请重新复制。");
             }
@@ -528,18 +529,22 @@ internal sealed record StoryAssetReplacementPlan(
 
 /// <summary>
 /// 整位立绘（角色 + 服装/表情/装饰/滤镜）的连续粘贴计划。
-/// 范围按"角色没变"划，<see cref="Clipboard"/> 是剪贴板那一整份，<see cref="Count"/> 是范围内的句数。
+///
+/// <see cref="Anchor"/> 是**当前句原本的那一份**，范围按它划 ——
+/// 五列里任何一列不同就停（服装、表情改了也算），所以手改过的句子不会被刷掉。
+/// <see cref="Clipboard"/> 是要写进去的那一份；
+/// <see cref="StoppingFieldLabel"/> 是停下来那一句"哪一列不同"（角色/服装/表情/装饰/滤镜）。
 /// </summary>
 internal sealed record StoryCharacterSlotReplacementPlan(
     int SlotIndex,
-    string CharacterFieldName,
-    string OriginalCharacter,
+    StoryCharacterSlotClipboard Anchor,
     StoryCharacterSlotClipboard Clipboard,
     int StartIndex,
     int EndIndex,
     int Count,
     StoryAssetReplacementStopReason StopReason,
-    int? StoppingIndex);
+    int? StoppingIndex,
+    string? StoppingFieldLabel);
 
 internal sealed record StoryValueReplacementPlan(
     string FieldName,

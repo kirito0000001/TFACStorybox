@@ -366,10 +366,13 @@ namespace GalExcleTools
             // 先建计划 → 问一句"要不要连续到后面" → 再落地。
             // ⚠️ 顺序不能反：先改当前句再问的话，「取消」就退不回去了。
             //
-            // 【2026-10-16 修】范围锚在**角色列**上、载荷是**整份立绘数据**。
-            // 以前是"角色列的计划 + 只有当前句写图层"，于是同角色、只是服装/表情不同时
-            // （这功能最常见的用法）角色列根本没变化 → 计划 0 句 → 只有当前句被改，
-            // 后面一句都不动，就是用户报的「Ctrl+V 无法连续更改」。
+            // 【口径（2026-10-16 两轮）】范围按**整份立绘数据**划：从当前句往后，
+            // 五列（角色 / 服装 / 表情 / 装饰 / 滤镜）都和当前句一样的才算这一段，任一列不同就停；
+            // 载荷是剪贴板那一整份。
+            //   · 第一版只比角色列 → 同角色、只是服装/表情不同时计划是 0 句，Ctrl+V 等于没反应；
+            //   · 改成只看角色列之后又太宽 —— 会一路刷过服装/表情已经变了的句子，
+            //     把后面手改的表情一起覆盖（用户当天下午报的「服装或者表情有变化也得停下」）。
+            // 现在这条口径下，段内每一句本来就完全一样，所以刷它们不会毁掉任何手改过的列。
             var replacementPlan = StoryAssetFieldService.BuildForwardContiguousCharacterSlotPlan(
                 _storyRows,
                 _currentStoryRowIndex,
@@ -423,7 +426,12 @@ namespace GalExcleTools
         /// 这一段本来就等于剪贴板那一份：不弹窗、不写、不进撤回栈，但**要报一句**。
         ///
         /// 以前这里是静默 <c>return</c> —— 用户按了 Ctrl+V 看着什么都没发生，只能报"不生效"。
-        /// 现在把话说清楚：要么告诉他一整段都已经是这份数据了。
+        /// 现在把话说清楚，并且分两种情况给不同的下一步：
+        ///   · 复制的是当前这一句自己的数据（用户 2026-10-16 就是这么按的）：这条路的用途是
+        ///     "把别处那一份刷到这里"，自己刷自己没有可改的，告诉他在那一句上先 Ctrl+C；
+        ///   · 整段本来就都是这一份：告诉他这条路的边界口径。
+        /// 两种都补一句"只想改服装 / 表情 / 装饰该走哪条路"——那是右键菜单里的对应项
+        ///（只动那一列，遇到该列不同或角色变化就停）。
         /// </summary>
         private bool IsStoryCharacterSlotPasteNoop(StoryCharacterSlotReplacementPlan replacementPlan)
         {
@@ -432,10 +440,18 @@ namespace GalExcleTools
                 return false;
             }
 
+            var slotDisplayName = StoryCharacterSlotService.GetSlotDisplayName(replacementPlan.SlotIndex);
+            var clipboardText = StoryCharacterSlotService.FormatClipboard(replacementPlan.Clipboard);
+            var hint = StoryCharacterSlotService.MatchesClipboard(
+                _storyRows[replacementPlan.StartIndex],
+                replacementPlan.SlotIndex,
+                replacementPlan.Clipboard)
+                ? "复制的是当前这一句自己的数据；要把别处的立绘刷过来，先在那一句上 Ctrl+C。只想改服装 / 表情 / 装饰：用右键菜单里对应的那一项，它可以连续更换。"
+                : "连续粘贴只覆盖“立绘数据和当前句一样”的句子；只想改服装 / 表情 / 装饰：用右键菜单里对应的那一项，它可以连续更换。";
             ShowStoryStatus(
                 InfoBarSeverity.Informational,
                 "立绘数据相同",
-                $"第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句的{StoryCharacterSlotService.GetSlotDisplayName(replacementPlan.SlotIndex)}已经是“{StoryCharacterSlotService.FormatClipboard(replacementPlan.Clipboard)}”，没有要改的。");
+                $"第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句的{slotDisplayName}已经是“{clipboardText}”，没有要改的。{hint}");
             return true;
         }
 

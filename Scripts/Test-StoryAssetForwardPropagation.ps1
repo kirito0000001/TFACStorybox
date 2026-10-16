@@ -169,46 +169,92 @@ if ([int]$characterChangedCount -ne 2 -or (Compare-Object @('C', 'C', 'B', 'A') 
     throw "Character propagation failed. Count=$characterChangedCount Values=$($actualCharacters -join ',')"
 }
 
-# 立绘位 Ctrl+V：范围要按**角色**划，载荷是**整份立绘数据**。
-# 2026-10-16 用户报的「Ctrl+V 无法连续更改」就是这里：同角色、只有服装/表情不同时，
-# 角色列没有变化，只算角色列的话计划是 0 句 → 后面一句都不动。
+# 立绘位 Ctrl+V：范围按**整份立绘数据**划（角色/服装/表情/装饰/滤镜任一列不同就停），
+# 载荷是整份立绘数据。这一条口径改过两轮，别再退回去：
+#   · 只比角色列 → 同角色、只是服装/表情不同时计划 0 句，Ctrl+V 等于没反应（用户 2026-10-16 上午）；
+#   · 只看角色列又太宽 → 会刷过服装/表情已经变了的句子，把后面手改的表情覆盖
+#     （同一天下午用户报的「服装或者表情有变化也得停下」）。
 $clipboardType = $assembly.GetType('GalExcleTools.StoryCharacterSlotClipboard', $true)
 $slotClipboard = [System.Activator]::CreateInstance($clipboardType, @('Xia', '4', '3', '0', '0'))
+
+# ① 一模一样的两句 + 第三句服装不同：只能覆盖前两句，停止原因报"服装"
 $slotRows = [System.Activator]::CreateInstance($listType)
-foreach ($body in @('4', '1', '1', '2')) {
+foreach ($body in @('1', '1', '2', '1')) {
     $row = [System.Activator]::CreateInstance($rowType, $true)
     [void]$setMethod.Invoke($row, @('Chara1', 'Xia'))
     [void]$setMethod.Invoke($row, @('Body1', $body))
-    [void]$setMethod.Invoke($row, @('Face1', '3'))
+    [void]$setMethod.Invoke($row, @('Face1', '1'))
     [void]$setMethod.Invoke($row, @('Adorn1', '0'))
     [void]$setMethod.Invoke($row, @('Vfx1', '0'))
     [void]$slotRows.Add($row)
 }
 
 $slotPlan = $buildSlotPlanMethod.Invoke($null, @($slotRows, 0, 1, $slotClipboard))
-if ([int]$slotPlan.GetType().GetProperty('Count').GetValue($slotPlan) -ne 4) {
-    throw 'Character-slot paste must cover the whole same-character run.'
+$slotPlanType = $slotPlan.GetType()
+if ([int]$slotPlanType.GetProperty('Count').GetValue($slotPlan) -ne 2) {
+    throw 'Character-slot paste must stop before the clothing changes.'
+}
+if ([string]$slotPlanType.GetProperty('StoppingFieldLabel').GetValue($slotPlan) -ne '服装') {
+    throw 'Character-slot paste must report which column stopped the range.'
 }
 if (-not [bool]$hasSlotChangeMethod.Invoke($null, @($slotRows, $slotPlan))) {
-    throw 'Character-slot paste must notice that later rows carry different layers.'
+    throw 'Character-slot paste must notice that the clipboard differs from the range.'
 }
 
 $slotChangedCount = $applySlotPlanMethod.Invoke($null, @($slotRows, $slotPlan))
 $actualSlots = @($slotRows | ForEach-Object { "$($getMethod.Invoke($_, @('Body1')))/$($getMethod.Invoke($_, @('Face1')))" })
-if ([int]$slotChangedCount -ne 3 -or (Compare-Object @('4/3', '4/3', '4/3', '4/3') $actualSlots -SyncWindow 0)) {
+if ([int]$slotChangedCount -ne 2 -or (Compare-Object @('4/3', '4/3', '2/1', '1/1') $actualSlots -SyncWindow 0)) {
     throw "Character-slot forward paste failed. Count=$slotChangedCount Values=$($actualSlots -join ',')"
 }
 
+# ② 表情不同也要停
+$faceSlotRows = [System.Activator]::CreateInstance($listType)
+foreach ($face in @('1', '5')) {
+    $row = [System.Activator]::CreateInstance($rowType, $true)
+    [void]$setMethod.Invoke($row, @('Chara1', 'Xia'))
+    [void]$setMethod.Invoke($row, @('Body1', '1'))
+    [void]$setMethod.Invoke($row, @('Face1', $face))
+    [void]$setMethod.Invoke($row, @('Adorn1', '0'))
+    [void]$setMethod.Invoke($row, @('Vfx1', '0'))
+    [void]$faceSlotRows.Add($row)
+}
+$faceSlotPlan = $buildSlotPlanMethod.Invoke($null, @($faceSlotRows, 0, 1, $slotClipboard))
+if ([int]$faceSlotPlan.GetType().GetProperty('Count').GetValue($faceSlotPlan) -ne 1 -or
+    [string]$faceSlotPlan.GetType().GetProperty('StoppingFieldLabel').GetValue($faceSlotPlan) -ne '表情') {
+    throw 'Character-slot paste must stop before the expression changes.'
+}
+
+# ③ 角色不同也要停
 $mixedSlotRows = [System.Activator]::CreateInstance($listType)
 foreach ($character in @('Xia', 'Xia', 'Diao')) {
     $row = [System.Activator]::CreateInstance($rowType, $true)
     [void]$setMethod.Invoke($row, @('Chara1', $character))
     [void]$setMethod.Invoke($row, @('Body1', '1'))
+    [void]$setMethod.Invoke($row, @('Face1', '1'))
+    [void]$setMethod.Invoke($row, @('Adorn1', '0'))
+    [void]$setMethod.Invoke($row, @('Vfx1', '0'))
     [void]$mixedSlotRows.Add($row)
 }
 $mixedSlotPlan = $buildSlotPlanMethod.Invoke($null, @($mixedSlotRows, 0, 1, $slotClipboard))
 if ([int]$mixedSlotPlan.GetType().GetProperty('Count').GetValue($mixedSlotPlan) -ne 2) {
     throw 'Character-slot paste must stop where the character changes.'
+}
+
+# ④ 整段本来就等于剪贴板：没有要改的（UI 走"立绘数据相同"提示，不弹窗、不写）
+$sameSlotRows = [System.Activator]::CreateInstance($listType)
+foreach ($unused in @(0, 1)) {
+    $row = [System.Activator]::CreateInstance($rowType, $true)
+    [void]$setMethod.Invoke($row, @('Chara1', 'Xia'))
+    [void]$setMethod.Invoke($row, @('Body1', '4'))
+    [void]$setMethod.Invoke($row, @('Face1', '3'))
+    [void]$setMethod.Invoke($row, @('Adorn1', '0'))
+    [void]$setMethod.Invoke($row, @('Vfx1', '0'))
+    [void]$sameSlotRows.Add($row)
+}
+$sameSlotPlan = $buildSlotPlanMethod.Invoke($null, @($sameSlotRows, 0, 1, $slotClipboard))
+if ([bool]$hasSlotChangeMethod.Invoke($null, @($sameSlotRows, $sameSlotPlan)) -or
+    [int]$applySlotPlanMethod.Invoke($null, @($sameSlotRows, $sameSlotPlan)) -ne 0) {
+    throw 'Character-slot paste must leave an identical range untouched.'
 }
 
 $unsupportedRejected = $false

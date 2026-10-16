@@ -24,6 +24,39 @@ internal static class StoryCharacterSlotService
             string.Equals(row.Get(GetLayerColumn(slotIndex, "Vfx")), clipboard.Vfx, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// 这一位和参照那一份**第一个不一样**的字段（"角色" / "服装" / "表情" / "装饰" / "滤镜"）；
+    /// 五列全一样返回 null。
+    ///
+    /// 连续粘贴靠它给出"为什么停在这一句"—— 范围按整份立绘数据划，
+    /// 停在哪儿必须说清楚是哪一列不同的，否则用户只看到"停"不知道为什么。
+    /// </summary>
+    public static string? DescribeSlotDifference(StoryRow row, int slotIndex, StoryCharacterSlotClipboard reference)
+    {
+        if (!string.Equals(row.Get(GetCharacterColumn(slotIndex)), reference.Character, StringComparison.Ordinal))
+        {
+            return "角色";
+        }
+        if (!string.Equals(row.Get(GetLayerColumn(slotIndex, "Body")), reference.Body, StringComparison.Ordinal))
+        {
+            return "服装";
+        }
+        if (!string.Equals(row.Get(GetLayerColumn(slotIndex, "Face")), reference.Face, StringComparison.Ordinal))
+        {
+            return "表情";
+        }
+        if (!string.Equals(row.Get(GetLayerColumn(slotIndex, "Adorn")), reference.Adorn, StringComparison.Ordinal))
+        {
+            return "装饰";
+        }
+        if (!string.Equals(row.Get(GetLayerColumn(slotIndex, "Vfx")), reference.Vfx, StringComparison.Ordinal))
+        {
+            return "滤镜";
+        }
+
+        return null;
+    }
+
     public static void ApplyClipboard(StoryRow row, int slotIndex, StoryCharacterSlotClipboard clipboard)
     {
         row.Set(GetCharacterColumn(slotIndex), clipboard.Character);
