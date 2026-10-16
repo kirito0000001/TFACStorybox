@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 
 namespace GalExcleTools.Services;
@@ -130,6 +131,40 @@ internal static class WorkspacePathUtility
     public static string GetCharacterFolderPath(AssetLibraryInfo assetLibrary)
     {
         return Path.Combine(assetLibrary.Path, CharacterFolderName);
+    }
+
+    /// <summary>
+    /// 素材库的**分类文件夹名** —— 唯一清单。
+    ///
+    /// 【为什么要有这么一份】建目录（<c>ProjectWorkspaceService.EnsureAssetLibraryCategoryFolders</c>）
+    /// 和同步时读目录（<c>ImageSetService</c> / <c>AudioAssetService</c> 那一串）必须说同一件事，
+    /// 而它们原来**各写一份**：2026-10-14 新加了「道具图片」分类，读的那边加了、建的这边忘了，
+    /// 于是没有道具图片的素材库一同步就炸在
+    /// <c>Directory.EnumerateFiles</c> 的"找不到路径 …\道具图片"上（2026-10-16 用户报的）。
+    /// 现在两边都从这儿取，加分类只改这一处。
+    /// </summary>
+    public static IReadOnlyList<string> AssetLibraryCategoryFolderNames { get; } =
+    [
+        BackgroundFolderName,
+        PropImageFolderName,
+        CharacterFolderName,
+        MusicFolderName,
+        AmbientSoundFolderName,
+        SoundEffectFolderName,
+        FunctionFolderName,
+        CharacterFilterFolderName
+    ];
+
+    /// <summary>展开成磁盘绝对路径（给"确保目录存在"用）。</summary>
+    public static IReadOnlyList<string> GetAssetLibraryCategoryFolderPaths(string assetLibraryPath)
+    {
+        var result = new List<string>(AssetLibraryCategoryFolderNames.Count);
+        foreach (var folderName in AssetLibraryCategoryFolderNames)
+        {
+            result.Add(Path.Combine(assetLibraryPath, folderName));
+        }
+
+        return result;
     }
 
     // GetUnrealBackupFolder 已删除（2026-10-12）：同步前的回退点从 zip 备份

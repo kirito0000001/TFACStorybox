@@ -112,8 +112,20 @@ internal sealed class AudioAssetService
         NormalizeFiles(kind, folderPath);
     }
 
+    /// <summary>
+    /// 列出一个音频分类下的 wav。
+    ///
+    /// 【目录不存在就当空集】和剪贴图那边同一个道理：分类目录是懒建的，
+    /// 还没导入过素材的分类可能没有目录，<c>EnumerateFiles</c> 会直接抛
+    ///（2026-10-16 用户报的同步炸在「道具图片」上就是这个形状）。
+    /// </summary>
     public static List<string> GetFilePaths(string folderPath)
     {
+        if (!Directory.Exists(folderPath))
+        {
+            return [];
+        }
+
         return Directory
             .EnumerateFiles(folderPath, "*.wav")
             .OrderBy(Path.GetFileName)

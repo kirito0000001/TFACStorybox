@@ -368,9 +368,11 @@ if (Test-Path -LiteralPath $assemblyPath) {
             if (-not (Test-Path -LiteralPath $applyResult.BackupPath)) {
                 throw '合并前必须先给章节做一次备份。'
             }
-            $backupMeta = [System.IO.File]::ReadAllText("$($applyResult.BackupPath).meta.json")
-            if ($backupMeta -notmatch '合并章节包前') {
-                throw '那次备份的备注应当写明是"合并章节包前"。'
+            # ⚠️ 别拿正则啃 JSON 原文：序列化器把中文写成了 \uXXXX 转义，
+            # 直接 -match '合并章节包前' 永远匹配不到（这里踩过一次）。解析完再看字段。
+            $backupMeta = Get-Content -Raw -Encoding UTF8 -LiteralPath "$($applyResult.BackupPath).meta.json" | ConvertFrom-Json
+            if ($backupMeta.Note -notmatch '合并章节包前') {
+                throw "那次备份的备注应当写明是「合并章节包前」，实际：$($backupMeta.Note)"
             }
 
             $merged = $repositoryType.GetMethod('Load').Invoke($repository, @($chapter))

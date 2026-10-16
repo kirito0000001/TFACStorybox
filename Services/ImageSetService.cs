@@ -169,8 +169,20 @@ internal sealed class ImageSetService
         }
     }
 
+    /// <summary>
+    /// 列出一个图集分类下的 png。
+    ///
+    /// 【目录不存在就当空集】分类目录是懒建的，"还没有素材的分类"可能压根没有目录 ——
+    /// 直接 <c>EnumerateFiles</c> 会抛"找不到路径"（2026-10-16 用户报的同步炸在「道具图片」上）。
+    /// 口径照 <c>ProjectVoiceAssetService.GetVoiceFilePaths</c>：没有的东西算 0 个，不算错误。
+    /// </summary>
     public static List<string> GetFilePaths(string folderPath)
     {
+        if (!Directory.Exists(folderPath))
+        {
+            return [];
+        }
+
         return Directory
             .EnumerateFiles(folderPath, "*.png")
             .OrderBy(Path.GetFileName)

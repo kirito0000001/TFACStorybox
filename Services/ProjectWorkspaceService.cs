@@ -13,13 +13,9 @@ internal sealed class ProjectWorkspaceService
     private const string ProjectFolderPrefix = "项目-";
     private const string AssetLibraryFolderPrefix = "素材库-";
     private const string ToolsFolderName = "Tools";
-    private const string BackgroundFolderName = "背景图";
-    private const string CharacterFolderName = "立绘";
-    private const string MusicFolderName = "音乐";
-    private const string AmbientSoundFolderName = "环境音";
-    private const string SoundEffectFolderName = "特殊音效";
-    private const string FunctionFolderName = "函数";
-    private const string CharacterFilterFolderName = "角色滤镜";
+    // 分类文件夹名（背景图 / 道具图片 / 立绘 …）不在这里各留一份常量：
+    // 唯一清单是 WorkspacePathUtility.AssetLibraryCategoryFolderNames，
+    // 建目录照着它、同步读目录也照着它 —— 两边各写一份就会漂（2026-10-16 道具图片那件事）。
     private const string ProjectMetaFileName = "project.meta.json";
     private const string AssetLibraryMetaFileName = "asset-library.meta.json";
     private const string ChapterMetaFileName = "chapter.meta.json";
@@ -647,15 +643,20 @@ internal sealed class ProjectWorkspaceService
         }
     }
 
+    /// <summary>
+    /// 把素材库的分类文件夹补齐（缺哪个建哪个，已有的不动）。
+    ///
+    /// 【清单从哪来】<see cref="WorkspacePathUtility.AssetLibraryCategoryFolderNames"/> ——
+    /// 原来这里**另写了一份**七个名字，于是 2026-10-14 新加的「道具图片」只加在了读的那边，
+    /// 建的这边漏了：没有道具图片的素材库一同步就炸在"找不到路径 …\道具图片"上。
+    /// 分类清单现在只有一处，这里只是照着建。
+    /// </summary>
     public static void EnsureAssetLibraryCategoryFolders(string assetLibraryPath)
     {
-        Directory.CreateDirectory(Path.Combine(assetLibraryPath, BackgroundFolderName));
-        Directory.CreateDirectory(Path.Combine(assetLibraryPath, CharacterFolderName));
-        Directory.CreateDirectory(Path.Combine(assetLibraryPath, MusicFolderName));
-        Directory.CreateDirectory(Path.Combine(assetLibraryPath, AmbientSoundFolderName));
-        Directory.CreateDirectory(Path.Combine(assetLibraryPath, SoundEffectFolderName));
-        Directory.CreateDirectory(Path.Combine(assetLibraryPath, FunctionFolderName));
-        Directory.CreateDirectory(Path.Combine(assetLibraryPath, CharacterFilterFolderName));
+        foreach (var folderPath in WorkspacePathUtility.GetAssetLibraryCategoryFolderPaths(assetLibraryPath))
+        {
+            Directory.CreateDirectory(folderPath);
+        }
     }
 
     private static string GetUniqueDirectoryPath(string parentPath, string folderName)

@@ -257,6 +257,15 @@ namespace GalExcleTools
 
         private UnrealSyncChangePlan BuildUnrealSyncChangePlan(UnrealSyncContext context, bool forceFullSync = false)
         {
+            // 读之前先把**工具箱侧**的分类目录补齐。
+            //
+            // 分类目录是懒建的（建库 / 导入素材时才建），所以"还没有素材的分类"根本没有目录；
+            // 而下面每一个枚举都假设目录存在。2026-10-16 用户报的那条
+            // 「找不到路径 …\素材库-白恋-…\道具图片」就是这么来的 —— 道具图片是新增分类，
+            // 当时建目录的清单里漏了它，检测差异走到这里直接抛。
+            // 放在这里是因为"检测差异"和"完整同步"两条路都从这里读素材库（各自唯一的那次）。
+            ProjectWorkspaceService.EnsureAssetLibraryCategoryFolders(context.AssetLibrary.Path);
+
             var characters = GetCharactersForAssetLibrary(context.AssetLibrary);
             var allStoryTables = BuildStoryTableSyncEntries(context);
             var assetIndexTableCacheFolder = Path.Combine(context.Project.Path, ToolsFolderName, UnrealAssetIndexTablesFolderName);
