@@ -256,15 +256,27 @@ Require-SourcePattern "MainWindow.xaml" 'StoryInspectorStateTabButton[\s\S]*?Hor
 Require-SourcePattern "MainWindow.xaml" 'HasCurrentTransitionFunction[\s\S]*?Text="转场"' "Transition state must appear only when the current row explicitly contains a transition function."
 Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryInspectorTabButton_Click" 'StorySidePanelContent\.Visibility[\s\S]*?StoryInspectorToolsScrollViewer\.Visibility' "Story inspector tabs must switch between state and tools without a shared long scroll."
 Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryEditorPage_PreviewKeyDown" 'IsControlKeyDown\(\)[\s\S]*?VirtualKey\.Z[\s\S]*?UndoStoryEditorOperation\(\)[\s\S]*?e\.Handled\s*=\s*true' "The story editor preview key handler must route Ctrl+Z to the unified undo stack."
-Require-SourcePattern "Models/UpdateModels.cs" 'UpdateSource[\s\S]*?Gitee[\s\S]*?GitHub[\s\S]*?UpdateManifest[\s\S]*?sha256[\s\S]*?UpdatePackageManifest' "The toolbox update models must describe Gitee/GitHub sources, hashes, and package identity."
-Require-SourcePattern "Services/UpdateService.cs" 'GiteeReleaseApiUrl\s*=\s*"https://gitee\.com/api/v5/repos/xiaojie578/TFACStorybox/releases"' "The update service must target the TFACStorybox Gitee releases API."
-Require-MethodPattern "Services/UpdateService.cs" "CheckAsync" 'UpdateSource\.Gitee[\s\S]*?UpdateSource\.GitHub' "Update checks must try Gitee before the GitHub fallback."
-Require-MethodPattern "Services/UpdateService.cs" "DownloadAndVerifyAsync" 'ValidateDownloadedFileAsync' "Downloaded updates must pass the shared validation pipeline before installation."
-Require-MethodPattern "Services/UpdateService.cs" "ValidateDownloadedFileAsync" 'SHA256[\s\S]*?ValidatePackage' "Downloaded updates must pass SHA-256 and package identity validation."
-Require-MethodPattern "Services/UpdateService.cs" "LaunchUpdaterAsync" '热更新覆盖\.ps1[\s\S]*?Environment\.ProcessId' "Installing an update must hand off to an external updater that waits for the current process."
-Require-SourcePattern "MainWindow.Update.cs" '#if DEBUG[\s\S]*?CheckUpdateOnStartupAsync[\s\S]*?return;' "Debug builds must skip automatic startup updates."
-Require-MethodPattern "MainWindow.Update.cs" "PromptAndInstallUpdateAsync" '#if DEBUG[\s\S]*?开发版[\s\S]*?return;' "Debug builds must never overwrite their development output through the in-app updater."
-Require-SourcePattern "MainWindow.xaml" 'Header="应用更新"[\s\S]*?自动检查更新[\s\S]*?更新通道[\s\S]*?检查更新[\s\S]*?测试连接' "The settings page must expose update controls and status."
+# ── 热更新（2026-10-16 重新对锚）─────────────────────────────────────────────
+# 这块被**整体重做过**：`Services/UpdateService.cs` 拆成了 `Services/Update/` 一整套
+# （Gitee 客户端 / 通道选择 / 下载器 / 校验器 / 覆盖计划 / 启动交接 / 白名单），
+# 设置页也从 MainWindow.xaml 挪进了 Controls/UpdateSettingsPanel.xaml。
+# 老的那几条钉的是"Gitee + GitHub 双源 + 一个 UpdateService 类"那套，按设计已经作废：
+# **现在只有 Gitee 一个更新源**（模型里的原话：设置里存 URL 只会留下"settings 里还是旧地址"的坑），
+# GitHub 那半不存在了 —— 所以这里不再要求"先 Gitee 后 GitHub"。
+Require-SourcePattern "Models/UpdateModels.cs" 'GiteeRepository[\s\S]*?ApiRoot[\s\S]*?ReleasesApiUrl[\s\S]*?ToolboxUpdateManifestDto[\s\S]*?Sha256[\s\S]*?ToolboxPackageManifestDto[\s\S]*?ToolboxStableKey[\s\S]*?EntryExe' "The toolbox update models must describe the Gitee repository, the remote manifest with its SHA-256, and the in-package identity."
+Require-SourcePattern "Models/UpdateModels.cs" 'new\("xiaojie578", "TFACStorybox"\)[\s\S]*?gitee\.com/api/v5/repos/\{Owner\}/\{Name\}' "The update repository coordinates must stay the TFACStorybox Gitee repo (the only source)."
+Require-SourcePattern "Services/Update/GiteeReleaseClient.cs" 'ReleasesApiUrl\}\?per_page=100' "The release list must be fetched with per_page=100, otherwise the second page is unreachable."
+Require-SourcePattern "Services/Update/UpdateService.cs" 'CheckForUpdateAsync[\s\S]*?UpdateChannelSelector\.SelectRelease\(releases, request\.Channel\)' "Release selection must go through the channel selector so stable never picks a prerelease."
+Require-SourcePattern "Services/Update/UpdateDownloader.cs" 'NormalizeSha256\(payload\.Sha256\)[\s\S]*?StringComparison\.Ordinal' "Every downloaded payload must be compared against the manifest SHA-256 exactly."
+Require-SourcePattern "Services/Update/UpdatePackageValidator.cs" 'ToolboxStableKey[\s\S]*?UpdateVersion\.CompareSemantic\(manifest\.Version, expectedVersion\)[\s\S]*?expectedRuntime' "The package validator must verify identity, version and runtime before anything is applied."
+Require-SourcePattern "Services/Update/UpdateLaunchService.cs" 'Environment\.ProcessId[\s\S]*?"-InstallDir", install[\s\S]*?"-ExpectedSha256", plan\.Sha256' "Installing must hand off to the external updater with our process id and the expected hash."
+Require-SourcePattern "Services/Update/UpdateLaunchService.cs" 'ScriptFileName = "热更新覆盖\.ps1"' "The updater handoff must run the 热更新覆盖 script."
+# 「不许乱覆盖」这条换了个判据：老的锚点是"Debug 版绝不覆盖开发产物"，
+# 而新实现里 Debug 只挡**启动时的自动检查**（手动点「下载并更新」不受影响，代码注释明写）。
+# 现在真正的护栏是**白名单**：覆盖计划只处理 update-whitelist.json 允许镜像的路径。
+Require-SourcePattern "Services/Update/UpdateApplyPlan.cs" 'IsMirrored\(path\)' "The apply plan must decide what to touch from the whitelist, never from the package alone."
+Require-SourcePattern "MainWindow.Update.cs" '#if DEBUG[\s\S]*?await Task\.CompletedTask;[\s\S]*?#else[\s\S]*?CheckOnStartupAsync\(\)' "Debug builds must skip the automatic startup update (a Release package would be laid over bin\)."
+Require-SourcePattern "Controls/UpdateSettingsPanel.xaml" 'Text="更新通道"[\s\S]*?Content="检查更新"[\s\S]*?Content="下载并更新"[\s\S]*?Content="测试 Gitee 连接"' "The settings page must expose the update channel and the check/download/test actions."
 Require-SourcePattern "Scripts/Package-App.ps1" 'update-package\.json' "Packaging must embed an update-package identity manifest."
 Require-SourcePattern "Scripts/Package-App.ps1" 'toolbox-update\.json' "Packaging must generate the remote update manifest."
 Require-SourcePattern "Scripts/Package-App.ps1" 'Get-FileHash[\s\S]*?SHA256' "Packaging must generate a SHA-256 for the update ZIP."
