@@ -33,6 +33,23 @@ internal static class StoryCharacterSlotService
         row.Set(GetLayerColumn(slotIndex, "Vfx"), clipboard.Vfx);
     }
 
+    /// <summary>
+    /// 把剪贴板那一份写进这一位，返回**是不是真的改了**。
+    ///
+    /// 连续粘贴要按"实际改动"报数：同角色、只是服装/表情不同是这功能最常见的用法，
+    /// 那时候角色列没变、能变的只有图层 —— 不返回这个的话，"共修改 N 句"会虚报。
+    /// </summary>
+    public static bool ApplyClipboardIfChanged(StoryRow row, int slotIndex, StoryCharacterSlotClipboard clipboard)
+    {
+        if (MatchesClipboard(row, slotIndex, clipboard))
+        {
+            return false;
+        }
+
+        ApplyClipboard(row, slotIndex, clipboard);
+        return true;
+    }
+
     public static bool IsEmpty(StoryRow row, int slotIndex)
     {
         return string.IsNullOrWhiteSpace(row.Get(GetCharacterColumn(slotIndex))) &&

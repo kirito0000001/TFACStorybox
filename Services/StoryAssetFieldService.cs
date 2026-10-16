@@ -296,6 +296,113 @@ internal static class StoryAssetFieldService
         return ApplyForwardContiguousPlan(rows, plan);
     }
 
+    /// <summary>
+    /// 立绘位（角色 + 服装/表情/装饰/滤镜）的连续粘贴计划：从起点往后，**只要还是同一个角色**就算这一段。
+    ///
+    /// 【为什么锚在角色列上，而不是锚在"整份立绘数据"上】
+    /// 锚在整份数据上的话，第一步"当前这一位 == 剪贴板"就会成立 → 范围永远只有当前这一句。
+    /// 而 Ctrl+V 真正的用法是"这一位长这样，后面同角色的几句也都刷成这样"，
+    /// 变的往往只是服装/表情 —— 所以范围按角色划，载荷才是整份数据。
+    /// </summary>
+    public static StoryCharacterSlotReplacementPlan BuildForwardContiguousCharacterSlotPlan(
+        IReadOnlyList<StoryRow> rows,
+        int startIndex,
+        int slotIndex,
+        StoryCharacterSlotClipboard clipboard)
+    {
+        if (startIndex < 0 || startIndex >= rows.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(startIndex));
+        }
+        if (slotIndex is < 0 or > 5)
+        {
+            throw new ArgumentOutOfRangeException(nameof(slotIndex));
+        }
+
+        var characterFieldName = StoryCharacterSlotService.GetCharacterColumn(slotIndex);
+        var originalCharacter = rows[startIndex].Get(characterFieldName);
+        var endIndex = startIndex;
+        int? stoppingIndex = null;
+        for (var index = startIndex; index < rows.Count; index++)
+        {
+            if (!string.Equals(
+                    rows[index].Get(characterFieldName),
+                    originalCharacter,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                stoppingIndex = index;
+                break;
+            }
+
+            endIndex = index;
+        }
+
+        return new StoryCharacterSlotReplacementPlan(
+            slotIndex,
+            characterFieldName,
+            originalCharacter,
+            clipboard,
+            startIndex,
+            endIndex,
+            endIndex - startIndex + 1,
+            stoppingIndex is null
+                ? StoryAssetReplacementStopReason.EndOfChapter
+                : StoryAssetReplacementStopReason.DifferentContext,
+            stoppingIndex);
+    }
+
+    /// <summary>这一份计划里有没有**真正会被改到**的句（整段都和剪贴板一样就是没有）。</summary>
+    public static bool HasCharacterSlotChange(
+        IReadOnlyList<StoryRow> rows,
+        StoryCharacterSlotReplacementPlan plan)
+    {
+        for (var index = plan.StartIndex; index <= plan.EndIndex; index++)
+        {
+            if (!StoryCharacterSlotService.MatchesClipboard(rows[index], plan.SlotIndex, plan.Clipboard))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static int ApplyForwardContiguousCharacterSlotPlan(
+        IReadOnlyList<StoryRow> rows,
+        StoryCharacterSlotReplacementPlan plan)
+    {
+        if (plan.StartIndex < 0 ||
+            plan.EndIndex < plan.StartIndex ||
+            plan.EndIndex >= rows.Count ||
+            plan.Count != plan.EndIndex - plan.StartIndex + 1)
+        {
+            throw new InvalidOperationException("连续粘贴立绘的范围无效。");
+        }
+
+        // 建计划和落地之间可能切了句/改了角色 —— 和另外两套一样，整段重校验一遍再写。
+        for (var index = plan.StartIndex; index <= plan.EndIndex; index++)
+        {
+            if (!string.Equals(
+                    rows[index].Get(plan.CharacterFieldName),
+                    plan.OriginalCharacter,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("连续粘贴立绘的范围已经变化，请重新复制。");
+            }
+        }
+
+        var changedCount = 0;
+        for (var index = plan.StartIndex; index <= plan.EndIndex; index++)
+        {
+            if (StoryCharacterSlotService.ApplyClipboardIfChanged(rows[index], plan.SlotIndex, plan.Clipboard))
+            {
+                changedCount++;
+            }
+        }
+
+        return changedCount;
+    }
+
     public static StoryAssetClipboard CreateClipboard(StoryRow row, string fieldName)
     {
         return new StoryAssetClipboard(fieldName, row.Get(fieldName));
@@ -418,6 +525,21 @@ internal sealed record StoryAssetReplacementPlan(
     public string? SecondaryContinuityFieldName { get; init; }
     public string? OriginalSecondaryContinuityValue { get; init; }
 }
+
+/// <summary>
+/// 整位立绘（角色 + 服装/表情/装饰/滤镜）的连续粘贴计划。
+/// 范围按"角色没变"划，<see cref="Clipboard"/> 是剪贴板那一整份，<see cref="Count"/> 是范围内的句数。
+/// </summary>
+internal sealed record StoryCharacterSlotReplacementPlan(
+    int SlotIndex,
+    string CharacterFieldName,
+    string OriginalCharacter,
+    StoryCharacterSlotClipboard Clipboard,
+    int StartIndex,
+    int EndIndex,
+    int Count,
+    StoryAssetReplacementStopReason StopReason,
+    int? StoppingIndex);
 
 internal sealed record StoryValueReplacementPlan(
     string FieldName,

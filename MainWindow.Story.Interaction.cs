@@ -326,7 +326,7 @@ namespace GalExcleTools
                 return;
             }
 
-            // 粘贴一律弹窗让用户自己选（连续更换 / 只换一句）——判据在 ConfirmStoryValueReplacementAsync。
+            // 粘贴一律弹窗让用户自己选（连续粘贴 / 只粘这一句）。
             _alwaysAskStoryReplacementConfirm = true;
 
             if (_storyCharacterSlotClipboard is null)
@@ -336,64 +336,84 @@ namespace GalExcleTools
             }
 
             var row = _storyRows[_currentStoryRowIndex];
-            if (StoryCharacterSlotService.MatchesClipboard(row, slotIndex, _storyCharacterSlotClipboard))
+            var slotDisplayName = StoryCharacterSlotService.GetSlotDisplayName(slotIndex);
+            var characterField = StoryCharacterSlotService.GetCharacterColumn(slotIndex);
+
+            // 和「更换角色」走同一条路（MainWindow.Story.Assets.cs 那套三段式）：
+            // 先建计划 → 问一句"要不要连续到后面" → 再落地。
+            // ⚠️ 顺序不能反：先改当前句再问的话，「取消」就退不回去了。
+            //
+            // 【2026-10-16 修】范围锚在**角色列**上、载荷是**整份立绘数据**。
+            // 以前是"角色列的计划 + 只有当前句写图层"，于是同角色、只是服装/表情不同时
+            // （这功能最常见的用法）角色列根本没变化 → 计划 0 句 → 只有当前句被改，
+            // 后面一句都不动，就是用户报的「Ctrl+V 无法连续更改」。
+            var replacementPlan = StoryAssetFieldService.BuildForwardContiguousCharacterSlotPlan(
+                _storyRows,
+                _currentStoryRowIndex,
+                slotIndex,
+                _storyCharacterSlotClipboard);
+
+            if (IsStoryCharacterSlotPasteNoop(replacementPlan))
             {
                 return;
             }
 
-            // 和「更换角色」走同一条路（MainWindow.Story.Assets.cs 那套三段式）：
-            // 先问一句"要不要连续到后面"，再落地。
-            // ⚠️ 顺序不能反：先改当前句再问的话，「取消」就退不回去了。
-            var slotDisplayName = StoryCharacterSlotService.GetSlotDisplayName(slotIndex);
-            var displayName = $"{slotDisplayName}角色";
-            var characterField = StoryCharacterSlotService.GetCharacterColumn(slotIndex);
-            var replacementPlan = StoryAssetFieldService.BuildForwardContiguousValuePlan(
-                _storyRows,
-                _currentStoryRowIndex,
-                characterField,
-                _storyCharacterSlotClipboard.Character);
-            var replacementChoice = await ConfirmStoryValueReplacementAsync(
-                replacementPlan,
-                displayName,
-                value => ResolveStoryCharacter(value)?.Name ?? value);
+            var replacementChoice = await ConfirmStoryCharacterSlotReplacementAsync(replacementPlan, slotDisplayName);
             if (replacementChoice is DialogResultKind.None or DialogResultKind.Cancel)
             {
+                // 关掉了（右键 / Esc / 右上角 X）—— 什么都不做，和以前"取消"一个意思。
                 return;
             }
 
             if (replacementChoice == DialogResultKind.Secondary)
             {
-                // 「只换一句」：把范围压成当前这一句，下面那段一行都不用改。
+                // 「只粘这一句」：把范围压成当前这一句，下面那段一行都不用改。
                 replacementPlan = replacementPlan with
                 {
                     EndIndex = replacementPlan.StartIndex,
                     Count = 1
                 };
+                if (IsStoryCharacterSlotPasteNoop(replacementPlan))
+                {
+                    return;
+                }
             }
 
             CaptureStoryUndoState(replacementPlan.Count > 1
-                ? $"连续粘贴{displayName}立绘数据"
+                ? $"连续粘贴{slotDisplayName}立绘数据"
                 : $"粘贴{slotDisplayName}立绘数据");
-            var changedCount = StoryAssetFieldService.ApplyForwardContiguousValuePlan(_storyRows, replacementPlan);
-            // 换了角色，后面那些句已有的图层分层就不一定配得上了 —— 和「连续更换角色」同一个口径：清掉。
-            for (var index = replacementPlan.StartIndex; index <= replacementPlan.EndIndex; index++)
-            {
-                StoryCharacterSlotService.ResetLayerColumns(_storyRows[index], slotIndex);
-            }
-
-            // 当前这一句还要按剪贴板把**图层**一起写上（这正是"粘贴立绘数据"和"只换角色"的区别）；
-            // 连续段里的其它句只跟角色，图层留给归一逻辑收拾。
-            StoryCharacterSlotService.ApplyClipboard(row, slotIndex, _storyCharacterSlotClipboard);
-            NormalizeStoryDetachedCharacterLayers(row);
+            var changedCount = StoryAssetFieldService.ApplyForwardContiguousCharacterSlotPlan(_storyRows, replacementPlan);
+            // 说话人那一位的下拉框跟着走；整段都按剪贴板写过了，图层不会再留旧的。
             SyncStorySpeakerTextIfNeeded(slotIndex, row.Get(characterField));
+            NormalizeStoryDetachedCharacterLayers(row);
             QueueCurrentStoryDocumentSave();
             ShowStoryStatus(
                 InfoBarSeverity.Success,
-                changedCount > 1 ? $"{displayName}已连续粘贴" : "已粘贴立绘数据",
-                changedCount > 1
+                replacementPlan.Count > 1 ? $"{slotDisplayName}立绘已连续粘贴" : "已粘贴立绘数据",
+                replacementPlan.Count > 1
                     ? $"共修改 {changedCount} 句（第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句）。"
                     : $"{slotDisplayName}：{StoryCharacterSlotService.FormatClipboard(_storyCharacterSlotClipboard)}");
             await RefreshStoryPreviewAsync();
+        }
+
+        /// <summary>
+        /// 这一段本来就等于剪贴板那一份：不弹窗、不写、不进撤回栈，但**要报一句**。
+        ///
+        /// 以前这里是静默 <c>return</c> —— 用户按了 Ctrl+V 看着什么都没发生，只能报"不生效"。
+        /// 现在把话说清楚：要么告诉他一整段都已经是这份数据了。
+        /// </summary>
+        private bool IsStoryCharacterSlotPasteNoop(StoryCharacterSlotReplacementPlan replacementPlan)
+        {
+            if (StoryAssetFieldService.HasCharacterSlotChange(_storyRows, replacementPlan))
+            {
+                return false;
+            }
+
+            ShowStoryStatus(
+                InfoBarSeverity.Informational,
+                "立绘数据相同",
+                $"第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句的{StoryCharacterSlotService.GetSlotDisplayName(replacementPlan.SlotIndex)}已经是“{StoryCharacterSlotService.FormatClipboard(replacementPlan.Clipboard)}”，没有要改的。");
+            return true;
         }
 
         private void CopyStoryAssetField(string fieldName)

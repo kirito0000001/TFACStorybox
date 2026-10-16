@@ -766,6 +766,33 @@ namespace GalExcleTools
             return result;
         }
 
+        /// <summary>
+        /// 「连续粘贴立绘数据」的三选一确认：整段 / 只粘当前这一句 / 关掉（右键、Esc）什么都不做。
+        ///
+        /// 和上面两个确认框的区别只有两处：载荷是**整份立绘数据**（角色 + 服装/表情/装饰/滤镜），
+        /// 停止条件是**角色变了**；另外这条路**每次都问**（用户 2026-10-16 的要求），
+        /// 所以这里没有"范围内只有一句就不问"的短路。
+        /// </summary>
+        private async Task<DialogResultKind> ConfirmStoryCharacterSlotReplacementAsync(
+            StoryCharacterSlotReplacementPlan replacementPlan,
+            string slotDisplayName)
+        {
+            var stopText = replacementPlan.StopReason switch
+            {
+                StoryAssetReplacementStopReason.DifferentContext =>
+                    $"到第 {replacementPlan.StoppingIndex!.Value + 1} 句角色发生变化后停止。",
+                StoryAssetReplacementStopReason.EndOfChapter => "连续范围一直到本章最后一句。",
+                _ => string.Empty
+            };
+            var result = await _dialogService.ShowAsync(new DialogRequest(
+                "连续粘贴立绘数据",
+                $"将第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句，共 {replacementPlan.Count} 句的{slotDisplayName}立绘数据粘贴为“{StoryCharacterSlotService.FormatClipboard(replacementPlan.Clipboard)}”。\n{stopText}\n\n也可以只粘当前这一句（第 {replacementPlan.StartIndex + 1} 句）。",
+                "连续粘贴",
+                CloseButtonText: string.Empty,
+                SecondaryButtonText: "只粘这一句"));
+            return result;
+        }
+
         private static string FormatStoryAssetChoiceValue(
             IReadOnlyList<StoryAssetChoice> choices,
             int index)
