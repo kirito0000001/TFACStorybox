@@ -440,7 +440,7 @@ namespace GalExcleTools
                 return;
             }
 
-            // 粘贴一律弹窗让用户自己选（连续更换 / 只换一句）——判据在 ConfirmStoryValueReplacementAsync。
+            // 粘贴一律弹窗让用户自己选（连续更换 / 只换一句）。
             _alwaysAskStoryReplacementConfirm = true;
 
             if (_storyAssetClipboard is null)
@@ -455,23 +455,44 @@ namespace GalExcleTools
                 return;
             }
 
+            var displayName = StoryAssetFieldService.GetDisplayName(fieldName);
             var row = _storyRows[_currentStoryRowIndex];
             if (StoryAssetFieldService.MatchesValue(row, fieldName, _storyAssetClipboard))
             {
+                // 和当前这一句一样 = 这一段本来就是这个号，没有要改的。说一句，别静默吞掉。
+                ShowStoryStatus(
+                    InfoBarSeverity.Informational,
+                    "素材相同",
+                    $"这一句的{displayName}已经是 {_storyAssetClipboard.Value} 了。");
                 return;
             }
 
             // 同样走「连续更换」那一套（和「更换背景图 / BGM / 环境音」共用确认框与计划）。
-            var displayName = StoryAssetFieldService.GetDisplayName(fieldName);
-            var replacementPlan = StoryAssetFieldService.BuildForwardContiguousValuePlan(
+            //
+            // 【2026-10-16 修】这三个字段是**索引列**，必须用索引计划（BuildForwardContiguousPlan）。
+            // 以前这里调的是值计划（BuildForwardContiguousValuePlan），而值计划的开头是
+            // ValidateCharacterField —— 只认 TalkChar / Chara1-5，喂 BGindex 会当场抛
+            // 「角色字段不支持向后连续修改」。它挂在 async void 的 StoryEditorPage_KeyDown 下、
+            // 没人接这个异常，App 那边的 UnhandledException 又只写日志不设 Handled，
+            // 所以素材栏 Ctrl+V 是**必崩**的一条（悬停那三个按钮就会把焦点交回页面，按得到）。
+            var replacementPlan = StoryAssetFieldService.BuildForwardContiguousPlan(
                 _storyRows,
                 _currentStoryRowIndex,
                 fieldName,
-                _storyAssetClipboard.Value);
-            var replacementChoice = await ConfirmStoryValueReplacementAsync(
+                ParseInt(_storyAssetClipboard.Value));
+            if (replacementPlan.Count == 0)
+            {
+                ShowStoryStatus(
+                    InfoBarSeverity.Informational,
+                    "素材相同",
+                    $"这一句的{displayName}已经是 {FormatStoryAssetFieldValue(fieldName, ParseInt(_storyAssetClipboard.Value))} 了。");
+                return;
+            }
+
+            var replacementChoice = await ConfirmStoryAssetReplacementAsync(
                 replacementPlan,
                 displayName,
-                value => value);
+                index => FormatStoryAssetFieldValue(fieldName, index));
             if (replacementChoice is DialogResultKind.None or DialogResultKind.Cancel)
             {
                 return;
@@ -487,7 +508,7 @@ namespace GalExcleTools
             }
 
             CaptureStoryUndoState(replacementPlan.Count > 1 ? $"连续粘贴{displayName}" : $"粘贴{displayName}");
-            var changedCount = StoryAssetFieldService.ApplyForwardContiguousValuePlan(_storyRows, replacementPlan);
+            var changedCount = StoryAssetFieldService.ApplyForwardContiguousPlan(_storyRows, replacementPlan);
             QueueCurrentStoryDocumentSave();
             UpdateStoryToolbarCurrentInfo();
             ShowStoryStatus(
@@ -495,7 +516,7 @@ namespace GalExcleTools
                 changedCount > 1 ? $"{displayName}已连续粘贴" : "已粘贴基础素材",
                 changedCount > 1
                     ? $"共修改 {changedCount} 句（第 {replacementPlan.StartIndex + 1}-{replacementPlan.EndIndex + 1} 句）。"
-                    : $"{displayName}：{_storyAssetClipboard.Value}");
+                    : $"{displayName}：{FormatStoryAssetFieldValue(fieldName, ParseInt(_storyAssetClipboard.Value))}");
             if (fieldName == "BGM")
             {
                 await ApplyCurrentStoryRowMediaAndFunctionAsync();
@@ -506,6 +527,24 @@ namespace GalExcleTools
             }
 
             await RefreshStoryPreviewAsync();
+        }
+
+        /// <summary>
+        /// 素材索引在弹窗和提示里怎么显示（"13: bg_room" 这种）；查不到名字就退回号。
+        /// 候选表就是「更换背景图 / BGM / 环境音」那三张，和更换那条路保持同一个口径。
+        /// </summary>
+        private string FormatStoryAssetFieldValue(string fieldName, int index)
+        {
+            var choices = fieldName switch
+            {
+                "BGindex" => GetStoryBackgroundChoices(),
+                "BGM" => GetStoryBgmChoices(),
+                "Scene" => GetStorySceneChoices(),
+                _ => null
+            };
+            return choices is null
+                ? index.ToString(CultureInfo.InvariantCulture)
+                : FormatStoryAssetChoiceValue(choices, index);
         }
 
         private async Task CycleStoryCharacterLayerAsync(int slotIndex, CharacterLayerKind layerKind, int delta)
