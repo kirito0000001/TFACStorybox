@@ -326,6 +326,9 @@ namespace GalExcleTools
                 return;
             }
 
+            // 粘贴一律弹窗让用户自己选（连续更换 / 只换一句）——判据在 ConfirmStoryValueReplacementAsync。
+            _alwaysAskStoryReplacementConfirm = true;
+
             if (_storyCharacterSlotClipboard is null)
             {
                 ShowStoryStatus(InfoBarSeverity.Warning, "没有可粘贴数据", "先悬停一个立绘位并按 Ctrl+C 复制。");
@@ -416,6 +419,9 @@ namespace GalExcleTools
             {
                 return;
             }
+
+            // 粘贴一律弹窗让用户自己选（连续更换 / 只换一句）——判据在 ConfirmStoryValueReplacementAsync。
+            _alwaysAskStoryReplacementConfirm = true;
 
             if (_storyAssetClipboard is null)
             {

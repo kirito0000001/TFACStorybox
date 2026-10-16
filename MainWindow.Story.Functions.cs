@@ -704,12 +704,18 @@ namespace GalExcleTools
         /// 现在关掉键传空串：按项目的规范，弹窗可以**右键关闭、Esc 关闭**，
         /// 不需要可视的关闭键，而且有撤回兜底。
         /// </summary>
+        /// <summary>
+        /// 粘贴那条路要不要每次都问（判据在下面两个确认方法的开头）。
+        /// 用户 2026-10-16 的要求：Ctrl+V 之后要能自己选连续更换还是只换一句。
+        /// </summary>
+        private bool _alwaysAskStoryReplacementConfirm;
+
         private async Task<DialogResultKind> ConfirmStoryAssetReplacementAsync(
             StoryAssetReplacementPlan replacementPlan,
             string displayName,
             Func<int, string> formatValue)
         {
-            if (replacementPlan.Count <= 1)
+            if (!_alwaysAskStoryReplacementConfirm && replacementPlan.Count <= 1)
             {
                 // 范围内本来就只有一句，"只换一张"和"连续更换"是同一件事，不必问。
                 return DialogResultKind.Primary;
@@ -739,7 +745,7 @@ namespace GalExcleTools
             string displayName,
             Func<string, string> formatValue)
         {
-            if (replacementPlan.Count <= 1)
+            if (!_alwaysAskStoryReplacementConfirm && replacementPlan.Count <= 1)
             {
                 return DialogResultKind.Primary;
             }
