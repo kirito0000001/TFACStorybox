@@ -261,6 +261,12 @@ Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryEditorPage_Preview
 # 表现就是"按 Tab 没清空立绘，反而跳焦点"（用户 2026-10-16 报的）。所以它必须在隧道层。
 Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryEditorPage_PreviewKeyDown" 'VirtualKey\.Tab[\s\S]*?ClearStoryCharacterSlot\(hoveredSlotIndex\)[\s\S]*?e\.Handled = true' "Tab must clear the hovered character slot from the tunneling handler."
 Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryEditorPage_KeyDown" 'case Windows\.System\.VirtualKey\.Tab' "The dead Tab case must not come back to the bubbling handler." -NotMatch
+# 快捷键的 KeyDown 挂在 StoryEditorPage 上 —— 焦点不在页面上就什么都收不到。
+# 焦点会被弹窗关闭、Shift+Tab、切窗口带走，而鼠标可能一直没离开立绘位，
+# 所以"鼠标压在立绘上"这条路上，焦点必须**每次确认**，不能只在换位那一下抢
+#（用户 2026-10-16 报的「有时候鼠标在立绘上却触发不了快捷键」）。
+Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryCharacterSlot_PointerMoved" 'EnsureStoryEditorFocus\(\)' "Hovering a portrait slot must re-assert editor focus on every move, not only when the hovered slot changes."
+Require-MethodPattern "MainWindow.Story.Interaction.cs" "StoryCharacterSlot_PointerMoved" '_hoveredStoryCharacterSlotIndex != slotIndex' "Hovering must not gate the editor focus grab on the hovered slot index changing." -NotMatch
 # ── 热更新（2026-10-16 重新对锚）─────────────────────────────────────────────
 # 这块被**整体重做过**：`Services/UpdateService.cs` 拆成了 `Services/Update/` 一整套
 # （Gitee 客户端 / 通道选择 / 下载器 / 校验器 / 覆盖计划 / 启动交接 / 白名单），

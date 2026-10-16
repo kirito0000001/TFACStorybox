@@ -73,6 +73,23 @@ namespace GalExcleTools
         }
 
         /// <summary>
+        /// 让焦点回到剧情编辑器页面 —— 整套快捷键的 KeyDown 挂在页面上，
+        /// 焦点不在页面上时（弹窗关闭、Shift+Tab、切出去再切回来…）按什么都没反应。
+        ///
+        /// 已经在页面上就什么都不做：PointerMoved 触发很频繁，
+        /// 别在鼠标滑动时反复调 Focus()。
+        /// </summary>
+        private void EnsureStoryEditorFocus()
+        {
+            if (ReferenceEquals(FocusManager.GetFocusedElement(StoryEditorPage.XamlRoot), StoryEditorPage))
+            {
+                return;
+            }
+
+            StoryEditorPage.Focus(FocusState.Programmatic);
+        }
+
+        /// <summary>
         /// 鼠标移到某个立绘位上（含说话人那个，它的 Tag 是 0）。
         ///
         /// ⚠️ 挂的是 <c>PointerMoved</c>，**不是** <c>Pointer&#69;ntered</c>。
@@ -84,17 +101,22 @@ namespace GalExcleTools
         /// PointerMoved 只在鼠标**真的动了**才触发，切句时鼠标没动就不会触发；
         /// 而快捷键照样能用 —— 鼠标移到立绘上时这里才设 hover 并聚焦。
         ///
-        /// 另外加了"只在目标变了才动"的守卫：PointerMoved 触发很频繁，
-        /// 不加守卫的话鼠标在同一个位上滑动也会反复调 Focus()。
+        /// 【2026-10-16 修】焦点改成**每次确认**，不再只在"换了个立绘位"那一下抢。
+        /// 以前是 <c>_hoveredStoryCharacterSlotIndex != slotIndex</c> 才 Focus，于是只要
+        /// 焦点被别的东西带走（弹窗关闭、Shift+Tab、切出窗口再切回、上一位的
+        /// PointerExited 没送到而索引还是旧值…），鼠标明明压在立绘上，快捷键却一直按不动 ——
+        /// 就是「有时候鼠标在立绘上却触发不了快捷键」那条。
+        /// 抢焦点本身仍然只在"焦点不在页面上"时才做（见 EnsureStoryEditorFocus），
+        /// 所以鼠标在同一个位上滑动不会反复调 Focus()。
         /// </summary>
         private void StoryCharacterSlot_PointerMoved(object sender, PointerRoutedEventArgs e)
         {
             if (sender is Border slot)
             {
-                if (slot.Tag is int slotIndex && _hoveredStoryCharacterSlotIndex != slotIndex)
+                if (slot.Tag is int slotIndex)
                 {
                     _hoveredStoryCharacterSlotIndex = slotIndex;
-                    StoryEditorPage.Focus(FocusState.Programmatic);
+                    EnsureStoryEditorFocus();
                 }
 
                 // 高亮是幂等的，但 PointerMoved 触发频繁 —— 每次都 new 一个 Brush 是白扔对象。
@@ -130,7 +152,8 @@ namespace GalExcleTools
             {
                 _hoveredStoryAssetFieldName = fieldName;
                 ToolTipService.SetToolTip(element, "Ctrl+C / Ctrl+V：复制或粘贴当前素材");
-                StoryEditorPage.Focus(FocusState.Programmatic);
+                // 和立绘位那条共用同一个口径：焦点不在页面上就抢回来（在页面上则不动）。
+                EnsureStoryEditorFocus();
             }
         }
 
