@@ -1099,8 +1099,8 @@
 
                     <ScrollViewer
                         x:Name="AssetLibraryDetailScrollViewer"
-                        Grid.Row="1"
-                        Visibility="Collapsed"
+                        Grid.Row="0"
+                        Visibility="Visible"
                         VerticalScrollBarVisibility="Auto"
                         PointerWheelChanged="AssetLibraryDetailScrollViewer_PointerWheelChanged">
                         <StackPanel Spacing="10">
