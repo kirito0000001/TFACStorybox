@@ -103,8 +103,7 @@ namespace GalExcleTools
                 assetLabels.NewLabels,
                 orderedPaths.Count);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshBackgroundImageCards(_currentAssetLibrary);
-            // 新骨架那份也要重铺，否则拖完顺序后浏览器里的卡片还是旧顺序。
+            // 只重铺新骨架那一份：旧网格（BackgroundImagesGridView）正在按文档第二节退休。
             if (AssetBrowserHost is not null)
             {
                 await FillAssetBrowserWithBackgroundsAsync(AssetBrowserHost, _currentAssetLibrary);

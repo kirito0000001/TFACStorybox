@@ -61,8 +61,7 @@ public sealed partial class MainWindow
             filters.Count);
 
         TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-        // 两个界面都要重铺：旧的 Expander 网格 + 新骨架的浏览器。
-        LoadCharacterFilters(_currentAssetLibrary);
+        // 只重铺新骨架那一份：旧的滤镜网格正在按文档第二节退休。
         if (AssetBrowserHost is not null)
         {
             FillAssetBrowserWithCharacterFilters(AssetBrowserHost, _currentAssetLibrary);

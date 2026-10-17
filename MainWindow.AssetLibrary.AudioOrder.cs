@@ -70,8 +70,7 @@ public sealed partial class MainWindow
         }
 
         TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-        RefreshAudioCards(_currentAssetLibrary, kind);
-        // 新骨架那份也要重铺，否则顺序在浏览器里不更新。
+        // 只重铺新骨架那一份：旧的音频网格正在按文档第二节退休。
         if (AssetBrowserHost is not null)
         {
             FillAssetBrowserWithAudio(AssetBrowserHost, kind, _currentAssetLibrary);
