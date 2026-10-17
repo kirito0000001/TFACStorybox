@@ -42,27 +42,11 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private GridView GetAudioGridView(AudioAssetKind kind)
-        {
-            return kind switch
-            {
-                AudioAssetKind.Music => MusicGridView,
-                AudioAssetKind.Ambient => AmbientSoundGridView,
-                AudioAssetKind.SoundEffect => SoundEffectGridView,
-                _ => MusicGridView
-            };
-        }
+        // GetAudioGridView 已删：它返回的是 XAML 里那三张旧音频网格（已随整段 Expander 删除），
+        // 留着会直接编译失败。新骨架的音频卡片在 AssetBrowser 的网格里，不需要这个查找。
 
-        private bool IsAudioExpanderExpanded(AudioAssetKind kind)
-        {
-            return kind switch
-            {
-                AudioAssetKind.Music => MusicExpander.IsExpanded,
-                AudioAssetKind.Ambient => AmbientSoundExpander.IsExpanded,
-                AudioAssetKind.SoundEffect => SoundEffectExpander.IsExpanded,
-                _ => false
-            };
-        }
+        // IsAudioExpanderExpanded 已删：它读的是已删除的三个音频 Expander（旧网格的折叠状态），
+        // 留着会编译失败。新骨架按分类卡分发，不需要判断旧 Expander 是否展开。
 
         private bool IsAudioNormalizing(AudioAssetKind kind)
         {
