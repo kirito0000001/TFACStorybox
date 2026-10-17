@@ -42,29 +42,8 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private async void BackgroundImagesGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
-        {
-            if (_currentAssetLibrary is null || _isNormalizingBackgroundImages)
-            {
-                _draggingBackgroundImageItem = null;
-                return;
-            }
-
-            // 拖拽一定由网格发起 —— 用 sender 而不是写死网格名：新骨架的卡片网格
-            // （AssetBrowser 内部那个）与旧的 BackgroundImagesGridView 走同一批处理器。
-            var orderedPaths = GetOrderedExistingTaggedPaths((sender as GridView)!);
-
-            if (orderedPaths.Count == 0)
-            {
-                _draggingBackgroundImageItem = null;
-                return;
-            }
-
-            // 应用新顺序这一段抽成独立方法：**自写重排**（卡片 CanDrag + 网格 Drop）
-            // 走的是同一条链，不能只在框架的 DragItemsCompleted 里有一份。
-            await ApplyBackgroundImageOrderAsync(orderedPaths);
-            _draggingBackgroundImageItem = null;
-        }
+        // BackgroundImagesGridView_DragItemsCompleted 已删：旧背景图网格的拖拽落位。
+        // 素材页背景图排序由「移动素材」接管；落地方 ApplyBackgroundImageOrderAsync 保留。
 
         /// <summary>
         /// 把"用户拖出来的这个新顺序"落地：算位置映射 → 记证据日志 → 重命名 → 同步所有章节的 BGindex。
@@ -117,41 +96,8 @@ namespace GalExcleTools
             AppendLog(LogKind.User, "已调整背景图顺序并触发自动命名。");
         }
 
-        private void BackgroundImagesGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
-        {
-            if (sender is not GridView grid)
-            {
-                return;
-            }
-
-            _draggingBackgroundImageItem = ResolveDraggedGridViewItem(grid, e);
-
-            AppendLog(
-                LogKind.Info,
-                _draggingBackgroundImageItem is null
-                    ? $"背景图拖拽开始，但未识别拖拽项。Items[0]={e.Items.FirstOrDefault()?.GetType().Name ?? "null"}"
-                    : $"背景图拖拽开始：{Path.GetFileName(_draggingBackgroundImageItem.Tag as string)}");
-        }
-
-        private void BackgroundImagesGridView_DragOver(object sender, DragEventArgs e)
-        {
-            if (sender is not GridView grid ||
-                _draggingBackgroundImageItem is null ||
-                grid.Items.Count <= 1)
-            {
-                return;
-            }
-
-            e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
-
-            var pointerPosition = e.GetPosition(grid);
-            if (!IsPointerInTrailingBlankArea(grid, pointerPosition, _draggingBackgroundImageItem))
-            {
-                return;
-            }
-
-            MoveDraggingBackgroundImageToEnd(grid);
-        }
+        // BackgroundImagesGridView_DragItemsStarting 与 _DragOver 已删：旧背景图网格的拖拽接线。
+        // MoveDraggingBackgroundImageToEnd 暂时还有人用（旧拖放区），留到第 5 步一起清。
 
         private void BackgroundImagesDropZone_DragOver(object sender, DragEventArgs e)
         {
