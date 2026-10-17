@@ -28,17 +28,25 @@ public sealed partial class MainWindow
     private FrameworkElement? _moveTargetCard;
     private FrameworkElement? _moveSourceCard;
 
+    /// <summary>移动模式里显示用的名字：路径取文件名，其它身份对象（如滤镜条目）用 ToString。</summary>
+    private static string DescribeMoveItem(object item)
+    {
+        return item is string path ? Path.GetFileNameWithoutExtension(path) : item.ToString() ?? "素材";
+    }
+
     /// <summary>
-    /// 移动素材的**两个可替换零件**：取当前分类的路径列表、把新顺序落地。
-    /// 默认（null）= 背景图那一套；音频三类在各自的填充方法里 ConfigureMoveAsset 一次即可 ——
+    /// 移动素材的**两个可替换零件**：取当前分类的条目列表、把新顺序落地。
+    /// 条目是**不透明身份对象** —— 文件类分类放路径字符串（string），
+    /// 角色滤镜放 <c>CharacterFilterEntry</c>（卡片 Tag 就是它），比较一律用 Equals。
+    /// 默认（null）= 背景图那一套；各分类在填充方法里 ConfigureMoveAsset 一次即可 ——
     /// 交互（进入模式 / 悬停高亮 / 左键落位 / 右键取消）完全通用，不必按分类再写一遍。
     /// </summary>
-    private Func<List<string>>? _movePathProvider;
-    private Func<List<string>, Task>? _moveOrderApplier;
+    private Func<List<object>>? _moveItemProvider;
+    private Func<List<object>, Task>? _moveOrderApplier;
 
-    private void ConfigureMoveAsset(Func<List<string>> pathProvider, Func<List<string>, Task> orderApplier)
+    private void ConfigureMoveAsset(Func<List<object>> itemProvider, Func<List<object>, Task> orderApplier)
     {
-        _movePathProvider = pathProvider;
+        _moveItemProvider = itemProvider;
         _moveOrderApplier = orderApplier;
     }
 
@@ -96,31 +104,32 @@ public sealed partial class MainWindow
     /// 左键点某张卡：移动模式下 = 把素材放到它后面（返回 true，调用方别再打开看图页）；
     /// 不在移动模式返回 false，调用方照旧。
     /// </summary>
-    private async Task<bool> TryCompleteMoveBackgroundImageAsync(string targetPath)
+    private async Task<bool> TryCompleteMoveBackgroundImageAsync(object targetItem)
     {
-        if (_movingBackgroundImagePath is not string movingPath || _currentAssetLibrary is null)
+        if (_movingBackgroundImagePath is null || _currentAssetLibrary is null)
         {
             return false;
         }
 
-        // 路径列表与落地动作都走"可替换零件"：默认是背景图，音频三类各自配置过就用自己的。
-        var orderedPaths = _movePathProvider?.Invoke()
-            ?? ImageSetService.GetFilePaths(GetBackgroundFolderPath(_currentAssetLibrary)).ToList();
+        var movingItem = _movingBackgroundImagePath;
+        // 条目列表与落地动作都走"可替换零件"：默认是背景图，各分类配置过就用自己的。
+        var items = _moveItemProvider?.Invoke()
+            ?? ImageSetService.GetFilePaths(GetBackgroundFolderPath(_currentAssetLibrary)).Cast<object>().ToList();
         ClearMoveTargetHighlight();
         RestoreMoveSourceCard();
         _movingBackgroundImagePath = null;
 
-        if (string.Equals(movingPath, targetPath, StringComparison.OrdinalIgnoreCase))
+        if (Equals(movingItem, targetItem))
         {
-            AssetLibraryStatusText.Text = "移动素材：已取消（点的是它自己）。";
+            AssetLibraryDetailStatusText.Text = "移动素材：已取消（点的是它自己）。";
             return true;
         }
 
-        var movingIndex = orderedPaths.FindIndex(path => string.Equals(path, movingPath, StringComparison.OrdinalIgnoreCase));
-        var targetIndex = orderedPaths.FindIndex(path => string.Equals(path, targetPath, StringComparison.OrdinalIgnoreCase));
+        var movingIndex = items.FindIndex(item => Equals(item, movingItem));
+        var targetIndex = items.FindIndex(item => Equals(item, targetItem));
         if (movingIndex < 0 || targetIndex < 0)
         {
-            AssetLibraryStatusText.Text = "移动素材：找不到那张素材，已取消。";
+            AssetLibraryDetailStatusText.Text = "移动素材：找不到那张素材，已取消。";
             return true;
         }
 
@@ -131,10 +140,11 @@ public sealed partial class MainWindow
             targetIndex--;
         }
 
-        orderedPaths.Insert(Math.Clamp(targetIndex + 1, 0, orderedPaths.Count), movingPath);
-        AssetLibraryStatusText.Text =
-            $"移动素材：已把 {Path.GetFileNameWithoutExtension(movingPath)} 放到 {Path.GetFileNameWithoutExtension(targetPath)} 后面。";
-        await (_moveOrderApplier?.Invoke(orderedPaths) ?? ApplyBackgroundImageOrderAsync(orderedPaths));
+        items.Insert(Math.Clamp(targetIndex + 1, 0, items.Count), movingItem);
+        AssetLibraryDetailStatusText.Text =
+            $"移动素材：已把 {DescribeMoveItem(movingItem)} 放到 {DescribeMoveItem(targetItem)} 后面。";
+        await (_moveOrderApplier?.Invoke(items)
+            ?? ApplyBackgroundImageOrderAsync(items.Cast<string>().ToList()));
         return true;
     }
 

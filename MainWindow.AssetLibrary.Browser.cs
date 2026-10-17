@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using GalExcleTools.Services;
 using GalExcleTools.Views;
@@ -223,8 +224,8 @@ public sealed partial class MainWindow
         browser.SetUpEnabled(true);
         // 「移动素材」的两个零件：取道具图片列表 + 只重排编号（无 CSV 同步）。
         ConfigureMoveAsset(
-            () => ImageSetService.GetFilePaths(GetPropImageFolderPath(assetLibrary)),
-            paths => ApplyPropImageOrderAsync(paths));
+            () => ImageSetService.GetFilePaths(GetPropImageFolderPath(assetLibrary)).Cast<object>().ToList(),
+            items => ApplyPropImageOrderAsync(items.Cast<string>().ToList()));
 
         var cards = new List<object>();
         foreach (var path in orderedPaths)
@@ -273,8 +274,8 @@ public sealed partial class MainWindow
         // 「移动素材」的两个零件：取这一类的路径列表 + 用 ApplyAudioOrderAsync 落地
         //（音乐 BGM、环境音 Scene、特殊音效 Scene_n —— 落地方自己按 kind 分）。
         ConfigureMoveAsset(
-            () => AudioAssetService.GetFilePaths(GetAudioFolderPath(assetLibrary, kind)),
-            paths => ApplyAudioOrderAsync(kind, paths));
+            () => AudioAssetService.GetFilePaths(GetAudioFolderPath(assetLibrary, kind)).Cast<object>().ToList(),
+            items => ApplyAudioOrderAsync(kind, items.Cast<string>().ToList()));
 
         var cards = new List<object>();
         foreach (var path in orderedPaths)
