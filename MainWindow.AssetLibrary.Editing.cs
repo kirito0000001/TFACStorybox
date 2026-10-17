@@ -743,10 +743,7 @@ namespace GalExcleTools
                 "装饰");
         }
 
-        private async Task<string?> SetMusicRemarkAsync(string musicPath)
-        {
-            return await SetAudioRemarkAsync(AudioAssetKind.Music, musicPath);
-        }
+        // SetMusicRemarkAsync 已删：它只是转调 SetAudioRemarkAsync(Music, …)。
 
         private async Task<string?> SetAudioRemarkAsync(AudioAssetKind kind, string musicPath)
         {
@@ -815,10 +812,7 @@ namespace GalExcleTools
             return renamedPath;
         }
 
-        private async Task<bool> DeleteMusicAsync(string musicPath)
-        {
-            return await DeleteAudioAsync(AudioAssetKind.Music, musicPath);
-        }
+        // DeleteMusicAsync 已删：它只是转调 DeleteAudioAsync(Music, …)。
 
         private async Task<bool> DeleteAudioAsync(AudioAssetKind kind, string musicPath)
         {
@@ -924,10 +918,7 @@ namespace GalExcleTools
             }
         }
 
-        private async Task NormalizeMusicFilesAsync(string musicFolderPath, IReadOnlyList<string>? orderedPaths = null)
-        {
-            await NormalizeAudioFilesAsync(AudioAssetKind.Music, musicFolderPath, orderedPaths);
-        }
+        // NormalizeMusicFilesAsync 已删：它只是转调 NormalizeAudioFilesAsync(Music, …)。
 
         private async Task NormalizeAudioFilesAsync(AudioAssetKind kind, string musicFolderPath, IReadOnlyList<string>? orderedPaths = null)
         {
