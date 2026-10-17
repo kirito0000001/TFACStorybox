@@ -92,10 +92,68 @@ public sealed partial class MainWindow
                 ShowAssetBrowserLayer();
                 await FillAssetBrowserWithBackgroundsAsync(AssetBrowserHost, _currentAssetLibrary);
                 break;
+            case "music" when AssetBrowserHost is not null:
+                ShowAssetBrowserLayer();
+                FillAssetBrowserWithAudio(AssetBrowserHost, AudioAssetKind.Music, _currentAssetLibrary);
+                break;
+            case "ambient" when AssetBrowserHost is not null:
+                ShowAssetBrowserLayer();
+                FillAssetBrowserWithAudio(AssetBrowserHost, AudioAssetKind.Ambient, _currentAssetLibrary);
+                break;
+            case "soundeffects" when AssetBrowserHost is not null:
+                ShowAssetBrowserLayer();
+                FillAssetBrowserWithAudio(AssetBrowserHost, AudioAssetKind.SoundEffect, _currentAssetLibrary);
+                break;
             default:
-                AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架：目前只有背景图迁好了，其余按顺序来。";
+                AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架：背景图、音乐、环境音、特殊音效已好，其余按顺序来。";
                 break;
         }
+    }
+
+    /// <summary>
+    /// 音频三类（音乐 / 环境音 / 特殊音效）铺进浏览器：扁平卡（音符图标 + 文件名）。
+    /// 点击进播放器页、右键三项与旧卡**完全同一批方法**（按 kind 分发，所以三类共用这一个方法）。
+    ///
+    /// ⚠️ 这三类的「移动素材」还没接：它们的顺序同样要同步剧情（BGM / Scene / Scene_n），
+    /// 得把 MoveAsset 那套按 kind 泛化一次；在那之前，旧网格里的拖拽仍是可用的退路。
+    /// </summary>
+    private void FillAssetBrowserWithAudio(Controls.AssetBrowser browser, AudioAssetKind kind, AssetLibraryInfo assetLibrary)
+    {
+        var folderPath = GetAudioFolderPath(assetLibrary, kind);
+        var orderedPaths = AudioAssetService.GetFilePaths(folderPath);
+        browser.SetPath(folderPath);
+        browser.SetUpEnabled(true);
+
+        var cards = new List<object>();
+        foreach (var path in orderedPaths)
+        {
+            var content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    new FontIcon { FontSize = 16, Glyph = "\uE8D6" },
+                    CardShell.CreateTitle(System.IO.Path.GetFileNameWithoutExtension(path))
+                }
+            };
+
+            var card = CardShell.CreateFlatCard(path, content);
+            card.Click += (_, _) =>
+            {
+                PlaySelectionSound();
+                ShowMusicPlayerPage(path, kind);
+            };
+            card.ContextFlyout = GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetAudioRemarkAsync(kind, path)),
+                GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceAudioAsync(kind, path)),
+                GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteAudioAsync(kind, path)));
+            Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(card, System.IO.Path.GetFileNameWithoutExtension(path));
+            cards.Add(card);
+        }
+
+        browser.SetCards(cards);
     }
 
     /// <summary>
