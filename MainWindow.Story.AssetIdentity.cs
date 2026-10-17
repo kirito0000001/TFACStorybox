@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GalExcleTools.Services;
 using Microsoft.UI.Xaml.Controls;
+using static GalExcleTools.Services.WorkspacePathUtility;
 
 namespace GalExcleTools;
 

@@ -716,7 +716,7 @@ namespace GalExcleTools
             // 而且**每种素材都要同步**：以前只有「环境音」那条同步了 —— 音乐拖完顺序后
             // BGM 列还指着旧位置（= 换完音乐顺序，剧情里的 BGM 全部错位），同一类坑。
             var audioFolderPath = GetAudioFolderPath(_currentAssetLibrary, kind);
-            var beforeOrderedPaths = AudioAssetService.GetFilePaths(kind, audioFolderPath);
+            var beforeOrderedPaths = AudioAssetService.GetFilePaths(audioFolderPath);
             var indexRemap = BuildPositionalAssetIndexRemap(beforeOrderedPaths, orderedPaths);
             var assetLabels = BuildPositionalLabelMaps(beforeOrderedPaths, orderedPaths);
             LogAssetIndexRemapEvidence(AudioAssetService.GetDisplayName(kind), beforeOrderedPaths, orderedPaths);
