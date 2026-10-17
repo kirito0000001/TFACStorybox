@@ -84,4 +84,36 @@ public sealed partial class MainWindow
 
         AppendLog(LogKind.User, $"已调整{assetLabel}顺序并触发自动命名。");
     }
+
+    /// <summary>
+    /// 音频三类的**规范化**（建目录 + 按规范顺序重命名），不含任何界面填充。
+    ///
+    /// 为什么单独抽出来：这段原来在 ReloadAudioFilesAsync 里，而它的调用者只有三个已死的
+    /// async void 包装（旧 Expander 的展开入口）—— 也就是打开素材库时**音频不再被规范化** ✗。
+    /// 剧情的 BGM / Scene / Scene_n 都是位置索引，位置认的是 GetFilePaths 的规范顺序，
+    /// 所以规范化必须挂回打开素材库那条路（见 RefreshAssetLibraryDetailSections）。
+    ///
+    /// ⚠️ 音频这条**不需要索引同步**：它的重命名顺序就是 GetFilePaths（改名不动位置），
+    /// 与背景图不同（背景图的排序把 jpg/webp 也算进去，而剧情的位置只数 png）。
+    /// </summary>
+    private async Task NormalizeAudioKindAsync(AssetLibraryInfo assetLibrary, AudioAssetKind kind)
+    {
+        var folderPath = GetAudioFolderPath(assetLibrary, kind);
+        Directory.CreateDirectory(folderPath);
+
+        if (IsAudioNormalizing(kind))
+        {
+            return;
+        }
+
+        SetAudioNormalizing(kind, true);
+        try
+        {
+            await NormalizeAudioFilesAsync(kind, folderPath);
+        }
+        finally
+        {
+            SetAudioNormalizing(kind, false);
+        }
+    }
 }

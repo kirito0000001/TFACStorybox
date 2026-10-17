@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -49,7 +49,7 @@ namespace GalExcleTools
 
         private void RegisterAssetLibraryExpanderLazyLoading()
         {
-            BackgroundImagesExpander.Expanding += BackgroundImagesExpander_Expanded;
+            // BackgroundImagesExpander.Expanding += BackgroundImagesExpander_Expanded;  ← 旧 Expander 入口，已退休
             // PropImagesExpander.Expanding += PropImagesExpander_Expanded;  ← 旧网格的展开器入口，已退休
             // MusicExpander.Expanding += MusicExpander_Expanded;  ← 旧网格的展开器入口，已退休
             // AmbientSoundExpander.Expanding += AmbientSoundExpander_Expanded;  ← 旧网格的展开器入口，已退休
@@ -70,23 +70,21 @@ namespace GalExcleTools
         private void RefreshAssetLibraryDetailSections(AssetLibraryInfo assetLibrary)
         {
             var cancellationToken = GetAssetLibraryLoadToken();
-            // 旧背景网格的填充已退休（打开素材库只铺分类卡，点分类时才填素材卡）。
-            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Music, cancellationToken));
-            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Ambient, cancellationToken));
-            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.SoundEffect, cancellationToken));
-            // 打开素材库时不再刷新旧函数网格（浏览器由分类卡点击时填充，
-            // 函数的"从关联项目收录"也在打开函数分类时做）。
-            // 打开素材库时不再刷新旧角色网格（浏览器由分类卡点击时填充）。
-            // 打开素材库时不再刷新旧滤镜网格（浏览器由分类卡点击时填充）。
+            // 打开素材库时要做的两件"非显示"工作（旧网格填充已全部退休）：
+            // ① 背景图自动规范化 + BGindex 同步 —— 原来挂在 BackgroundImagesExpander_Expanded 里，
+            //    那个处理器随整段 Expander 删除，所以搬到这里（**不能丢**：2026-10-16 那个
+            //    "换序后背景错位"就是它修的）。
+            RunAssetLibraryLoad(ReloadBackgroundImagesAsync(assetLibrary));
+            // ② 音频三类的规范化 —— 原来在 ReloadAudioFilesAsync 里（它的调用者只有三个已死的
+            //    包装），现在改为只做"建目录 + 规范化"，不再填旧网格（旧网格已删，填它会空引用）。
+            RunAssetLibraryLoad(NormalizeAudioKindAsync(assetLibrary, AudioAssetKind.Music));
+            RunAssetLibraryLoad(NormalizeAudioKindAsync(assetLibrary, AudioAssetKind.Ambient));
+            RunAssetLibraryLoad(NormalizeAudioKindAsync(assetLibrary, AudioAssetKind.SoundEffect));
         }
 
-        private void BackgroundImagesExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
-        {
-            if (_currentAssetLibrary is not null)
-            {
-                RunAssetLibraryLoad(ReloadBackgroundImagesAsync(_currentAssetLibrary, true));
-            }
-        }
+        // BackgroundImagesExpander_Expanded 已删：旧背景图 Expander 的展开入口。
+        // ⚠️ 它体内那次 ReloadBackgroundImagesAsync 调用已搬到 RefreshAssetLibraryDetailSections
+        // （就在上面），所以背景图自动规范化没有丢。
 
         // MusicExpander_Expanded / AmbientSoundExpander_Expanded / SoundEffectExpander_Expanded 已删：
         // 旧网格的三个展开器入口。新骨架的音频三类在点分类卡时填充。
@@ -253,51 +251,6 @@ namespace GalExcleTools
         // 旧网格退休后引用数为 0。新骨架的背景图卡在 CardShell.CreateBackgroundCard。
 
         // RefreshMusicCards 已删：它只是转调 RefreshAudioCards(音乐)。
-
-        private async Task RefreshAudioCardsAsync(AssetLibraryInfo assetLibrary, AudioAssetKind kind, CancellationToken cancellationToken, bool forcePopulateCards = false)
-        {
-            var musicFolderPath = GetAudioFolderPath(assetLibrary, kind);
-            AudioAssetService.DeleteIgnoredSidecarFiles(kind, musicFolderPath);
-            var musicPaths = AudioAssetService.GetFilePaths(musicFolderPath);
-            var gridView = GetAudioGridView(kind);
-
-            gridView.Items.Clear();
-            switch (kind)
-            {
-                case AudioAssetKind.Music:
-                    MusicExpander.Header = $"音乐 [数量：{musicPaths.Count}]";
-                    break;
-                case AudioAssetKind.Ambient:
-                    AmbientSoundExpander.Header = $"环境音 [数量：{musicPaths.Count}]";
-                    break;
-                case AudioAssetKind.SoundEffect:
-                    SoundEffectExpander.Header = $"特殊音效 [数量：{musicPaths.Count}]";
-                    break;
-            }
-
-            if (forcePopulateCards || IsAudioExpanderExpanded(kind))
-            {
-                await AddGridViewItemsInBatchesAsync(
-                    gridView,
-                    musicPaths,
-                    path => CreateAudioCard(kind, path),
-                    cancellationToken);
-            }
-
-            AppendLog(LogKind.Info, $"已加载{AudioAssetService.GetDisplayName(kind)}：{musicPaths.Count} 个文件。");
-        }
-
-        // RefreshAudioCards 已删：旧音频网格的同步包装。
-        // RefreshAudioCardsAsync 本体暂留（尾部还没读全，已无调用者，下次收掉）。
-
-        // LoadCharactersAsync 与 LoadCharacters 已删：旧角色网格的填充与其同步包装。
-        // 调用点（创建 / 重命名角色后、打开素材库时）都已改走统一重铺或删除。
-        // 日志"已加载角色卡：N 个"暂未搬 —— 下次连同两个旧角色卡工厂一起收尾。
-
-        // LoadFunctionsAsync 已删：函数的来源与"从关联项目收录函数主项"都搬到了新骨架的
-        // FillAssetBrowserWithFunctions（见 f2576d0），这里只剩旧网格填充，所以退休。
-
-        // LoadFunctions 已删：它只是转调 LoadFunctionsAsync，而那个已随旧网格退休。
 
         private async void AddFunctionButton_Click(object sender, RoutedEventArgs e)
         {

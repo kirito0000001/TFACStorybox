@@ -145,9 +145,8 @@ namespace GalExcleTools
                 SelectShellNavigationItem(AssetLibraryNavItem);
             }
             // 旧背景网格的填充已退休（这里只铺分类卡，素材卡点进分类时才填）。
-            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Music, cancellationToken));
-            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Ambient, cancellationToken));
-            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.SoundEffect, cancellationToken));
+            // 这里原来调三次 RefreshAudioCardsAsync 填旧音频网格 —— 网格已删，且音频规范化
+            // 现在由 RefreshAssetLibraryDetailSections 统一负责（同一打开路径上），所以整段去掉。
             // 打开素材库时不再刷新旧函数网格（同上：函数卡在点开函数分类时填）。
             // 打开素材库时不再刷新旧角色网格（同上）。
             // 打开素材库时不再刷新旧滤镜网格（浏览器由分类卡点击时填充）。
