@@ -51,9 +51,9 @@ namespace GalExcleTools
         {
             BackgroundImagesExpander.Expanding += BackgroundImagesExpander_Expanded;
             // PropImagesExpander.Expanding += PropImagesExpander_Expanded;  ← 旧网格的展开器入口，已退休
-            MusicExpander.Expanding += MusicExpander_Expanded;
-            AmbientSoundExpander.Expanding += AmbientSoundExpander_Expanded;
-            SoundEffectExpander.Expanding += SoundEffectExpander_Expanded;
+            // MusicExpander.Expanding += MusicExpander_Expanded;  ← 旧网格的展开器入口，已退休
+            // AmbientSoundExpander.Expanding += AmbientSoundExpander_Expanded;  ← 旧网格的展开器入口，已退休
+            // SoundEffectExpander.Expanding += SoundEffectExpander_Expanded;  ← 旧网格的展开器入口，已退休
             // CharactersExpander.Expanding += CharactersExpander_Expanded;  ← 旧网格的展开器入口，已退休
             // FunctionExpander.Expanding += FunctionExpander_Expanded;  ← 旧网格的展开器入口，已退休
             CharacterFilterExpander.Expanding += CharacterFilterExpander_Expanded;
@@ -88,29 +88,10 @@ namespace GalExcleTools
             }
         }
 
-        private void MusicExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
-        {
-            if (_currentAssetLibrary is not null)
-            {
-                RunAssetLibraryLoad(ReloadAudioFilesAsync(_currentAssetLibrary, AudioAssetKind.Music, true));
-            }
-        }
-
-        private void AmbientSoundExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
-        {
-            if (_currentAssetLibrary is not null)
-            {
-                RunAssetLibraryLoad(ReloadAudioFilesAsync(_currentAssetLibrary, AudioAssetKind.Ambient, true));
-            }
-        }
-
-        private void SoundEffectExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
-        {
-            if (_currentAssetLibrary is not null)
-            {
-                RunAssetLibraryLoad(ReloadAudioFilesAsync(_currentAssetLibrary, AudioAssetKind.SoundEffect, true));
-            }
-        }
+        // MusicExpander_Expanded / AmbientSoundExpander_Expanded / SoundEffectExpander_Expanded 已删：
+        // 旧网格的三个展开器入口。新骨架的音频三类在点分类卡时填充。
+        // ⚠️ ReloadAudioFilesAsync 与三个 Load*Files 包装**保留** —— 那是打开素材库时的加载链
+        //（建目录 + "已加载音乐：N 个文件"这类日志），与旧网格无关。
 
         // CharactersExpander_Expanded 已删：旧网格的展开器入口（注册上一轮已注释）。
 
