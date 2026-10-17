@@ -84,17 +84,51 @@ public sealed partial class MainWindow
         }
 
         // TODO（叶子层迁移）：每个分类迁完就把这里换成它自己的填充方法。
-        // 目前复用已经摆进 XAML 的那个浏览器控件（BackgroundAssetBrowser）——
-        // 等第一层立起来、叶子层逐个迁完，再把它改名成通用的 AssetBrowserHost。
         switch (key)
         {
-            case "backgrounds" when BackgroundAssetBrowser is not null:
-                BackgroundAssetBrowser.Visibility = Visibility.Visible;
-                await FillAssetBrowserWithBackgroundsAsync(BackgroundAssetBrowser, _currentAssetLibrary);
+            case "backgrounds" when AssetBrowserHost is not null:
+                ShowAssetBrowserLayer();
+                await FillAssetBrowserWithBackgroundsAsync(AssetBrowserHost, _currentAssetLibrary);
                 break;
             default:
                 AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架：目前只有背景图迁好了，其余按顺序来。";
                 break;
         }
+    }
+
+    /// <summary>切到第二层（浏览器）：收起分类卡、显示浏览器。旧的 Expander 堆叠保持折叠（它是退路）。</summary>
+    private void ShowAssetBrowserLayer()
+    {
+        if (AssetBrowserHost is not null)
+        {
+            // -= 再 += ：这个入口可能被点很多次，不能一次挂一个处理器。
+            AssetBrowserHost.BackRequested -= AssetBrowser_BackRequested;
+            AssetBrowserHost.BackRequested += AssetBrowser_BackRequested;
+            AssetBrowserHost.Visibility = Visibility.Visible;
+        }
+
+        if (AssetCategoryGridView is not null)
+        {
+            AssetCategoryGridView.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>第二层返回第一层（浏览器左上角那个返回箭头）。</summary>
+    private void CloseAssetBrowser()
+    {
+        if (AssetBrowserHost is not null)
+        {
+            AssetBrowserHost.Visibility = Visibility.Collapsed;
+        }
+
+        if (AssetCategoryGridView is not null)
+        {
+            AssetCategoryGridView.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void AssetBrowser_BackRequested(object? sender, EventArgs e)
+    {
+        CloseAssetBrowser();
     }
 }

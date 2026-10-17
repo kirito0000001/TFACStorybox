@@ -211,11 +211,17 @@ namespace GalExcleTools
 
             await RefreshBackgroundImageCardsAsync(assetLibrary, GetAssetLibraryLoadToken(), forcePopulateCards);
 
-            // 新骨架（照零境）：路径栏 + 16:9 卡片。这一步只读填充，先和旧网格并排看观感；
-            // 接上拖拽（+ 改索引同步剧情）之前，两边都会显示同一批背景图。
-            if (BackgroundAssetBrowser is not null)
+            // 新骨架的浏览器已经移到页面级（AssetBrowserHost）：点分类卡时才填充，
+            // 所以这里不再顺手填一份（那会白解一遍缩略图）。
+
+            // 第一层的分类卡：每次载入素材库都按当前数量重建（计数会变）。
+            if (AssetCategoryGridView is not null)
             {
-                await FillAssetBrowserWithBackgroundsAsync(BackgroundAssetBrowser, assetLibrary);
+                AssetCategoryGridView.Items.Clear();
+                foreach (var card in BuildAssetCategoryCards(assetLibrary))
+                {
+                    AssetCategoryGridView.Items.Add(card);
+                }
             }
         }
 
