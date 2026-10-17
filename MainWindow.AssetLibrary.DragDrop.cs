@@ -50,7 +50,9 @@ namespace GalExcleTools
                 return;
             }
 
-            var orderedPaths = GetOrderedExistingTaggedPaths(BackgroundImagesGridView);
+            // 拖拽一定由网格发起 —— 用 sender 而不是写死网格名：新骨架的卡片网格
+            // （AssetBrowser 内部那个）与旧的 BackgroundImagesGridView 走同一批处理器。
+            var orderedPaths = GetOrderedExistingTaggedPaths((sender as GridView)!);
 
             if (orderedPaths.Count == 0)
             {
@@ -85,6 +87,12 @@ namespace GalExcleTools
                 orderedPaths.Count);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshBackgroundImageCards(_currentAssetLibrary);
+            // 新骨架那份也要重铺，否则拖完顺序后浏览器里的卡片还是旧顺序。
+            if (AssetBrowserHost is not null)
+            {
+                await FillAssetBrowserWithBackgroundsAsync(AssetBrowserHost, _currentAssetLibrary);
+            }
+
             RequestDelayedRefresh();
             if (syncResult.ChangedCsvCount > 0)
             {
@@ -96,7 +104,12 @@ namespace GalExcleTools
 
         private void BackgroundImagesGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
         {
-            _draggingBackgroundImageItem = ResolveDraggedGridViewItem(BackgroundImagesGridView, e);
+            if (sender is not GridView grid)
+            {
+                return;
+            }
+
+            _draggingBackgroundImageItem = ResolveDraggedGridViewItem(grid, e);
 
             AppendLog(
                 LogKind.Info,
@@ -107,20 +120,22 @@ namespace GalExcleTools
 
         private void BackgroundImagesGridView_DragOver(object sender, DragEventArgs e)
         {
-            if (_draggingBackgroundImageItem is null || BackgroundImagesGridView.Items.Count <= 1)
+            if (sender is not GridView grid ||
+                _draggingBackgroundImageItem is null ||
+                grid.Items.Count <= 1)
             {
                 return;
             }
 
             e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
 
-            var pointerPosition = e.GetPosition(BackgroundImagesGridView);
-            if (!IsPointerInTrailingBlankArea(pointerPosition, _draggingBackgroundImageItem))
+            var pointerPosition = e.GetPosition(grid);
+            if (!IsPointerInTrailingBlankArea(grid, pointerPosition, _draggingBackgroundImageItem))
             {
                 return;
             }
 
-            MoveDraggingBackgroundImageToEnd();
+            MoveDraggingBackgroundImageToEnd(grid);
         }
 
         private void BackgroundImagesDropZone_DragOver(object sender, DragEventArgs e)
@@ -897,15 +912,14 @@ namespace GalExcleTools
             }
         }
 
-        private void MoveDraggingBackgroundImageToEnd()
+        private void MoveDraggingBackgroundImageToEnd(GridView grid)
         {
-            MoveGridViewItemToEnd(BackgroundImagesGridView, _draggingBackgroundImageItem);
+            MoveGridViewItemToEnd(grid, _draggingBackgroundImageItem);
         }
 
-        private bool IsPointerInTrailingBlankArea(Windows.Foundation.Point pointerPosition, FrameworkElement draggingItem)
-        {
-            return IsPointerInTrailingBlankArea(BackgroundImagesGridView, pointerPosition, draggingItem);
-        }
+        // 原来这里有个单参包装方法（内部写死 BackgroundImagesGridView）——
+        // 现在静态重载已经收网格参数，包装方法同签名会**自己调自己**（无限递归），所以删掉，
+        // 调用方直接用 IsPointerInTrailingBlankArea(grid, point, item)。
 
         private static bool IsPointerInTrailingBlankArea(
             GridView gridView,
