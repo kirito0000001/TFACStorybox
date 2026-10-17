@@ -122,7 +122,10 @@ namespace GalExcleTools
                 }
             }
 
-            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
             RefreshImageSetCardsFor(imagePath);
             RequestDelayedRefresh();
             ShowFloatingTip(
@@ -796,7 +799,10 @@ namespace GalExcleTools
                 }
             }
 
-            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            if (_currentAssetLibrary is not null)
+            {
+                TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+            }
             RefreshAudioCards(_currentAssetLibrary, kind);
             RequestDelayedRefresh();
             var displayName = AudioAssetService.GetDisplayName(kind);
