@@ -108,10 +108,38 @@ public sealed partial class MainWindow
                 ShowAssetBrowserLayer();
                 await FillAssetBrowserWithPropImagesAsync(AssetBrowserHost, _currentAssetLibrary);
                 break;
+            case "functions" when AssetBrowserHost is not null:
+                ShowAssetBrowserLayer();
+                FillAssetBrowserWithFunctions(AssetBrowserHost, _currentAssetLibrary);
+                break;
             default:
-                AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架：背景图、道具图片、音乐、环境音、特殊音效已好，其余按顺序来。";
+                AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架：背景图、道具图片、音频三类、函数已好，角色滤镜与立绘按顺序来。";
                 break;
         }
+    }
+
+    /// <summary>
+    /// 函数铺进浏览器：卡片**直接复用**已经迁到新样式的
+    /// <c>CreateFunctionCard</c>（280×76 扁平卡：名称 + 目录摘要，介绍与选项备注在 ToolTip 里）
+    /// 与 <c>CreateAddFunctionCard</c>（一枚居中加号、用途走 ToolTip）。
+    ///
+    /// 函数**不参与排序**（旧界面的说明就写着"函数卡不参与排序"），
+    /// 所以这一类**不需要**「移动素材」。
+    /// </summary>
+    private void FillAssetBrowserWithFunctions(Controls.AssetBrowser browser, AssetLibraryInfo assetLibrary)
+    {
+        var folderPath = GetFunctionFolderPath(assetLibrary);
+        browser.SetPath(folderPath);
+        browser.SetUpEnabled(true);
+
+        var cards = new List<object>();
+        foreach (var function in GetStoryFunctions())
+        {
+            cards.Add(CreateFunctionCard(function));
+        }
+
+        cards.Add(CreateAddFunctionCard());
+        browser.SetCards(cards);
     }
 
     /// <summary>
