@@ -511,30 +511,17 @@ namespace GalExcleTools
         // 调 ImportAudioFiles；导入入口已记入 Docs/2026-10-17-素材页导入入口待补.md，
         // 服务方法都还在，补入口时照那份文档做）。
 
-        private void MoveDraggingAudioToEnd(AudioAssetKind kind)
-        {
-            MoveGridViewItemToEnd(GetAudioGridView(kind), GetDraggingAudioItem(kind));
-        }
+        // MoveDraggingAudioToEnd 已删：旧音频拖放区把卡片挪到末尾用的（拖放区已退休）。
 
-        /// <summary>
-        /// 当前"活着"的那个背景图网格。拖放区（外层 StackPanel）**不是网格**，
-        /// 它要挪卡片时得知道往哪个网格里挪：新骨架的浏览器优先 ——
-        /// 旧的 Expander 是折叠的退路，两者互斥，同一时刻只有一个在跟用户交互。
-        /// </summary>
-        private GridView ResolveActiveBackgroundImageGrid()
-        {
-            return AssetBrowserHost?.CardsHost ?? BackgroundImagesGridView;
-        }
+        // ResolveActiveBackgroundImageGrid 已删：旧背景图拖放区用它找"往哪个网格挪"
+        //（拖放区已退休，新骨架的排序走「移动素材」，不需要这个判断）。
 
         // BackgroundImagesDropZone_Drop 已删：旧背景图拖放区的落下处理。
         // 它带"拖入文件即导入背景图"的逻辑（调 ImportBackgroundImagesAsync）——
         // 导入入口已记入 Docs/2026-10-17-素材页导入入口待补.md，服务方法都还在，
         // 补入口时照那份文档做即可（写法可从 git 历史恢复）。
 
-        private void MoveDraggingBackgroundImageToEnd(GridView grid)
-        {
-            MoveGridViewItemToEnd(grid, _draggingBackgroundImageItem);
-        }
+        // MoveDraggingBackgroundImageToEnd 已删：旧背景图拖放区把卡片挪到末尾用的。
 
         // 原来这里有个单参包装方法（内部写死 BackgroundImagesGridView）——
         // 现在静态重载已经收网格参数，包装方法同签名会**自己调自己**（无限递归），所以删掉，
