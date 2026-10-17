@@ -246,15 +246,8 @@ namespace GalExcleTools
             _draggingCharacterFilterItem = null;
         }
 
-        private void CharacterFilterGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
-        {
-            _draggingCharacterFilterItem = ResolveDraggedGridViewItem(CharacterFilterGridView, e);
-
-            if (_draggingCharacterFilterItem?.Tag is not CharacterFilterEntry)
-            {
-                _draggingCharacterFilterItem = null;
-            }
-        }
+        // CharacterFilterGridView_DragItemsStarting 已删：旧滤镜网格的拖拽起手。
+        // 素材页的滤镜排序由「移动素材」接管（ApplyCharacterFilterOrderAsync）。
 
         private void CharacterFilterGridView_DragOver(object sender, DragEventArgs e)
         {
