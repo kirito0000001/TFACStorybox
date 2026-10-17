@@ -109,20 +109,8 @@ namespace GalExcleTools
 
         // MusicGridView_DragOver 已删：旧音乐网格的拖拽悬停。
 
-        private void MusicDropZone_DragEnter(object sender, DragEventArgs e)
-        {
-            AudioDropZone_DragEnter(AudioAssetKind.Music, e);
-        }
-
-        private void MusicDropZone_DragOver(object sender, DragEventArgs e)
-        {
-            AudioDropZone_DragOver(AudioAssetKind.Music, e);
-        }
-
-        private async void MusicDropZone_Drop(object sender, DragEventArgs e)
-        {
-            await AudioDropZone_Drop(AudioAssetKind.Music, e);
-        }
+        // MusicDropZone_DragEnter / _DragOver / _Drop 已删：旧音乐拖放区的三个包装
+        //（都只是转调 AudioDropZone_*，而那个拖放区已随整段 Expander 删除）。
 
         // AmbientSoundGridView_DragItemsCompleted 已删：旧环境音网格的拖拽落位。
 
@@ -130,20 +118,7 @@ namespace GalExcleTools
 
         // AmbientSoundGridView_DragOver 已删：旧环境音网格的拖拽悬停。
 
-        private void AmbientSoundDropZone_DragEnter(object sender, DragEventArgs e)
-        {
-            AudioDropZone_DragEnter(AudioAssetKind.Ambient, e);
-        }
-
-        private void AmbientSoundDropZone_DragOver(object sender, DragEventArgs e)
-        {
-            AudioDropZone_DragOver(AudioAssetKind.Ambient, e);
-        }
-
-        private async void AmbientSoundDropZone_Drop(object sender, DragEventArgs e)
-        {
-            await AudioDropZone_Drop(AudioAssetKind.Ambient, e);
-        }
+        // AmbientSoundDropZone_DragEnter / _DragOver / _Drop 已删：旧环境音拖放区的三个包装。
 
         // SoundEffectGridView_DragItemsCompleted 已删：旧特殊音效网格的拖拽落位。
 
@@ -151,20 +126,7 @@ namespace GalExcleTools
 
         // SoundEffectGridView_DragOver 已删：旧特殊音效网格的拖拽悬停。
 
-        private void SoundEffectDropZone_DragEnter(object sender, DragEventArgs e)
-        {
-            AudioDropZone_DragEnter(AudioAssetKind.SoundEffect, e);
-        }
-
-        private void SoundEffectDropZone_DragOver(object sender, DragEventArgs e)
-        {
-            AudioDropZone_DragOver(AudioAssetKind.SoundEffect, e);
-        }
-
-        private async void SoundEffectDropZone_Drop(object sender, DragEventArgs e)
-        {
-            await AudioDropZone_Drop(AudioAssetKind.SoundEffect, e);
-        }
+        // SoundEffectDropZone_DragEnter / _DragOver / _Drop 已删：旧特殊音效拖放区的三个包装。
 
         // CharacterFilterGridView_DragItemsCompleted 已删：旧滤镜网格的拖拽落位。
         // 它体内那套「读清单 → Normalize → BuildIndexRemap → 写回（带守卫）→
