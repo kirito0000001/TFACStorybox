@@ -313,7 +313,7 @@ namespace GalExcleTools
         private FrameworkElement? _draggingMusicItem;
         private FrameworkElement? _draggingAmbientSoundItem;
         private FrameworkElement? _draggingSoundEffectItem;
-        private FrameworkElement? _draggingCharacterFilterItem;
+        // _draggingCharacterFilterItem 已删：滤镜旧网格的拖拽项字段（处理器删完后归零）。
         private FrameworkElement? _draggingCharacterClothItem;
         private FrameworkElement? _draggingCharacterFaceItem;
         private FrameworkElement? _draggingCharacterAdornItem;
