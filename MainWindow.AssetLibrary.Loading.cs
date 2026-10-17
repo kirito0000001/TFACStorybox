@@ -1050,19 +1050,29 @@ namespace GalExcleTools
             return card;
         }
 
-        private GridViewItem CreateCharacterFilterCard(CharacterFilterEntry filter, int index)
+        private Button CreateCharacterFilterCard(CharacterFilterEntry filter, int index)
         {
             var canEdit = !CharacterFilterService.IsEmpty(filter);
-            return AssetCardFactory.CreateCard(
-                220,
-                92,
-                AssetCardContentFactory.CreateCharacterFilterCardContent($"VFX{index:00}", filter.Remark),
-                filter,
-                contextFlyout: canEdit
-                    ? GridViewItemFactory.CreateMenu(
-                        GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteCharacterFilterAsync(filter)))
-                    : null,
-                stretchContent: true);
+            // 换到新卡片外壳（用户 2026-10-17 看到的那排"白框"就是这张旧卡：
+            // 220x92 的旧工厂 + 自绘内容）。现在 = 扁平卡 280x76：VFX 编号 + 备注。
+            // Tag 仍然是 filter 本身 —— 旧拖拽处理器与新的「移动素材」都按它认卡片。
+            var content = new StackPanel
+            {
+                Spacing = 2,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    CardShell.CreateTitle($"VFX{index:00}"),
+                    CardShell.CreateSubtitle(string.IsNullOrWhiteSpace(filter.Remark) ? "（空）" : filter.Remark)
+                }
+            };
+
+            var card = CardShell.CreateFlatCard(filter, content);
+            card.ContextFlyout = canEdit
+                ? GridViewItemFactory.CreateMenu(
+                    GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteCharacterFilterAsync(filter)))
+                : null;
+            return card;
         }
 
         private Button CreateAddCharacterFilterCard()
