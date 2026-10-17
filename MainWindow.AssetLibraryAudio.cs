@@ -91,16 +91,8 @@ namespace GalExcleTools
             }
         }
 
-        private FrameworkElement? GetDraggingAudioItem(AudioAssetKind kind)
-        {
-            return kind switch
-            {
-                AudioAssetKind.Music => _draggingMusicItem,
-                AudioAssetKind.Ambient => _draggingAmbientSoundItem,
-                AudioAssetKind.SoundEffect => _draggingSoundEffectItem,
-                _ => null
-            };
-        }
+        // GetDraggingAudioItem 已删：音频拖放区读"当前拖拽项"用的 getter。
+        // 拖放区退休后它已无调用者，配套的三个字段也一并删除。
 
         // SetDraggingAudioItem 已删：音频旧网格拖拽项的写入方法（处理器删完后归零）。
         // GetDraggingAudioItem 仍保留 —— 拖放区（AudioDropZone_* 一族）还在读它，

@@ -309,10 +309,10 @@ namespace GalExcleTools
             get => UnrealSyncState.IsLoadingProjects;
             set => UnrealSyncState.IsLoadingProjects = value;
         }
-        private FrameworkElement? _draggingBackgroundImageItem;
-        private FrameworkElement? _draggingMusicItem;
-        private FrameworkElement? _draggingAmbientSoundItem;
-        private FrameworkElement? _draggingSoundEffectItem;
+        // 旧拖拽状态字段已删（素材页旧网格与拖放区退休后全部归零）：
+        // _draggingBackgroundImageItem 与音频三个（_draggingMusicItem / _draggingAmbientSoundItem /
+        // _draggingSoundEffectItem）。素材页排序现在走「移动素材」，不再需要"当前拖拽项"。
+        // ⚠️ 角色详情页的三个图层字段（_draggingCharacterClothItem / Face / Adorn）仍在用，保留。
         // _draggingCharacterFilterItem 已删：滤镜旧网格的拖拽项字段（处理器删完后归零）。
         private FrameworkElement? _draggingCharacterClothItem;
         private FrameworkElement? _draggingCharacterFaceItem;
