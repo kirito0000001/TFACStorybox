@@ -209,14 +209,10 @@ namespace GalExcleTools
                 }
             }
 
-            await RefreshBackgroundImageCardsAsync(assetLibrary, GetAssetLibraryLoadToken(), forcePopulateCards);
-
-            // 新骨架的浏览器已经移到页面级（AssetBrowserHost）：点分类卡时才填充，
-            // 所以这里不再顺手填一份（那会白解一遍缩略图）。
-
-            // 分类卡不在这里铺：详情页只有那一个浏览器，铺分类卡是**打开素材库**那条路的事
-            // （MainWindow.Navigation.cs 里的 FillAssetBrowserWithCategories），
-            // 而且这条懒加载在一个被折叠、永不展开的 Expander 上，本来也跑不到。
+            // 这里原来还有一步"填旧背景图网格"（RefreshBackgroundImageCardsAsync）——
+            // 旧网格按文档第二节退休，已删除。
+            // ⚠️ 上面那段**自动规范化与 BGindex 同步必须留**：打开素材库时给整个目录重新编号
+            // 并把旧位置映射到新位置（2026-10-16"换序后背景错位"就是它修的，文档专门标注过）。
         }
 
         private async void LoadMusicFiles(AssetLibraryInfo assetLibrary)
