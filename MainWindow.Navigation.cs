@@ -150,7 +150,7 @@ namespace GalExcleTools
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.SoundEffect, cancellationToken));
             // 打开素材库时不再刷新旧函数网格（同上：函数卡在点开函数分类时填）。
             // 打开素材库时不再刷新旧角色网格（同上）。
-            RunAssetLibraryLoad(LoadCharacterFiltersAsync(assetLibrary, cancellationToken));
+            // 打开素材库时不再刷新旧滤镜网格（浏览器由分类卡点击时填充）。
             ApplyAssetLibraryMetadataToUi(assetLibrary);
             UpdateAssetLibraryDiskUsage(assetLibrary);
             PlayPageEntrance(AssetLibraryDetailPage);

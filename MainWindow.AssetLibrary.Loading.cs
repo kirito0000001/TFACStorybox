@@ -97,13 +97,7 @@ namespace GalExcleTools
 
         // FunctionExpander_Expanded 已删：旧网格的展开器入口（注册已注释），随旧加载器退休。
 
-        private void CharacterFilterExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
-        {
-            if (_currentAssetLibrary is not null)
-            {
-                RunAssetLibraryLoad(LoadCharacterFiltersAsync(_currentAssetLibrary, GetAssetLibraryLoadToken(), true));
-            }
-        }
+        // CharacterFilterExpander_Expanded 已删：旧网格的展开器入口（注册上一轮已注释）。
 
         private void CharacterClothExpander_Expanding(Expander sender, ExpanderExpandingEventArgs e)
         {
@@ -446,38 +440,9 @@ namespace GalExcleTools
                 : chapterCode.Trim();
         }
 
-        private async Task LoadCharacterFiltersAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
-        {
-            var storedFilters = _characterFilterService.ReadStored(assetLibrary);
-            var filters = CharacterFilterService.Normalize(storedFilters);
-            CharacterFilterGridView.Items.Clear();
-            CharacterFilterExpander.Header = $"角色滤镜 [数量：{filters.Count}]";
-            if (forcePopulateCards || CharacterFilterExpander.IsExpanded)
-            {
-                var indexedFilters = filters
-                    .Select((filter, index) => (filter, index))
-                    .ToList();
-                await AddGridViewItemsInBatchesAsync(
-                    CharacterFilterGridView,
-                    indexedFilters,
-                    item => CreateCharacterFilterCard(item.filter, item.index),
-                    cancellationToken);
-                CharacterFilterGridView.Items.Add(CreateAddCharacterFilterCard());
-            }
-
-            AppendLog(LogKind.Info, $"已加载角色滤镜：{filters.Count} 个。");
-            if (!_isRepairingCharacterFilters &&
-                !_isReorderingCharacterFilters &&
-                (filters.Count != storedFilters.Count || !filters.SequenceEqual(storedFilters)))
-            {
-                _ = RepairStoredCharacterFiltersAsync(assetLibrary, storedFilters, filters);
-            }
-        }
-
-        private void LoadCharacterFilters(AssetLibraryInfo assetLibrary)
-        {
-            RunAssetLibraryLoad(LoadCharacterFiltersAsync(assetLibrary, GetAssetLibraryLoadToken()));
-        }
+        // LoadCharacterFiltersAsync 与 LoadCharacterFilters 已删：旧滤镜网格的填充与同步包装。
+        // 日志「已加载角色滤镜：N 个」与末尾的「回写修复」都已搬到新骨架的
+        // FillAssetBrowserWithCharacterFilters（见 b90c900）。
 
         private void ApplyAssetLibraryMetadataToUi(AssetLibraryInfo assetLibrary)
         {
@@ -543,7 +508,7 @@ namespace GalExcleTools
                 if (ReferenceEquals(_currentAssetLibrary, assetLibrary) ||
                     string.Equals(_currentAssetLibrary?.Path, assetLibrary.Path, StringComparison.OrdinalIgnoreCase))
                 {
-                    LoadCharacterFilters(assetLibrary);
+                    RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
                 }
 
                 RequestDelayedRefresh();
@@ -598,7 +563,7 @@ namespace GalExcleTools
             filters.Add(new CharacterFilterEntry(Guid.NewGuid().ToString("N"), remark));
             _characterFilterService.Write(_currentAssetLibrary, CharacterFilterService.Normalize(filters));
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            LoadCharacterFilters(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
             AppendLog(LogKind.User, $"已新增角色滤镜：{remark}");
         }
@@ -627,7 +592,7 @@ namespace GalExcleTools
                 .ToList();
             _characterFilterService.Write(_currentAssetLibrary, CharacterFilterService.Normalize(filters));
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            LoadCharacterFilters(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
             AppendLog(LogKind.User, $"已修改角色滤镜：{oldRemark} -> {remark}");
         }
@@ -664,7 +629,7 @@ namespace GalExcleTools
             _characterFilterService.Write(_currentAssetLibrary, filters);
             var syncResult = await SyncStoryCharacterFilterIndexesWithProgressAsync(_currentAssetLibrary, indexRemap, oldLabels, newLabels, filters.Count);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            LoadCharacterFilters(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
             if (syncResult.ChangedCsvCount > 0)
             {
