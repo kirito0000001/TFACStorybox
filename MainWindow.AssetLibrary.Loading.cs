@@ -179,25 +179,16 @@ namespace GalExcleTools
             // 并把旧位置映射到新位置（2026-10-16"换序后背景错位"就是它修的，文档专门标注过）。
         }
 
-        private async void LoadMusicFiles(AssetLibraryInfo assetLibrary)
-        {
-            await ReloadMusicFilesAsync(assetLibrary);
-        }
+        // LoadMusicFiles 已删：async void 包装，调用者（旧音乐 Expander）已随整段 Expander 删除。
 
         private async Task ReloadMusicFilesAsync(AssetLibraryInfo assetLibrary)
         {
             await ReloadAudioFilesAsync(assetLibrary, AudioAssetKind.Music);
         }
 
-        private async void LoadAmbientSoundFiles(AssetLibraryInfo assetLibrary)
-        {
-            await ReloadAudioFilesAsync(assetLibrary, AudioAssetKind.Ambient);
-        }
+        // LoadAmbientSoundFiles 已删：async void 包装，调用者（旧环境音 Expander）已删除。
 
-        private async void LoadSoundEffectFiles(AssetLibraryInfo assetLibrary)
-        {
-            await ReloadAudioFilesAsync(assetLibrary, AudioAssetKind.SoundEffect);
-        }
+        // LoadSoundEffectFiles 已删：async void 包装，调用者（旧特殊音效 Expander）已删除。
 
         private async Task ReloadAudioFilesAsync(AssetLibraryInfo assetLibrary, AudioAssetKind kind, bool forcePopulateCards = false)
         {
