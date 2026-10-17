@@ -117,10 +117,67 @@ public sealed partial class MainWindow
                 ShowAssetBrowserLayer();
                 FillAssetBrowserWithCharacterFilters(AssetBrowserHost, _currentAssetLibrary);
                 break;
+            case "portraits" when AssetBrowserHost is not null:
+                ShowAssetBrowserLayer();
+                FillAssetBrowserWithCharacters(AssetBrowserHost, _currentAssetLibrary);
+                break;
             default:
-                AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架：只剩立绘了（它是两级：角色卡 → 图层卡）。";
+                AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架。";
                 break;
         }
+    }
+
+    /// <summary>
+    /// 立绘分类：**角色小卡**（扁平卡 280×76：中文名 + 英文代号）。
+    ///
+    /// 用户 2026-10-17 定的口径："也做成小卡片，只需要显示角色中文名字和英文代号就行了，
+    /// 点开就是之前的详情，很容易复用" —— 所以这里只做入口：
+    /// 点击直接调 <c>ShowCharacterDetailPage</c>，图层管理 / 小预览 / 重命名全在那边，
+    /// 一行都不用重写。
+    ///
+    /// 缺小预览的角色：旧卡是**角标覆盖**在卡上，扁平卡塞角标会花 —— 改成放进 ToolTip。
+    /// 立绘没有排序需求（角色顺序不是剧情索引），所以**不需要**「移动素材」。
+    /// </summary>
+    private void FillAssetBrowserWithCharacters(Controls.AssetBrowser browser, AssetLibraryInfo assetLibrary)
+    {
+        var folderPath = GetCharacterFolderPath(assetLibrary);
+        browser.SetPath(folderPath);
+        browser.SetUpEnabled(true);
+
+        var characters = _characterWorkspaceService.GetCharactersByFolderName(assetLibrary);
+        var cards = new List<object>();
+        for (var index = 0; index < characters.Count; index++)
+        {
+            var character = characters[index];
+            var content = new StackPanel
+            {
+                Spacing = 2,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    CardShell.CreateTitle(character.Name),
+                    CardShell.CreateSubtitle(character.Code)
+                }
+            };
+
+            var card = CardShell.CreateFlatCard(character, content);
+            var warning = GetCharacterPortraitPreviewWarningMessage(character);
+            Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
+                card,
+                warning is null
+                    ? $"{character.Name}（{character.Code}）"
+                    : $"{character.Name}（{character.Code}）{Environment.NewLine}{warning}");
+            card.Click += (_, _) =>
+            {
+                PlaySelectionSound();
+                ShowCharacterDetailPage(character);
+            };
+            card.ContextFlyout = GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("重命名", async (_, _) => await RenameCharacterAsync(character)));
+            cards.Add(card);
+        }
+
+        browser.SetCards(cards);
     }
 
     /// <summary>
