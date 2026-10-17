@@ -533,56 +533,9 @@ namespace GalExcleTools
             }
         }
 
-        private async Task AudioDropZone_Drop(AudioAssetKind kind, DragEventArgs e)
-        {
-            if (GetDraggingAudioItem(kind) is not null)
-            {
-                MoveDraggingAudioToEnd(kind);
-                e.Handled = true;
-                return;
-            }
-
-            if (!e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                return;
-            }
-
-            e.Handled = true;
-            var deferral = e.GetDeferral();
-            try
-            {
-                var storageItems = await e.DataView.GetStorageItemsAsync();
-                var droppedMusicPaths = storageItems
-                    .OfType<StorageFile>()
-                    .Select(file => file.Path)
-                    .Where(AudioAssetService.IsValidAudioPath)
-                    .ToList();
-
-                var importedCount = ImportAudioFiles(kind, droppedMusicPaths);
-                var displayName = AudioAssetService.GetDisplayName(kind);
-                ShowFloatingTip(
-                    importedCount > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
-                    importedCount > 0 ? $"{displayName}已导入" : $"没有导入{displayName}",
-                    importedCount > 0 ? $"已拖入导入 {importedCount} 个文件。" : "拖入内容中没有可导入的音频文件。",
-                    logMessage: importedCount > 0
-                        ? $"拖入导入{displayName}：{importedCount} 个文件。"
-                        : $"拖入内容中没有可导入的 wav {displayName}文件。");
-            }
-            catch (Exception ex)
-            {
-                var displayName = AudioAssetService.GetDisplayName(kind);
-                ShowFloatingTip(
-                    InfoBarSeverity.Error,
-                    $"{displayName}导入失败",
-                    "错误详情已复制到剪贴板，并写入 Log。",
-                    ex,
-                    $"拖入导入{displayName}失败。");
-            }
-            finally
-            {
-                deferral.Complete();
-            }
-        }
+        // AudioDropZone_Drop 已删：旧音频拖放区的落下处理（含"拖入文件即导入音频"，
+        // 调 ImportAudioFiles；导入入口已记入 Docs/2026-10-17-素材页导入入口待补.md，
+        // 服务方法都还在，补入口时照那份文档做）。
 
         private void MoveDraggingAudioToEnd(AudioAssetKind kind)
         {
