@@ -1303,9 +1303,9 @@
                                         CanDragItems="True"
                                         CanReorderItems="True"
                                         ReorderMode="Enabled"
-                                        DragItemsStarting="CharacterFilterGridView_DragItemsStarting"
-                                        DragOver="CharacterFilterGridView_DragOver"
-                                        DragItemsCompleted="CharacterFilterGridView_DragItemsCompleted" />
+                                        
+                                        
+                                         />
                                 </StackPanel>
                             </Expander>
                         </StackPanel>
