@@ -115,9 +115,9 @@ namespace GalExcleTools
         {
             var folderPath = Services.WorkspacePathUtility.GetBackgroundFolderPath(assetLibrary);
             var orderedPaths = ImageSetService.GetFilePaths(folderPath);
-            browser.SetHeader("背景图", $"共 {orderedPaths.Count} 张 —— 文件名里的编号就是剧情里引用的号。");
+            // 不设大标题：零境那页只有路径栏（页名/库名在外层已经有了，再来一遍是重复）。
             browser.SetPath(folderPath);
-            browser.SetUpEnabled(false);
+            browser.SetUpEnabled(true);
 
             var cards = new System.Collections.Generic.List<object>();
             foreach (var path in orderedPaths)

@@ -35,12 +35,7 @@ public sealed partial class AssetBrowser : UserControl
     /// <summary>在资源管理器里打开当前目录。</summary>
     public event EventHandler? OpenFolderRequested;
 
-    public void SetHeader(string title, string subtitle)
-    {
-        TitleText.Text = title;
-        SubtitleText.Text = subtitle;
-    }
-
+    /// <summary>路径栏上那行字（当前目录的完整路径）。</summary>
     public void SetPath(string path)
     {
         PathText.Text = path;

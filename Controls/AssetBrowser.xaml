@@ -6,7 +6,8 @@
 
     <!--
         素材浏览器骨架，照隔壁零境工具箱（Controls/AssetLibraryBrowser.xaml）：
-        上面一条**路径栏**（返回 / 上级 / 当前路径 / 打开目录），下面一片**卡片网格**。
+        **只有一条路径栏 + 一片卡片网格** —— 零境那页没有大标题，
+        页名/库名在外层（素材库列表页）已经有了，这里再来一遍就是重复（用户 2026-10-17）。
 
         和零境的两处不同（都是我们这边的实情）：
         · 卡片用 GridView 而不是 ItemsControl —— 我们的素材卡要**拖拽重排**
@@ -19,18 +20,11 @@
     <Grid RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- 标题行：页名 + 一句说明（零境：PageTitleStyle + SubtleTextStyle） -->
-        <StackPanel Grid.Row="0" Spacing="4">
-            <TextBlock x:Name="TitleText" Style="{StaticResource PageTitleStyle}" Text="素材库" />
-            <TextBlock x:Name="SubtitleText" Style="{StaticResource SubtleTextStyle}" Text="" />
-        </StackPanel>
-
         <!-- 路径栏 -->
-        <Border Grid.Row="1" Style="{StaticResource PanelBorderStyle}" Padding="8">
+        <Border Grid.Row="0" Style="{StaticResource PanelBorderStyle}" Padding="8">
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -95,7 +89,7 @@
         <!-- 卡片网格（拖拽接线由外面挂：CanDragItems / DragItemsCompleted） -->
         <GridView
             x:Name="CardGrid"
-            Grid.Row="2"
+            Grid.Row="1"
             Style="{StaticResource AssetGridViewStyle}"
             Padding="2,4,16,16" />
     </Grid>
