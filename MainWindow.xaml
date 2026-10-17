@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Window
     x:Class="GalExcleTools.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -1209,13 +1209,6 @@
                                     <GridView
                                         x:Name="MusicGridView"
                                         Style="{StaticResource AssetGridViewStyle}"
-                                        AllowDrop="True"
-                                        CanDragItems="True"
-                                        CanReorderItems="True"
-                                        ReorderMode="Enabled"
-                                        DragItemsStarting="MusicGridView_DragItemsStarting"
-                                        DragOver="MusicGridView_DragOver"
-                                        DragItemsCompleted="MusicGridView_DragItemsCompleted" />
                                 </StackPanel>
                             </Expander>
                             <Expander x:Name="AmbientSoundExpander" Header="环境音">
@@ -1239,13 +1232,6 @@
                                     <GridView
                                         x:Name="AmbientSoundGridView"
                                         Style="{StaticResource AssetGridViewStyle}"
-                                        AllowDrop="True"
-                                        CanDragItems="True"
-                                        CanReorderItems="True"
-                                        ReorderMode="Enabled"
-                                        DragItemsStarting="AmbientSoundGridView_DragItemsStarting"
-                                        DragOver="AmbientSoundGridView_DragOver"
-                                        DragItemsCompleted="AmbientSoundGridView_DragItemsCompleted" />
                                 </StackPanel>
                             </Expander>
                             <Expander x:Name="SoundEffectExpander" Header="特殊音效">
@@ -1269,13 +1255,6 @@
                                     <GridView
                                         x:Name="SoundEffectGridView"
                                         Style="{StaticResource AssetGridViewStyle}"
-                                        AllowDrop="True"
-                                        CanDragItems="True"
-                                        CanReorderItems="True"
-                                        ReorderMode="Enabled"
-                                        DragItemsStarting="SoundEffectGridView_DragItemsStarting"
-                                        DragOver="SoundEffectGridView_DragOver"
-                                        DragItemsCompleted="SoundEffectGridView_DragItemsCompleted" />
                                 </StackPanel>
                             </Expander>
                             <Expander x:Name="FunctionExpander" Header="函数">
