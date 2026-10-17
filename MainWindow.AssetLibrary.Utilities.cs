@@ -141,7 +141,20 @@ namespace GalExcleTools
                     Child = CardShell.CreateTitle(Path.GetFileNameWithoutExtension(path))
                 });
 
-                cards.Add(CardShell.CreateBackgroundCard(path, content));
+                var card = CardShell.CreateBackgroundCard(path, content);
+            // 交互与旧卡**同一批方法**（查看器/改备注/替换/删除都按"文件自己所在目录"找分类，
+            // 所以背景图与道具图片通用）：点击看图、右键三项、悬停看文件名。
+            card.Click += (_, _) =>
+            {
+                PlaySelectionSound();
+                ShowBackgroundImageViewerPage(path);
+            };
+            card.ContextFlyout = GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetBackgroundImageRemarkAsync(path)),
+                GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceBackgroundImageAsync(path)),
+                GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(path)));
+            Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(card, Path.GetFileNameWithoutExtension(path));
+            cards.Add(card);
             }
 
             browser.SetCards(cards);
