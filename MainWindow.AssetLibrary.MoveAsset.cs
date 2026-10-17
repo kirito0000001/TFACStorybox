@@ -24,7 +24,9 @@ namespace GalExcleTools;
 /// </summary>
 public sealed partial class MainWindow
 {
-    private string? _movingBackgroundImagePath;
+    // 移动中的那个"身份对象"：文件类分类放路径字符串，滤镜放 CharacterFilterEntry ——
+    // 所以类型是 object（名字保留 _movingBackgroundImagePath，少动引用点）。
+    private object? _movingBackgroundImagePath;
     private FrameworkElement? _moveTargetCard;
     private FrameworkElement? _moveSourceCard;
 
@@ -53,9 +55,9 @@ public sealed partial class MainWindow
     private bool IsMovingBackgroundImage => _movingBackgroundImagePath is not null;
 
     /// <summary>进入移动模式（右键菜单「移动素材」）。</summary>
-    private void BeginMoveBackgroundImage(string imagePath, FrameworkElement? sourceCard = null)
+    private void BeginMoveBackgroundImage(object item, FrameworkElement? sourceCard = null)
     {
-        _movingBackgroundImagePath = imagePath;
+        _movingBackgroundImagePath = item;
         _moveSourceCard = sourceCard;
         ClearMoveTargetHighlight();
 
@@ -67,7 +69,7 @@ public sealed partial class MainWindow
             source.Opacity = 0.55;
         }
 
-        var name = Path.GetFileNameWithoutExtension(imagePath);
+        var name = DescribeMoveItem(item);
         // ⚠️ 写的是**详情页**的状态条（AssetLibraryDetailStatusText，Grid.Row=2，看得见）。
         // 之前写成 AssetLibraryStatusText —— 那是**外层素材库列表页**的（导入流程在用），
         // 此刻是隐藏的，于是"点了移动素材一点反应都没有"（用户 2026-10-17）。
