@@ -42,10 +42,10 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private async void LoadBackgroundImages(AssetLibraryInfo assetLibrary)
-        {
-            await ReloadBackgroundImagesAsync(assetLibrary);
-        }
+        // LoadBackgroundImages 已删：这个 async void 包装的调用者（旧背景图 Expander）已随整段
+        // Expander 删除。它干的活（ReloadBackgroundImagesAsync：打开素材库时的自动规范化 +
+        // BGindex 同步）仍由 RefreshAssetLibraryDetailSections 调用（Loading.cs:87 附近）——
+        // 那条链必须留着，本步只删这个已无调用者的包装。
 
         private void RegisterAssetLibraryExpanderLazyLoading()
         {
