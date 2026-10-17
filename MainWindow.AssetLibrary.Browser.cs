@@ -194,7 +194,9 @@ public sealed partial class MainWindow
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
 
-        var characters = _characterWorkspaceService.GetCharactersByFolderName(assetLibrary);
+        // ⚠️ 顺序要和旧界面一致：旧立绘网格用的是 GetCharactersByName
+        // （我一开始写成 GetCharactersByFolderName，两者顺序可能不同 → 用户会看到"立绘顺序变了"）。
+        var characters = _characterWorkspaceService.GetCharactersByName(assetLibrary);
         var cards = new List<object>();
         for (var index = 0; index < characters.Count; index++)
         {
