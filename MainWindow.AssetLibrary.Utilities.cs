@@ -171,22 +171,10 @@ namespace GalExcleTools
 
             browser.SetCards(cards);
 
-            // 新骨架的卡片网格**也开拖拽重排**：处理器与旧网格共用（已经去掉写死网格名，
-            // 谁发起拖拽就用谁的 Items 算顺序），拖完照样走"改索引 → 同步剧情 BGindex"那条链。
-            // -= 再 += 是幂等的：这个填充每次进分类都会跑一遍，不能重复挂处理器。
-            var grid = browser.CardsHost;
-            grid.AllowDrop = true;
-            grid.CanDragItems = true;
-            grid.CanReorderItems = true;
-            grid.ReorderMode = Microsoft.UI.Xaml.Controls.ListViewReorderMode.Enabled;
-            grid.DragItemsStarting -= BackgroundImagesGridView_DragItemsStarting;
-            grid.DragItemsStarting += BackgroundImagesGridView_DragItemsStarting;
-            grid.DragOver -= BackgroundImagesGridView_DragOver;
-            grid.DragOver += BackgroundImagesGridView_DragOver;
-            grid.DragItemsCompleted -= BackgroundImagesGridView_DragItemsCompleted;
-            grid.DragItemsCompleted += BackgroundImagesGridView_DragItemsCompleted;
-
-            // 用户 2026-10-17 定的方向：**不做拖拽重排**，改成右键菜单里的「移动素材」——
+            // 这里原来还有一段"给浏览器网格开拖拽并挂三个旧处理器"（AllowDrop / CanDragItems /
+            // CanReorderItems / ReorderMode + 三个事件的加减挂接）—— 那是 2026-10-17 放弃拖拽、
+            // 改走「移动素材」时**漏删的一处**，害得三个旧处理器一直被引用着（断言抓出来的）。
+            // 用户定的方向：**不做拖拽重排**，改成右键菜单里的「移动素材」——
             // 拖拽那条路（卡片 CanDrag + 自写落位）逻辑风险高、还容易误触，
             // 而"移动素材"底下复用同一条同步链（ApplyBackgroundImageOrderAsync），一行都不用改。
         }
