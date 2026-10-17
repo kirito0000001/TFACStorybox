@@ -524,24 +524,9 @@ namespace GalExcleTools
             return null;
         }
 
-        private void CharacterDropZone_DragEnter(object sender, DragEventArgs e)
-        {
-            if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-                AppendLog(LogKind.Info, "拖入立绘区：角色压缩包识别接口已保留，当前版本暂不导入。");
-            }
-        }
-
-        private void CharacterDropZone_DragOver(object sender, DragEventArgs e)
-        {
-            if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
-        }
+        // CharacterDropZone_DragEnter 与 _DragOver 已删：旧立绘拖放区的进入与悬停
+        //（都是空壳：只设 AcceptedOperation 与一行日志，没有真逻辑）。
+        // 至此立绘拖放区那三个处理器全部删除。
 
         // CharacterDropZone_Drop 已删：旧立绘拖放区的落下处理（它本身是个空壳 ——
         // 只打一行"角色拖入导入暂未实现"，没有真逻辑，所以删它零损失）。
