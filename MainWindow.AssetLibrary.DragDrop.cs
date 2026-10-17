@@ -136,20 +136,11 @@ namespace GalExcleTools
             }
         }
 
-        private async void MusicGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
-        {
-            await AudioGridView_DragItemsCompleted(AudioAssetKind.Music);
-        }
+        // MusicGridView_DragItemsCompleted 已删：旧音乐网格的拖拽落位。
 
-        private void MusicGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
-        {
-            AudioGridView_DragItemsStarting(AudioAssetKind.Music, sender, e);
-        }
+        // MusicGridView_DragItemsStarting 已删：旧音乐网格的拖拽起手。
 
-        private void MusicGridView_DragOver(object sender, DragEventArgs e)
-        {
-            AudioGridView_DragOver(AudioAssetKind.Music, e);
-        }
+        // MusicGridView_DragOver 已删：旧音乐网格的拖拽悬停。
 
         private void MusicDropZone_DragEnter(object sender, DragEventArgs e)
         {
