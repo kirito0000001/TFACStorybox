@@ -813,7 +813,9 @@ namespace GalExcleTools
         private async Task AddGridViewItemsInBatchesAsync<T>(
             GridView gridView,
             IReadOnlyList<T> items,
-            Func<T, GridViewItem> createItem,
+            // 卡片容器不再限定 GridViewItem：新卡片外壳是 Button（照零境口径），
+            // 放宽到 UIElement 后两种都能传（GridViewItem 本身也是 UIElement），旧调用点不受影响。
+            Func<T, UIElement> createItem,
             CancellationToken cancellationToken,
             int batchSize = 12)
         {

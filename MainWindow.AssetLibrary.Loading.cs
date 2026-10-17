@@ -987,35 +987,59 @@ namespace GalExcleTools
                 CloseSound: DialogSoundIntent.Selection));
         }
 
-        private GridViewItem CreateFunctionCard(FunctionEntry function)
+        /// <summary>
+        /// 函数卡 —— **第一批换成新卡片外壳的样板**（用户 2026-10-17：先做函数卡看观感）。
+        ///
+        /// 口径照隔壁零境工具箱：卡片就是 Button 自己、280×76 扁平、圆角 8、1px 主题描边、
+        /// **不设底色**（悬停/按下交给系统状态色）。原来那张 260×126 的卡里挤了三行字
+        /// （名称 / 目录摘要 / 介绍），正是"样式很花"的来源之一 —— 现在卡面只留
+        /// 一行标题 + 一行副标题，介绍和选项备注都挪进 ToolTip。
+        /// </summary>
+        private Button CreateFunctionCard(FunctionEntry function)
         {
             var choiceNotes = function.ChoiceNotes ?? [];
-            return AssetCardFactory.CreateCard(
-                260,
-                126,
-                AssetCardContentFactory.CreateFunctionCardContent(
-                    function.Name,
-                    StoryFunctionService.BuildFunctionCatalogSummary(function),
-                    string.IsNullOrWhiteSpace(function.Description) ? "暂无介绍" : function.Description),
-                function,
-                async (_, _) => await EditFunctionAsync(function),
-                GridViewItemFactory.CreateMenu(
-                    GridViewItemFactory.CreateMenuItem("修改函数", async (_, _) => await EditFunctionAsync(function)),
-                    GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteFunctionAsync(function))),
-                stretchContent: true,
-                toolTip: choiceNotes.Count > 0
-                    ? string.Join(Environment.NewLine, choiceNotes.Select((note, index) => $"{index + 1}. {note}"))
-                    : null);
+            var description = string.IsNullOrWhiteSpace(function.Description) ? "暂无介绍" : function.Description;
+
+            var content = new StackPanel
+            {
+                Spacing = 2,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    CardShell.CreateTitle(function.Name),
+                    CardShell.CreateSubtitle(StoryFunctionService.BuildFunctionCatalogSummary(function))
+                }
+            };
+
+            var card = CardShell.CreateFlatCard(function, content);
+            var toolTipLines = new List<string> { description };
+            toolTipLines.AddRange(choiceNotes.Select((note, index) => $"{index + 1}. {note}"));
+            ToolTipService.SetToolTip(card, string.Join(Environment.NewLine, toolTipLines));
+
+            card.Click += async (_, _) => await EditFunctionAsync(function);
+            card.ContextFlyout = GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("修改函数", async (_, _) => await EditFunctionAsync(function)),
+                GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteFunctionAsync(function)));
+            return card;
         }
 
-        private GridViewItem CreateAddFunctionCard()
+        private Button CreateAddFunctionCard()
         {
-            return AssetCardFactory.CreateCard(
-                260,
-                126,
-                AssetCardContentFactory.CreateAddTextCardContent("+"),
-                stretchContent: true,
-                tappedHandler: async (_, _) => await AddFunctionAsync());
+            var content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    new FontIcon { FontSize = 18, Glyph = "\uE710" },
+                    CardShell.CreateTitle("新建函数")
+                }
+            };
+
+            var card = CardShell.CreateFlatCard(null, content);
+            card.Click += async (_, _) => await AddFunctionAsync();
+            return card;
         }
 
         private GridViewItem CreateCharacterFilterCard(CharacterFilterEntry filter, int index)
