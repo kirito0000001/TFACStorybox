@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -100,49 +100,6 @@ namespace GalExcleTools
         /// 同一个号就指向另一个素材了。2026-10-16 之前只有「环境音」那条同步过 ——
         /// 也就是说：换完音乐顺序，剧情里的 BGM 会**静默**全部错位。
         /// </summary>
-        private async Task SyncStoryAudioIndexesAsync(
-            AssetLibraryInfo assetLibrary,
-            AudioAssetKind kind,
-            IReadOnlyDictionary<int, int> indexRemap,
-            (Dictionary<int, string> OldLabels, Dictionary<int, string> NewLabels) assetLabels,
-            int assetCount)
-        {
-            if (indexRemap.Count == 0)
-            {
-                return;
-            }
-
-            AssetIndexSyncResult syncResult;
-            string assetLabel;
-            if (kind == AudioAssetKind.SoundEffect)
-            {
-                assetLabel = "特殊音效";
-                syncResult = await SyncStorySoundEffectIndexesWithProgressAsync(
-                    assetLibrary,
-                    indexRemap,
-                    assetLabels.OldLabels,
-                    assetLabels.NewLabels,
-                    assetCount);
-            }
-            else
-            {
-                var isMusic = kind == AudioAssetKind.Music;
-                assetLabel = isMusic ? "BGM" : "环境音";
-                syncResult = await SyncStoryGlobalAssetIndexesWithProgressAsync(
-                    assetLibrary,
-                    assetLabel,
-                    isMusic ? "BGM" : "Scene",
-                    indexRemap,
-                    assetLabels.OldLabels,
-                    assetLabels.NewLabels,
-                    assetCount);
-            }
-
-            if (syncResult.ChangedCsvCount > 0)
-            {
-                AppendLog(LogKind.Info, $"已同步 {syncResult.ChangedCsvCount} 个章节 CSV 的{assetLabel}索引。");
-            }
-        }
 
         private async Task<AssetIndexSyncResult> SyncStorySoundEffectIndexesWithProgressAsync(
             AssetLibraryInfo assetLibrary,
