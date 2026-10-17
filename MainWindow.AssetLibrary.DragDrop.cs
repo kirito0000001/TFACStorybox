@@ -687,20 +687,10 @@ namespace GalExcleTools
             SetDraggingAudioItem(kind, null);
         }
 
-        private void AudioGridView_DragItemsStarting(AudioAssetKind kind, object sender, DragItemsStartingEventArgs e)
-        {
-            SetDraggingAudioItem(kind, ResolveDraggedGridViewItem(GetAudioGridView(kind), e));
-        }
-
-        private void AudioGridView_DragOver(AudioAssetKind kind, DragEventArgs e)
-        {
-            if (GetDraggingAudioItem(kind) is null || GetAudioGridView(kind).Items.Count <= 1)
-            {
-                return;
-            }
-
-            e.AcceptedOperation = DataPackageOperation.Move;
-        }
+        // AudioGridView_DragItemsStarting 与 AudioGridView_DragOver 已删：
+        // 旧音频网格的拖拽起手与悬停（三个包装处理器删完后它们已无调用者）。
+        // ⚠️ MoveDraggingAudioToEnd **不能**一起删 —— 它的调用者在 AudioDropZone_Drop
+        // （拖放区）里，而拖放区要到第 5 步随整段 Expander 才退休。
 
         private void AudioDropZone_DragEnter(AudioAssetKind kind, DragEventArgs e)
         {
