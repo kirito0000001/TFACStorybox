@@ -260,26 +260,10 @@ namespace GalExcleTools
             await RefreshAudioCardsAsync(assetLibrary, kind, GetAssetLibraryLoadToken(), forcePopulateCards);
         }
 
-        private async Task RefreshBackgroundImageCardsAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
-        {
-            var backgroundFolderPath = GetBackgroundFolderPath(assetLibrary);
-            var imagePaths = ImageSetService.GetFilePaths(backgroundFolderPath);
-
-            BackgroundImagesGridView.Items.Clear();
-            BackgroundImagesExpander.Header = $"背景图 [数量：{imagePaths.Count}]";
-            AssetLibraryDetailStatusText.Text = $"背景图：{imagePaths.Count} 个文件 | {backgroundFolderPath}";
-            if (forcePopulateCards || BackgroundImagesExpander.IsExpanded)
-            {
-                await AddGridViewItemsInBatchesAsync(
-                    BackgroundImagesGridView,
-                    imagePaths,
-                    CreateBackgroundImageCard,
-                    cancellationToken,
-                    batchSize: 8);
-            }
-
-            AppendLog(LogKind.Info, $"已加载背景图：{imagePaths.Count} 个文件。");
-        }
+        // 背景图旧网格的填充方法（RefreshBackgroundImageCardsAsync）已删：
+        // 通读确认它只做"清网格 / 设 Expander 标题 / 设状态条 / 分批加卡片 / 记一行日志"，
+        // 没有任何规范化或索引同步（那段在 ReloadBackgroundImagesAsync 里，必须留）。
+        // 日志那行已挪到新骨架的 FillAssetBrowserWithBackgroundsAsync。
 
         // 同步包装方法 RefreshBackgroundImageCards 已删：它只是转调 Async 那个，
         // 而旧背景网格不再需要填充（打开素材库只铺分类卡）。
