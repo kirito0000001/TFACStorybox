@@ -104,5 +104,48 @@ namespace GalExcleTools
             await encoder.FlushAsync();
         }
 
+        /// <summary>
+        /// 把一个分类的素材填进新的浏览器骨架（Controls.AssetBrowser）。
+        ///
+        /// 用户 2026-10-17：素材页骨架照隔壁零境换。这一步**先只填背景图、只读展示** ——
+        /// 不接拖拽重排、也不删旧的 Expander 界面，先看观感。
+        /// 卡片尺寸：背景图走 **16:9**（CardShell.CreateBackgroundCard = 272×153）。
+        /// </summary>
+        private async Task FillAssetBrowserWithBackgroundsAsync(Controls.AssetBrowser browser, AssetLibraryInfo assetLibrary)
+        {
+            var folderPath = Services.WorkspacePathUtility.GetBackgroundFolderPath(assetLibrary);
+            var orderedPaths = ImageSetService.GetFilePaths(folderPath);
+            browser.SetHeader("背景图", $"共 {orderedPaths.Count} 张 —— 文件名里的编号就是剧情里引用的号。");
+            browser.SetPath(folderPath);
+            browser.SetUpEnabled(false);
+
+            var cards = new System.Collections.Generic.List<object>();
+            foreach (var path in orderedPaths)
+            {
+                var preview = new Microsoft.UI.Xaml.Controls.Image
+                {
+                    Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill,
+                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch,
+                    VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Stretch
+                };
+                await ThumbnailFactory.LoadThumbnailFromFileAsync(preview, path);
+
+                var content = new Microsoft.UI.Xaml.Controls.Grid();
+                content.Children.Add(preview);
+                // 名字压在图上：卡片只有 16:9 那一块，留白条比让文字挤掉画面划算。
+                content.Children.Add(new Microsoft.UI.Xaml.Controls.Border
+                {
+                    Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0x99, 0, 0, 0)),
+                    VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Bottom,
+                    Padding = new Microsoft.UI.Xaml.Thickness(8, 4, 8, 4),
+                    Child = CardShell.CreateTitle(Path.GetFileNameWithoutExtension(path))
+                });
+
+                cards.Add(CardShell.CreateBackgroundCard(path, content));
+            }
+
+            browser.SetCards(cards);
+        }
+
     }
 }
