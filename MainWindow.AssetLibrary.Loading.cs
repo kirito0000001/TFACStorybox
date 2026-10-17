@@ -560,7 +560,7 @@ namespace GalExcleTools
             AssetLibraryDetailStatusText.Text = isEnabled
                 ? "已启用小预览；未设置的小预览会在虚幻同步前提示。"
                 : "已关闭小预览；虚幻同步不会写入 DA_Portraits。";
-            LoadCharacters(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             ReloadCharacterDetailLayersPreservingScroll();
             AppendLog(LogKind.User, isEnabled ? "已启用素材库小预览。" : "已关闭素材库小预览。");
         }

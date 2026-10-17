@@ -715,7 +715,7 @@ namespace GalExcleTools
             ReloadCharacterDetailLayersPreservingScroll();
             if (_currentAssetLibrary is not null)
             {
-                LoadCharacters(_currentAssetLibrary);
+                RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             }
 
             RequestDelayedRefresh();
