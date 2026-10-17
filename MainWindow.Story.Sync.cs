@@ -342,7 +342,7 @@ namespace GalExcleTools
                    (draggedObject is null ? null : gridView.ContainerFromItem(draggedObject) as FrameworkElement) ??
                    gridView.Items
                        .OfType<FrameworkElement>()
-                       .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject));
+                       .FirstOrDefault(item => ReferenceEquals((item as ContentControl)?.Content, draggedObject));
         }
 
         private static void MoveGridViewItemToEnd(GridView gridView, FrameworkElement? item)

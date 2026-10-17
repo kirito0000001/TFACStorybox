@@ -854,11 +854,21 @@ namespace GalExcleTools
             MoveGridViewItemToEnd(GetAudioGridView(kind), GetDraggingAudioItem(kind));
         }
 
+        /// <summary>
+        /// 当前"活着"的那个背景图网格。拖放区（外层 StackPanel）**不是网格**，
+        /// 它要挪卡片时得知道往哪个网格里挪：新骨架的浏览器优先 ——
+        /// 旧的 Expander 是折叠的退路，两者互斥，同一时刻只有一个在跟用户交互。
+        /// </summary>
+        private GridView ResolveActiveBackgroundImageGrid()
+        {
+            return AssetBrowserHost?.CardsHost ?? BackgroundImagesGridView;
+        }
+
         private async void BackgroundImagesDropZone_Drop(object sender, DragEventArgs e)
         {
             if (_draggingBackgroundImageItem is not null)
             {
-                MoveDraggingBackgroundImageToEnd();
+                MoveDraggingBackgroundImageToEnd(ResolveActiveBackgroundImageGrid());
                 e.Handled = true;
                 return;
             }
