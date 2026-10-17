@@ -762,7 +762,7 @@ namespace GalExcleTools
 
             await SyncStoryAudioIndexesAsync(_currentAssetLibrary, kind, indexRemap, assetLabels, orderedPaths.Count);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshAudioCards(_currentAssetLibrary, kind);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
             AppendLog(LogKind.User, $"已调整{AudioAssetService.GetDisplayName(kind)}顺序并触发自动命名。");
             SetDraggingAudioItem(kind, null);

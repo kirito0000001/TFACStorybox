@@ -267,10 +267,7 @@ namespace GalExcleTools
         // CreateBackgroundImageCard 已删：旧背景图卡工厂（160x190 的 AssetCardFactory 版本），
         // 旧网格退休后引用数为 0。新骨架的背景图卡在 CardShell.CreateBackgroundCard。
 
-        private void RefreshMusicCards(AssetLibraryInfo assetLibrary)
-        {
-            RefreshAudioCards(assetLibrary, AudioAssetKind.Music);
-        }
+        // RefreshMusicCards 已删：它只是转调 RefreshAudioCards(音乐)。
 
         private async Task RefreshAudioCardsAsync(AssetLibraryInfo assetLibrary, AudioAssetKind kind, CancellationToken cancellationToken, bool forcePopulateCards = false)
         {
@@ -305,10 +302,8 @@ namespace GalExcleTools
             AppendLog(LogKind.Info, $"已加载{AudioAssetService.GetDisplayName(kind)}：{musicPaths.Count} 个文件。");
         }
 
-        private void RefreshAudioCards(AssetLibraryInfo assetLibrary, AudioAssetKind kind)
-        {
-            RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, kind, GetAssetLibraryLoadToken()));
-        }
+        // RefreshAudioCards 已删：旧音频网格的同步包装。
+        // RefreshAudioCardsAsync 本体暂留（尾部还没读全，已无调用者，下次收掉）。
 
         // LoadCharactersAsync 与 LoadCharacters 已删：旧角色网格的填充与其同步包装。
         // 调用点（创建 / 重命名角色后、打开素材库时）都已改走统一重铺或删除。

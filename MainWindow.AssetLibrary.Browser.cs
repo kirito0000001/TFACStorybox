@@ -419,7 +419,11 @@ public sealed partial class MainWindow
     private void FillAssetBrowserWithAudio(Controls.AssetBrowser browser, AudioAssetKind kind, AssetLibraryInfo assetLibrary)
     {
         var folderPath = GetAudioFolderPath(assetLibrary, kind);
+        // 旧填充里藏着一步"清理被忽略的旁挂文件"（AudioAssetService.DeleteIgnoredSidecarFiles）——
+        // 那不是显示行为，删旧网格时不能连它一起丢，所以搬到这里。
+        AudioAssetService.DeleteIgnoredSidecarFiles(kind, folderPath);
         var orderedPaths = AudioAssetService.GetFilePaths(folderPath);
+        AppendLog(LogKind.Info, $"已加载{AudioAssetService.GetDisplayName(kind)}：{orderedPaths.Count} 个文件。");
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
         // 「移动素材」的两个零件：取这一类的路径列表 + 用 ApplyAudioOrderAsync 落地
