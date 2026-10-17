@@ -158,6 +158,21 @@ namespace GalExcleTools
             }
 
             browser.SetCards(cards);
+
+            // 新骨架的卡片网格**也开拖拽重排**：处理器与旧网格共用（已经去掉写死网格名，
+            // 谁发起拖拽就用谁的 Items 算顺序），拖完照样走"改索引 → 同步剧情 BGindex"那条链。
+            // -= 再 += 是幂等的：这个填充每次进分类都会跑一遍，不能重复挂处理器。
+            var grid = browser.CardsHost;
+            grid.AllowDrop = true;
+            grid.CanDragItems = true;
+            grid.CanReorderItems = true;
+            grid.ReorderMode = Microsoft.UI.Xaml.Controls.ListViewReorderMode.Enabled;
+            grid.DragItemsStarting -= BackgroundImagesGridView_DragItemsStarting;
+            grid.DragItemsStarting += BackgroundImagesGridView_DragItemsStarting;
+            grid.DragOver -= BackgroundImagesGridView_DragOver;
+            grid.DragOver += BackgroundImagesGridView_DragOver;
+            grid.DragItemsCompleted -= BackgroundImagesGridView_DragItemsCompleted;
+            grid.DragItemsCompleted += BackgroundImagesGridView_DragItemsCompleted;
         }
 
     }
