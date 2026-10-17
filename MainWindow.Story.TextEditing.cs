@@ -16,6 +16,7 @@ public sealed partial class MainWindow
 
     private bool SaveCurrentStoryRow()
     {
+        var hotPath = System.Diagnostics.Stopwatch.StartNew();
         // ⚠️ **备注和剧情行一起存。**
         //
         // 剧情行有 12 个地方会存（换句、换章、删行、导出、退出……），
@@ -65,6 +66,7 @@ public sealed partial class MainWindow
         }
 
         _isStoryRowDirty = false;
+        LogStoryHotPath("保存当前句", hotPath);
         return changed;
     }
 

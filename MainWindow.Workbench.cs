@@ -475,6 +475,7 @@ namespace GalExcleTools
             string imagePath,
             CancellationToken cancellationToken = default)
         {
+            var hotPath = Stopwatch.StartNew();
             try
             {
                 var bitmap = await GetCachedStoryPreviewImageAsync(imagePath, cancellationToken);
@@ -488,6 +489,12 @@ namespace GalExcleTools
             catch
             {
                 image.Source = ThumbnailFactory.CreateDefaultBitmap();
+            }
+            finally
+            {
+                // 首次解码实测 50–95 ms，是这套预览里**单价最贵**的一步 ——
+                // 每次解码都过一眼阈值，日志里就能看出"卡在哪张图上"。
+                LogStoryHotPath($"解码 {System.IO.Path.GetFileName(imagePath)}", hotPath);
             }
         }
 

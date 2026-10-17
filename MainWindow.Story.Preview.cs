@@ -55,6 +55,7 @@ namespace GalExcleTools
 
         private async Task RefreshStoryPreviewAsync(bool showInheritedTransitionStatus = true)
         {
+            var hotPath = Stopwatch.StartNew();
             _storyPreviewRefreshCancellation?.Cancel();
             _storyPreviewRefreshCancellation?.Dispose();
             var cancellation = new CancellationTokenSource();
@@ -93,6 +94,8 @@ namespace GalExcleTools
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
             }
+
+            LogStoryHotPath("预览刷新", hotPath);
         }
 
         private async Task SetStoryBackgroundAsync(

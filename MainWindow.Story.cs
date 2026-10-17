@@ -317,6 +317,7 @@ namespace GalExcleTools
             }
 
             ClearStoryFunctionTips();
+            var hotPath = Stopwatch.StartNew();
             _isLoadingStoryRow = true;
             _storyTextEditUndoCaptured = false;
             try
@@ -346,6 +347,9 @@ namespace GalExcleTools
 
             RefreshCurrentStoryPersistentStatus();
             _ = RefreshStoryPreviewAsync(showInheritedTransitionStatus);
+            // 到这里为止都是**同步**跑在 UI 线程上的（再往下是即发即忘的媒体播放）——
+            // 这一段有多久，就是"切句顿一下"有多久。
+            LogStoryHotPath("切句", hotPath);
             if (!playMedia)
             {
                 return;

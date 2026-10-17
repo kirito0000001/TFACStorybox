@@ -173,6 +173,27 @@ namespace GalExcleTools
             }
         }
 
+        /// <summary>
+        /// 剧情编辑器热路径的耗时探针：只在超过阈值时写一行日志。
+        ///
+        /// 【为什么要它】"哪一段慢"读代码读不出来 —— 每一段的静态开销单看都很小
+        ///（角色表 0.62 ms/次、目录枚举 0.04 ms、单张大图首次解码 50–95 ms），
+        /// 卡顿是这些叠出来的，得让程序在**真实交互**里自己说。
+        /// 阈值 50 ms：正常一次刷新只有几毫秒，超过了才值得记一行。
+        /// 有了它，下次"卡"的时候日志里直接就有 [性能] 那几行，不用再猜。
+        /// </summary>
+        private const int StoryHotPathLogThresholdMs = 50;
+
+        private void LogStoryHotPath(string label, Stopwatch stopwatch)
+        {
+            if (stopwatch.ElapsedMilliseconds < StoryHotPathLogThresholdMs)
+            {
+                return;
+            }
+
+            AppendLog(LogKind.Info, $"[性能] {label}：{stopwatch.ElapsedMilliseconds} ms");
+        }
+
         private void AppendLog(LogKind kind, string message, Exception? exception = null)
         {
             // ⚠️ **这个方法可能从任何线程被调进来**：进程轮询循环、远程任务回调、
