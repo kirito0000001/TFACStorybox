@@ -70,7 +70,7 @@ namespace GalExcleTools
         private void RefreshAssetLibraryDetailSections(AssetLibraryInfo assetLibrary)
         {
             var cancellationToken = GetAssetLibraryLoadToken();
-            RunAssetLibraryLoad(RefreshBackgroundImageCardsAsync(assetLibrary, cancellationToken));
+            // 旧背景网格的填充已退休（打开素材库只铺分类卡，点分类时才填素材卡）。
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Music, cancellationToken));
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Ambient, cancellationToken));
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.SoundEffect, cancellationToken));
@@ -281,10 +281,8 @@ namespace GalExcleTools
             AppendLog(LogKind.Info, $"已加载背景图：{imagePaths.Count} 个文件。");
         }
 
-        private void RefreshBackgroundImageCards(AssetLibraryInfo assetLibrary)
-        {
-            RunAssetLibraryLoad(RefreshBackgroundImageCardsAsync(assetLibrary, GetAssetLibraryLoadToken()));
-        }
+        // 同步包装方法 RefreshBackgroundImageCards 已删：它只是转调 Async 那个，
+        // 而旧背景网格不再需要填充（打开素材库只铺分类卡）。
 
         /// <summary>
         /// 道具图片的卡片加载 —— 和背景图那段**逐行同构**，只换了文件夹、控件和调用点。

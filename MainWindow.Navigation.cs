@@ -144,7 +144,7 @@ namespace GalExcleTools
             {
                 SelectShellNavigationItem(AssetLibraryNavItem);
             }
-            RunAssetLibraryLoad(RefreshBackgroundImageCardsAsync(assetLibrary, cancellationToken));
+            // 旧背景网格的填充已退休（这里只铺分类卡，素材卡点进分类时才填）。
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Music, cancellationToken));
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Ambient, cancellationToken));
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.SoundEffect, cancellationToken));
