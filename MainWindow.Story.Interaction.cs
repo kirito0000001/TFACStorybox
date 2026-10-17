@@ -120,11 +120,12 @@ namespace GalExcleTools
                 }
 
                 // 高亮是幂等的，但 PointerMoved 触发频繁 —— 每次都 new 一个 Brush 是白扔对象。
+                // 这几个画笔是常量，共享一份（见 MainWindow.Story.Preview.cs 顶部）。
                 if (slot.BorderBrush is null)
                 {
-                    slot.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.White);
+                    slot.BorderBrush = StorySlotHoverBorderBrush;
                     slot.BorderThickness = new Thickness(1);
-                    slot.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(42, 255, 255, 255));
+                    slot.Background = StorySlotHoverBrush;
                 }
             }
         }
@@ -141,8 +142,8 @@ namespace GalExcleTools
                 slot.BorderBrush = null;
                 slot.BorderThickness = new Thickness(0);
                 slot.Background = ReferenceEquals(slot, StorySpeakerPreviewSlot)
-                    ? new SolidColorBrush(Windows.UI.Color.FromArgb(34, 255, 255, 255))
-                    : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                    ? StorySpeakerIdleBrush
+                    : StorySlotIdleBrush;
             }
         }
 

@@ -70,15 +70,15 @@ namespace GalExcleTools
             {
                 await SetStoryBackgroundAsync(ParseInt(row.Get("BGindex")), cancellationToken, showInheritedTransitionStatus);
                 cancellationToken.ThrowIfCancellationRequested();
-                await SetStoryCharacterSlotAsync(StoryCharacterSlot1, 1, row.Get("Chara1"), ParseInt(row.Get("Body1")), ParseInt(row.Get("Face1")), ParseInt(row.Get("Adorn1")), ParseInt(row.Get("Vfx1")), cancellationToken);
+                await RefreshStoryCharacterSlotAsync(StoryCharacterSlot1, 1, row, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-                await SetStoryCharacterSlotAsync(StoryCharacterSlot2, 2, row.Get("Chara2"), ParseInt(row.Get("Body2")), ParseInt(row.Get("Face2")), ParseInt(row.Get("Adorn2")), ParseInt(row.Get("Vfx2")), cancellationToken);
+                await RefreshStoryCharacterSlotAsync(StoryCharacterSlot2, 2, row, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-                await SetStoryCharacterSlotAsync(StoryCharacterSlot3, 3, row.Get("Chara3"), ParseInt(row.Get("Body3")), ParseInt(row.Get("Face3")), ParseInt(row.Get("Adorn3")), ParseInt(row.Get("Vfx3")), cancellationToken);
+                await RefreshStoryCharacterSlotAsync(StoryCharacterSlot3, 3, row, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-                await SetStoryCharacterSlotAsync(StoryCharacterSlot4, 4, row.Get("Chara4"), ParseInt(row.Get("Body4")), ParseInt(row.Get("Face4")), ParseInt(row.Get("Adorn4")), ParseInt(row.Get("Vfx4")), cancellationToken);
+                await RefreshStoryCharacterSlotAsync(StoryCharacterSlot4, 4, row, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-                await SetStoryCharacterSlotAsync(StoryCharacterSlot5, 5, row.Get("Chara5"), ParseInt(row.Get("Body5")), ParseInt(row.Get("Face5")), ParseInt(row.Get("Adorn5")), ParseInt(row.Get("Vfx5")), cancellationToken);
+                await RefreshStoryCharacterSlotAsync(StoryCharacterSlot5, 5, row, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 await SetStorySpeakerPreviewAsync(row.Get("TalkChar"), ParseInt(row.Get("TalkBody")), ParseInt(row.Get("TalkFace")), ParseInt(row.Get("TalkAdorn")), ParseInt(row.Get("TalkVfx")), cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
@@ -145,13 +145,54 @@ namespace GalExcleTools
             }
         }
 
+        /// <summary>
+        /// 刷新一个立绘位（1~5 号位，列名就是 Chara{n} / Body{n} / Face{n} / Adorn{n} / Vfx{n}）。
+        ///
+        /// ⚠️ **折叠着的位直接跳过。** 4 / 5 号位默认是收起来的，但以前照样按行数据
+        /// 去查素材、解码图片 —— 一次刷新最多白解 6 张图（每张实测 50–95 ms）。
+        /// 跳过的位不写预览 key，所以等它被展开时（key 里含可见位数量）会自己重建。
+        /// </summary>
+        private async Task RefreshStoryCharacterSlotAsync(
+            Border slot,
+            int slotIndex,
+            StoryRow row,
+            CancellationToken cancellationToken)
+        {
+            if (slot.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+
+            await SetStoryCharacterSlotAsync(
+                slot,
+                slotIndex,
+                row.Get($"Chara{slotIndex}"),
+                ParseInt(row.Get($"Body{slotIndex}")),
+                ParseInt(row.Get($"Face{slotIndex}")),
+                ParseInt(row.Get($"Adorn{slotIndex}")),
+                ParseInt(row.Get($"Vfx{slotIndex}")),
+                cancellationToken);
+        }
+
         private async Task SetStoryCharacterSlotAsync(Border slot, int slotIndex, string characterName, int bodyIndex, int faceIndex, int adornIndex, int vfxIndex, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var grid = new Grid();
             slot.Tag = slotIndex;
-            slot.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            slot.ContextFlyout = CreateStoryCharacterSlotMenu(slotIndex);
+            // 下面这三样每次预览刷新都会走到，但**内容从不改变**：画笔是常量、
+            // 右键菜单只跟 slotIndex 有关。以前每刷一次就给 6 个位重新 new 一遍
+            // （画笔 + 一个 MenuFlyout + 5 个 MenuFlyoutItem + 5 个 lambda），
+            // 编辑时那是每秒好几次的白活，还顺带让合成器反复失效。
+            if (!ReferenceEquals(slot.Background, StorySlotIdleBrush))
+            {
+                slot.Background = StorySlotIdleBrush;
+            }
+
+            if (slot.ContextFlyout is null)
+            {
+                slot.ContextFlyout = CreateStoryCharacterSlotMenu(slotIndex);
+            }
+
             slot.PointerMoved -= StoryCharacterSlot_PointerMoved;
             slot.PointerExited -= StoryCharacterSlot_PointerExited;
             slot.PointerMoved += StoryCharacterSlot_PointerMoved;
@@ -226,7 +267,10 @@ namespace GalExcleTools
         {
             cancellationToken.ThrowIfCancellationRequested();
             StorySpeakerPreviewSlot.Tag = 0;
-            StorySpeakerPreviewSlot.ContextFlyout = CreateStorySpeakerSlotMenu();
+            if (StorySpeakerPreviewSlot.ContextFlyout is null)
+            {
+                StorySpeakerPreviewSlot.ContextFlyout = CreateStorySpeakerSlotMenu();
+            }
             StorySpeakerPreviewSlot.PointerMoved -= StoryCharacterSlot_PointerMoved;
             StorySpeakerPreviewSlot.PointerExited -= StoryCharacterSlot_PointerExited;
             StorySpeakerPreviewSlot.PointerMoved += StoryCharacterSlot_PointerMoved;
@@ -394,6 +438,22 @@ namespace GalExcleTools
                 ImageSetService.Extensions.Contains(Path.GetExtension(imagePath), StringComparer.OrdinalIgnoreCase);
         }
 
+        // ── 立绘位那几个"一直长这样"的画刷 ──────────────────────────────────
+        // 预览是**每次编辑、每次切句**都要重刷的（RefreshStoryPreviewAsync），
+        // 以前每次都给 6 个位 new 一遍 SolidColorBrush / RectangleGeometry —— 白扔对象，
+        // 还会让合成器反复失效。这几个颜色是常量，共享一份就够。
+        private static readonly SolidColorBrush StorySlotIdleBrush =
+            new(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+
+        private static readonly SolidColorBrush StorySpeakerIdleBrush =
+            new(Windows.UI.Color.FromArgb(34, 255, 255, 255));
+
+        private static readonly SolidColorBrush StorySlotHoverBrush =
+            new(Windows.UI.Color.FromArgb(42, 255, 255, 255));
+
+        private static readonly SolidColorBrush StorySlotHoverBorderBrush =
+            new(Microsoft.UI.Colors.White);
+
         private static void ClipPreviewBorderToBounds(Border border)
         {
             border.SizeChanged -= StoryPreviewBorder_SizeChanged;
@@ -412,6 +472,15 @@ namespace GalExcleTools
         private static void UpdatePreviewBorderClip(Border border, double width, double height)
         {
             if (width <= 0 || height <= 0)
+            {
+                return;
+            }
+
+            // 尺寸没变就别换几何体：换一次就是一次布局 / 合成失效，
+            // 而这个函数在每次预览刷新、每次 SizeChanged 上都会被调到。
+            if (border.Clip is RectangleGeometry existing &&
+                Math.Abs(existing.Rect.Width - width) < 0.5 &&
+                Math.Abs(existing.Rect.Height - height) < 0.5)
             {
                 return;
             }
