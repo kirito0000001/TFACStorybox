@@ -72,7 +72,7 @@ namespace GalExcleTools
             }
             else if (string.Equals(folder, GetPropImageFolderPath(_currentAssetLibrary), StringComparison.OrdinalIgnoreCase))
             {
-                RefreshPropImageCards(_currentAssetLibrary);
+                RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             }
         }
 

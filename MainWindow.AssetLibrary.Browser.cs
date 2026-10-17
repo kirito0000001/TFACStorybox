@@ -325,7 +325,7 @@ public sealed partial class MainWindow
             ImageSetPrefix.Prop);
 
         TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-        RefreshPropImageCards(_currentAssetLibrary);
+        // 只重铺新骨架那一份（另外三个排序方法上一轮都清了，道具这个当时漏了）。
         if (AssetBrowserHost is not null)
         {
             await FillAssetBrowserWithPropImagesAsync(AssetBrowserHost, _currentAssetLibrary);

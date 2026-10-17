@@ -387,7 +387,7 @@ namespace GalExcleTools
             }
 
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshPropImageCards(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
             return importedCount;
         }
@@ -420,7 +420,7 @@ namespace GalExcleTools
             }
 
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshBackgroundImageCards(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
             return importedCount;
         }
@@ -554,7 +554,7 @@ namespace GalExcleTools
             }
 
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshAudioCards(_currentAssetLibrary, kind);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
             return importedCount;
         }
