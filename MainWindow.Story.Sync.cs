@@ -327,7 +327,7 @@ namespace GalExcleTools
         private static List<string> GetOrderedExistingTaggedPaths(GridView gridView)
         {
             return gridView.Items
-                .OfType<GridViewItem>()
+                .OfType<FrameworkElement>()
                 .Select(item => item.Tag as string)
                 .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
                 .Cast<string>()
@@ -335,17 +335,17 @@ namespace GalExcleTools
                 .ToList();
         }
 
-        private static GridViewItem? ResolveDraggedGridViewItem(GridView gridView, DragItemsStartingEventArgs e)
+        private static FrameworkElement? ResolveDraggedGridViewItem(GridView gridView, DragItemsStartingEventArgs e)
         {
             var draggedObject = e.Items.FirstOrDefault();
             return draggedObject as GridViewItem ??
                    (draggedObject is null ? null : gridView.ContainerFromItem(draggedObject) as GridViewItem) ??
                    gridView.Items
-                       .OfType<GridViewItem>()
+                       .OfType<FrameworkElement>()
                        .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject));
         }
 
-        private static void MoveGridViewItemToEnd(GridView gridView, GridViewItem? item)
+        private static void MoveGridViewItemToEnd(GridView gridView, FrameworkElement? item)
         {
             if (item is null)
             {

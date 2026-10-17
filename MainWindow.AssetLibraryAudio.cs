@@ -91,7 +91,7 @@ namespace GalExcleTools
             }
         }
 
-        private GridViewItem? GetDraggingAudioItem(AudioAssetKind kind)
+        private FrameworkElement? GetDraggingAudioItem(AudioAssetKind kind)
         {
             return kind switch
             {
@@ -102,7 +102,7 @@ namespace GalExcleTools
             };
         }
 
-        private void SetDraggingAudioItem(AudioAssetKind kind, GridViewItem? item)
+        private void SetDraggingAudioItem(AudioAssetKind kind, FrameworkElement? item)
         {
             switch (kind)
             {

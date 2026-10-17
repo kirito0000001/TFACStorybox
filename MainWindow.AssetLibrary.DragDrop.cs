@@ -476,7 +476,7 @@ namespace GalExcleTools
             clearDraggingItem();
         }
 
-        private static void CharacterLayerDropZone_DragEnterOrOver(GridViewItem? draggingItem, DragEventArgs e)
+        private static void CharacterLayerDropZone_DragEnterOrOver(FrameworkElement? draggingItem, DragEventArgs e)
         {
             if (draggingItem is not null)
             {
@@ -500,7 +500,7 @@ namespace GalExcleTools
         private static void CharacterLayerGridView_DragItemsStarting(
             GridView gridView,
             DragItemsStartingEventArgs e,
-            Action<GridViewItem?> setDraggingItem)
+            Action<FrameworkElement?> setDraggingItem)
         {
             setDraggingItem(ResolveDraggedGridViewItem(gridView, e));
         }
@@ -532,7 +532,7 @@ namespace GalExcleTools
 
         private async Task CharacterLayerDropZone_Drop(
             DragEventArgs e,
-            GridViewItem? draggingItem,
+            FrameworkElement? draggingItem,
             Action moveDraggingItemToEnd,
             Func<IEnumerable<string>, Task<int>> importAsync,
             string logLabel)
@@ -593,7 +593,7 @@ namespace GalExcleTools
             }
         }
 
-        private static void CharacterLayerGridView_DragOver(GridView gridView, GridViewItem? draggingItem, DragEventArgs e)
+        private static void CharacterLayerGridView_DragOver(GridView gridView, FrameworkElement? draggingItem, DragEventArgs e)
         {
             if (draggingItem is null || gridView.Items.Count <= 1)
             {

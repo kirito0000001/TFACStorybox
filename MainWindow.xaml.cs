@@ -309,14 +309,14 @@ namespace GalExcleTools
             get => UnrealSyncState.IsLoadingProjects;
             set => UnrealSyncState.IsLoadingProjects = value;
         }
-        private GridViewItem? _draggingBackgroundImageItem;
-        private GridViewItem? _draggingMusicItem;
-        private GridViewItem? _draggingAmbientSoundItem;
-        private GridViewItem? _draggingSoundEffectItem;
-        private GridViewItem? _draggingCharacterFilterItem;
-        private GridViewItem? _draggingCharacterClothItem;
-        private GridViewItem? _draggingCharacterFaceItem;
-        private GridViewItem? _draggingCharacterAdornItem;
+        private FrameworkElement? _draggingBackgroundImageItem;
+        private FrameworkElement? _draggingMusicItem;
+        private FrameworkElement? _draggingAmbientSoundItem;
+        private FrameworkElement? _draggingSoundEffectItem;
+        private FrameworkElement? _draggingCharacterFilterItem;
+        private FrameworkElement? _draggingCharacterClothItem;
+        private FrameworkElement? _draggingCharacterFaceItem;
+        private FrameworkElement? _draggingCharacterAdornItem;
         private string? _viewingBackgroundImagePath
         {
             get => AssetLibraryState.ViewingBackgroundImagePath;
