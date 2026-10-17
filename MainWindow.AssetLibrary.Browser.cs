@@ -24,9 +24,15 @@ namespace GalExcleTools;
 /// </summary>
 public sealed partial class MainWindow
 {
-    /// <summary>当前正开着的分类 key（在分类层时为 null）—— 改备注 / 替换 / 删除 / 导入那些
-    /// 功能路径靠它决定重铺哪个分类的卡片，见 RefreshCurrentAssetCategoryAsync。</summary>
+    /// <summary>当前正开着的分类 key —— 改备注 / 替换 / 删除 / 导入那些功能路径靠它决定重铺谁。
+    /// ⚠️ **回到分类层时不再清空**（原来是清空的 ✗）：清空后重铺就变成 no-op，
+    /// 于是"改完备注/移动完素材后卡片没刷新"（用户 2026-10-17 反馈）。现在它表示
+    /// "最近打开过的分类"，是否真的在分类里由下面的 _isAssetCategoryLayerOpen 决定。</summary>
     private string? _currentAssetCategoryKey;
+
+    /// <summary>true = 现在停在分类层（铺分类卡）；false = 已进到某个分类里（铺素材卡）。
+    /// 重铺时按这个决定铺哪一层 —— 这样在分类层也能刷新（计数会跟着变）。</summary>
+    private bool _isAssetCategoryLayerOpen = true;
 
     /// <summary>一个分类卡：key 用来分发到各自的叶子层，count 是卡上的副标题。</summary>
     private sealed record AssetCategoryEntry(string Key, string Title, string CountText);
@@ -91,7 +97,9 @@ public sealed partial class MainWindow
         }
 
         // 记下"现在开着哪个分类"：改备注 / 替换 / 删除 / 导入那些功能路径靠它决定重铺谁。
+        // （这个 key 在回到分类层时**不清空**，只把下面的层标志翻回分类层。）
         _currentAssetCategoryKey = key;
+        _isAssetCategoryLayerOpen = false;
 
         switch (key)
         {
@@ -143,8 +151,16 @@ public sealed partial class MainWindow
     /// </summary>
     private async Task RefreshCurrentAssetCategoryAsync()
     {
-        if (AssetBrowserHost is null || _currentAssetLibrary is null || _currentAssetCategoryKey is null)
+        if (AssetBrowserHost is null || _currentAssetLibrary is null)
         {
+            return;
+        }
+
+        // 停在分类层时重铺分类卡（计数会跟着变）；进在某个分类里时重铺那个分类的素材卡。
+        // 这样"改完备注 / 移动完素材后没刷新"就不会再发生（原来 key 被清空 → 整个重铺 no-op）。
+        if (_isAssetCategoryLayerOpen || _currentAssetCategoryKey is null)
+        {
+            FillAssetBrowserWithCategories(_currentAssetLibrary);
             return;
         }
 
@@ -495,8 +511,8 @@ public sealed partial class MainWindow
         AssetBrowserHost.SetPath(assetLibrary.Path);
         AssetBrowserHost.SetUpEnabled(false);
         AssetBrowserHost.SetCards(BuildAssetCategoryCards(assetLibrary));
-        // 回到分类层：当前分类清空（这时不需要重铺某个分类的素材卡）。
-        _currentAssetCategoryKey = null;
+        // 回到分类层：只翻层标志，**不清 key**（清了会让功能路径的重铺变成 no-op）。
+        _isAssetCategoryLayerOpen = true;
         EnsureAssetBrowserHandlers();
     }
 
