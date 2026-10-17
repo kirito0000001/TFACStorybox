@@ -503,35 +503,9 @@ namespace GalExcleTools
         // ⚠️ MoveDraggingAudioToEnd **不能**一起删 —— 它的调用者在 AudioDropZone_Drop
         // （拖放区）里，而拖放区要到第 5 步随整段 Expander 才退休。
 
-        private void AudioDropZone_DragEnter(AudioAssetKind kind, DragEventArgs e)
-        {
-            if (GetDraggingAudioItem(kind) is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-            }
-            else if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
-        }
-
-        private void AudioDropZone_DragOver(AudioAssetKind kind, DragEventArgs e)
-        {
-            if (GetDraggingAudioItem(kind) is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-                return;
-            }
-
-            if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
-        }
+        // AudioDropZone_DragEnter 与 AudioDropZone_DragOver 已删：
+        // 旧音频拖放区的进入与悬停（拖放区已随整段 Expander 删除）。
+        // 至此音频拖放区的三个本体全部清除。
 
         // AudioDropZone_Drop 已删：旧音频拖放区的落下处理（含"拖入文件即导入音频"，
         // 调 ImportAudioFiles；导入入口已记入 Docs/2026-10-17-素材页导入入口待补.md，
