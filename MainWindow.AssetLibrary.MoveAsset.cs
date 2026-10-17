@@ -134,7 +134,7 @@ public sealed partial class MainWindow
         }
 
         // 先摘掉自己：目标在原位置之后时，摘掉会让目标下标前移一格。
-        orderedPaths.RemoveAt(movingIndex);
+        items.RemoveAt(movingIndex);
         if (targetIndex > movingIndex)
         {
             targetIndex--;
