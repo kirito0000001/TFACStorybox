@@ -74,7 +74,8 @@ namespace GalExcleTools
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Music, cancellationToken));
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.Ambient, cancellationToken));
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.SoundEffect, cancellationToken));
-            RunAssetLibraryLoad(LoadFunctionsAsync(assetLibrary, cancellationToken));
+            // 打开素材库时不再刷新旧函数网格（浏览器由分类卡点击时填充，
+            // 函数的"从关联项目收录"也在打开函数分类时做）。
             RunAssetLibraryLoad(LoadCharactersAsync(assetLibrary, cancellationToken));
             RunAssetLibraryLoad(LoadCharacterFiltersAsync(assetLibrary, cancellationToken));
         }
@@ -119,13 +120,7 @@ namespace GalExcleTools
             }
         }
 
-        private void FunctionExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
-        {
-            if (_currentAssetLibrary is not null)
-            {
-                RunAssetLibraryLoad(LoadFunctionsAsync(_currentAssetLibrary, GetAssetLibraryLoadToken(), true));
-            }
-        }
+        // FunctionExpander_Expanded 已删：旧网格的展开器入口（注册已注释），随旧加载器退休。
 
         private void CharacterFilterExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
         {
@@ -409,7 +404,7 @@ namespace GalExcleTools
             });
             StoryFunctionService.WriteFunctions(_currentAssetLibrary, functions, _jsonOptions);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            LoadFunctions(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
         }
 
@@ -448,7 +443,7 @@ namespace GalExcleTools
                 .ToList();
             StoryFunctionService.WriteFunctions(_currentAssetLibrary, functions, _jsonOptions);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            LoadFunctions(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
         }
 
@@ -470,7 +465,7 @@ namespace GalExcleTools
                 .ToList();
             StoryFunctionService.WriteFunctions(_currentAssetLibrary, functions, _jsonOptions);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            LoadFunctions(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
         }
 
