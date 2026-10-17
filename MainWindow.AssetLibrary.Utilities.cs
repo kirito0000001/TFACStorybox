@@ -160,7 +160,7 @@ namespace GalExcleTools
             card.ContextRequested += Card_ContextRequested;
             card.ContextFlyout = GridViewItemFactory.CreateMenu(
                 GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetBackgroundImageRemarkAsync(path)),
-                GridViewItemFactory.CreateMenuItem("移动素材", (_, _) => BeginMoveBackgroundImage(path)),
+                GridViewItemFactory.CreateMenuItem("移动素材", (_, _) => BeginMoveBackgroundImage(path, card)),
                 GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceBackgroundImageAsync(path)),
                 GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(path)));
             Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(card, Path.GetFileNameWithoutExtension(path));

@@ -26,16 +26,33 @@ public sealed partial class MainWindow
 {
     private string? _movingBackgroundImagePath;
     private FrameworkElement? _moveTargetCard;
+    private FrameworkElement? _moveSourceCard;
 
     private bool IsMovingBackgroundImage => _movingBackgroundImagePath is not null;
 
     /// <summary>进入移动模式（右键菜单「移动素材」）。</summary>
-    private void BeginMoveBackgroundImage(string imagePath)
+    private void BeginMoveBackgroundImage(string imagePath, FrameworkElement? sourceCard = null)
     {
         _movingBackgroundImagePath = imagePath;
+        _moveSourceCard = sourceCard;
         ClearMoveTargetHighlight();
-        AssetLibraryStatusText.Text =
-            $"移动素材：鼠标压到目标卡片上、左键点它，素材会放到它后面；点自己取消。（{Path.GetFileNameWithoutExtension(imagePath)}）";
+
+        // 被移动的那张**自己也变样**：不然"点了移动素材没反应"（用户 2026-10-17 的反馈）——
+        // 原来只有状态条一行字，太弱。
+        if (sourceCard is Control source)
+        {
+            source.BorderThickness = new Thickness(3);
+            source.Opacity = 0.55;
+        }
+
+        var name = Path.GetFileNameWithoutExtension(imagePath);
+        // ⚠️ 写的是**详情页**的状态条（AssetLibraryDetailStatusText，Grid.Row=2，看得见）。
+        // 之前写成 AssetLibraryStatusText —— 那是**外层素材库列表页**的（导入流程在用），
+        // 此刻是隐藏的，于是"点了移动素材一点反应都没有"（用户 2026-10-17）。
+        AssetLibraryDetailStatusText.Text =
+            $"移动素材：鼠标压到目标卡片上、左键点它，素材会放到它后面；右键取消。（{name}）";
+        // 日志也留一行：状态条不一定被看到，日志是这套工具里最稳的反馈通道。
+        AppendLog(LogKind.User, $"移动素材：已选中 {name}，点目标卡片把它放到后面（右键取消）。");
     }
 
     /// <summary>鼠标压在卡片上：移动模式下高亮它（用户要的"像拖动那样"）。</summary>
@@ -56,7 +73,8 @@ public sealed partial class MainWindow
         if (card is Control control)
         {
             // 和拖动那版同一个手法：只加粗描边，不换底色（免得和主题悬停色打架）。
-            control.BorderThickness = new Thickness(2);
+            // 3px 而不是 2px：1px→2px 在深色主题下几乎看不出来（用户反馈"没反应"）。
+            control.BorderThickness = new Thickness(3);
         }
     }
 
@@ -73,6 +91,7 @@ public sealed partial class MainWindow
 
         var orderedPaths = ImageSetService.GetFilePaths(GetBackgroundFolderPath(_currentAssetLibrary)).ToList();
         ClearMoveTargetHighlight();
+        RestoreMoveSourceCard();
         _movingBackgroundImagePath = null;
 
         if (string.Equals(movingPath, targetPath, StringComparison.OrdinalIgnoreCase))
@@ -125,8 +144,22 @@ public sealed partial class MainWindow
     private void CancelMoveBackgroundImage()
     {
         ClearMoveTargetHighlight();
+        RestoreMoveSourceCard();
         _movingBackgroundImagePath = null;
-        AssetLibraryStatusText.Text = "移动素材：已取消。";
+        AssetLibraryDetailStatusText.Text = "移动素材：已取消。";
+        AppendLog(LogKind.User, "移动素材：已取消。");
+    }
+
+    /// <summary>把"被移动的那张"恢复成普通样子（落位成功或取消时都要调）。</summary>
+    private void RestoreMoveSourceCard()
+    {
+        if (_moveSourceCard is Control source)
+        {
+            source.BorderThickness = new Thickness(1);
+            source.Opacity = 1;
+        }
+
+        _moveSourceCard = null;
     }
 
     private void ClearMoveTargetHighlight()
