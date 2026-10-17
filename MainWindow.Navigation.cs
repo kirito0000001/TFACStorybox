@@ -124,6 +124,23 @@ namespace GalExcleTools
             _currentAssetLibrary = assetLibrary;
             EnsureAssetLibraryCategoryFolders(assetLibrary.Path);
             AssetLibraryDetailTitleText.Text = assetLibrary.Name;
+            // 新骨架第一层：打开素材库就把分类卡铺上，并回到"第一层"状态
+            //（浏览器收起、旧 Expander 堆叠保持折叠）。
+            // ⚠️ 必须放在**这条打开路径**上：原来我把它挂在背景图那条懒加载里，
+            // 而那个 Expander 现在被折叠、永远不会展开 → 填充根本不跑，页面就是空的
+            //（用户 2026-10-17 看到的"看不见了"）。
+            if (AssetCategoryGridView is not null)
+            {
+                AssetCategoryGridView.Items.Clear();
+                foreach (var card in BuildAssetCategoryCards(assetLibrary))
+                {
+                    AssetCategoryGridView.Items.Add(card);
+                }
+
+                AssetCategoryGridView.Visibility = Visibility.Visible;
+            }
+
+            CloseAssetBrowser();
             WorkbenchPage.Visibility = Visibility.Collapsed;
             ProjectDetailPage.Visibility = Visibility.Collapsed;
             StoryEditorPage.Visibility = Visibility.Collapsed;
