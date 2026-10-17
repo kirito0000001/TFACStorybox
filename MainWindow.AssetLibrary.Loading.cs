@@ -55,7 +55,7 @@ namespace GalExcleTools
             AmbientSoundExpander.Expanding += AmbientSoundExpander_Expanded;
             SoundEffectExpander.Expanding += SoundEffectExpander_Expanded;
             CharactersExpander.Expanding += CharactersExpander_Expanded;
-            FunctionExpander.Expanding += FunctionExpander_Expanded;
+            // FunctionExpander.Expanding += FunctionExpander_Expanded;  ← 旧网格的展开器入口，已退休
             CharacterFilterExpander.Expanding += CharacterFilterExpander_Expanded;
         }
 
@@ -364,43 +364,10 @@ namespace GalExcleTools
             RunAssetLibraryLoad(LoadCharactersAsync(assetLibrary, GetAssetLibraryLoadToken()));
         }
 
-        private async Task LoadFunctionsAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
-        {
-            var linkedChapters = _projectWorkspaceService.GetProjects(_projectRootPath)
-                .Where(project =>
-                    string.Equals(project.AssetLibraryFolderName, assetLibrary.FolderName, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(project.AssetLibraryName, assetLibrary.Name, StringComparison.OrdinalIgnoreCase))
-                .SelectMany(_projectWorkspaceService.GetChapters)
-                .ToList();
-            var collectedCount = StoryFunctionService.CollectFunctionsFromChapters(
-                assetLibrary,
-                linkedChapters,
-                _storyDocumentRepository,
-                _jsonOptions);
-            var functions = StoryFunctionService.ReadFunctions(assetLibrary, _jsonOptions);
-            FunctionGridView.Items.Clear();
-            FunctionExpander.Header = $"函数 [数量：{functions.Count}]";
-            if (forcePopulateCards || FunctionExpander.IsExpanded)
-            {
-                await AddGridViewItemsInBatchesAsync(
-                    FunctionGridView,
-                    functions,
-                    CreateFunctionCard,
-                    cancellationToken);
-                FunctionGridView.Items.Add(CreateAddFunctionCard());
-            }
+        // LoadFunctionsAsync 已删：函数的来源与"从关联项目收录函数主项"都搬到了新骨架的
+        // FillAssetBrowserWithFunctions（见 f2576d0），这里只剩旧网格填充，所以退休。
 
-            AppendLog(LogKind.Info, $"已加载函数卡：{functions.Count} 个。");
-            if (collectedCount > 0)
-            {
-                AppendLog(LogKind.Info, $"已从关联项目收录函数主项：新增 {collectedCount} 个。");
-            }
-        }
-
-        private void LoadFunctions(AssetLibraryInfo assetLibrary)
-        {
-            RunAssetLibraryLoad(LoadFunctionsAsync(assetLibrary, GetAssetLibraryLoadToken()));
-        }
+        // LoadFunctions 已删：它只是转调 LoadFunctionsAsync，而那个已随旧网格退休。
 
         private async void AddFunctionButton_Click(object sender, RoutedEventArgs e)
         {
