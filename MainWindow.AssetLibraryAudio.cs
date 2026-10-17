@@ -102,21 +102,9 @@ namespace GalExcleTools
             };
         }
 
-        private void SetDraggingAudioItem(AudioAssetKind kind, FrameworkElement? item)
-        {
-            switch (kind)
-            {
-                case AudioAssetKind.Music:
-                    _draggingMusicItem = item;
-                    break;
-                case AudioAssetKind.Ambient:
-                    _draggingAmbientSoundItem = item;
-                    break;
-                case AudioAssetKind.SoundEffect:
-                    _draggingSoundEffectItem = item;
-                    break;
-            }
-        }
+        // SetDraggingAudioItem 已删：音频旧网格拖拽项的写入方法（处理器删完后归零）。
+        // GetDraggingAudioItem 仍保留 —— 拖放区（AudioDropZone_* 一族）还在读它，
+        // 要等第 5 步随整段 Expander 一起退休。
 
         private static int? ResolveStoryAssetIndex(int rawIndex, int assetCount)
         {
