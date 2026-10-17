@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using GalExcleTools.Services;
+using GalExcleTools.Views;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using static GalExcleTools.Services.WorkspacePathUtility;
 
 namespace GalExcleTools;
 

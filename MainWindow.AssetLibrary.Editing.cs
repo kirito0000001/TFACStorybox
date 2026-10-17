@@ -802,8 +802,9 @@ namespace GalExcleTools
             if (_currentAssetLibrary is not null)
             {
                 TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+                RefreshAudioCards(_currentAssetLibrary, kind);
             }
-            RefreshAudioCards(_currentAssetLibrary, kind);
+
             RequestDelayedRefresh();
             var displayName = AudioAssetService.GetDisplayName(kind);
             ShowFloatingTip(
