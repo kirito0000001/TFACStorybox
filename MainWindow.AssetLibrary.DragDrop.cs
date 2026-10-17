@@ -644,48 +644,10 @@ namespace GalExcleTools
             AppendLog(LogKind.Warning, "角色拖入导入暂未实现：后续会用于识别角色压缩包。");
         }
 
-        private async Task AudioGridView_DragItemsCompleted(AudioAssetKind kind)
-        {
-            if (_currentAssetLibrary is null || IsAudioNormalizing(kind))
-            {
-                SetDraggingAudioItem(kind, null);
-                return;
-            }
-
-            var gridView = GetAudioGridView(kind);
-            var orderedPaths = GetOrderedExistingTaggedPaths(gridView);
-
-            if (orderedPaths.Count == 0)
-            {
-                SetDraggingAudioItem(kind, null);
-                return;
-            }
-
-            // ⚠️ 映射按**位置**算（剧情里的 BGM / Scene / 特殊音效 Scene_n 全是位置），
-            // 而且**每种素材都要同步**：以前只有「环境音」那条同步了 —— 音乐拖完顺序后
-            // BGM 列还指着旧位置（= 换完音乐顺序，剧情里的 BGM 全部错位），同一类坑。
-            var audioFolderPath = GetAudioFolderPath(_currentAssetLibrary, kind);
-            var beforeOrderedPaths = AudioAssetService.GetFilePaths(audioFolderPath);
-            var indexRemap = BuildPositionalAssetIndexRemap(beforeOrderedPaths, orderedPaths);
-            var assetLabels = BuildPositionalLabelMaps(beforeOrderedPaths, orderedPaths);
-            LogAssetIndexRemapEvidence(AudioAssetService.GetDisplayName(kind), beforeOrderedPaths, orderedPaths);
-            SetAudioNormalizing(kind, true);
-            try
-            {
-                await NormalizeAudioFilesAsync(kind, audioFolderPath, orderedPaths);
-            }
-            finally
-            {
-                SetAudioNormalizing(kind, false);
-            }
-
-            await SyncStoryAudioIndexesAsync(_currentAssetLibrary, kind, indexRemap, assetLabels, orderedPaths.Count);
-            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
-            RequestDelayedRefresh();
-            AppendLog(LogKind.User, $"已调整{AudioAssetService.GetDisplayName(kind)}顺序并触发自动命名。");
-            SetDraggingAudioItem(kind, null);
-        }
+        // AudioGridView_DragItemsCompleted 已删：旧音频网格的拖拽落位。
+        // 它体内那套「算位置映射 → 重命名 → SyncStoryAudioIndexesAsync」逻辑，
+        // 新骨架的「移动素材」走的是 ApplyAudioOrderAsync（同一个形状，已复刻）。
+        // ⚠️ MoveDraggingAudioToEnd 与 AudioDropZone_* 一族仍在（拖放区用），留到第 5 步。
 
         // AudioGridView_DragItemsStarting 与 AudioGridView_DragOver 已删：
         // 旧音频网格的拖拽起手与悬停（三个包装处理器删完后它们已无调用者）。
