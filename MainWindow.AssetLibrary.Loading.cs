@@ -1025,24 +1025,20 @@ namespace GalExcleTools
 
         private Button CreateAddFunctionCard()
         {
-            // 照零境那张新建卡：**内容居中**（零境是一枚居中大加号）。
-            // 这里保留"+ 新建函数"两段（函数区光一个加号看不出要建什么），
-            // 但要的是同一套手感：居中、无自绘底色、圆角 8。
-            var content = new StackPanel
+            // 照零境那张新建卡**抄全**（用户 2026-10-17 指着零境的卡确认）：
+            // 一枚居中加号、**不带文字**，用途靠 ToolTip 说 —— 零境那边也是
+            // ToolTipService.ToolTip 写「新建文件夹」，卡面只有一个 +。
+            var content = new FontIcon
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = 10,
+                FontSize = 20,
+                Glyph = "\uE710",
                 HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                Children =
-                {
-                    new FontIcon { FontSize = 18, Glyph = "\uE710" },
-                    CardShell.CreateTitle("新建函数")
-                }
+                VerticalAlignment = VerticalAlignment.Center
             };
 
             var card = CardShell.CreateFlatCard(null, content);
             card.HorizontalContentAlignment = HorizontalAlignment.Center;
+            ToolTipService.SetToolTip(card, "新建函数");
             card.Click += async (_, _) => await AddFunctionAsync();
             return card;
         }
