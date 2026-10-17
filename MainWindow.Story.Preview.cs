@@ -87,6 +87,8 @@ namespace GalExcleTools
                 _storyEditorViewModel.AssetStatusText = _currentStoryAssetLibrary is null
                     ? "当前项目未关联素材库。"
                     : $"素材库：{_currentStoryAssetLibrary.Name} | 立绘：{(ShowFullCharacterArtCheckBox?.IsChecked == true ? "完整" : "上半身")}";
+                // 当前这一句画完了，顺手把前后两句的立绘预热上（见 ScheduleStoryPreviewPreload）。
+                ScheduleStoryPreviewPreload();
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -142,6 +144,156 @@ namespace GalExcleTools
                     InfoBarSeverity.Informational,
                     "背景切换模式",
                     StoryFunctionService.GetBackgroundTransitionModeRemark(_storyBackgroundTransitionMode));
+            }
+        }
+
+        /// <summary>
+        /// 立绘预加载：当前句停稳之后，把**上一句 / 下一句**用到的立绘先在后台解码进
+        /// <c>_storyPreviewImageCache</c>，这样按 ←/→ 或鼠标侧键切过去时是命中缓存、立刻出图。
+        ///
+        /// 【为什么值得做】实测（你那份素材库）：
+        ///   · 单张大图首次解码 50–95 ms（DecodePixelWidth=1280，PNG 必须整张解出来再缩放）；
+        ///   · 第三章 533 行里，相邻两句**立绘组合不同**的占 54%（532 次切换里 289 次），
+        ///     每次要解 2–6 张 → 一次切句 0.1–0.6 秒的"图慢半拍"。
+        /// 路径在**排程时**（UI 线程、很便宜：查角色已走缓存、列目录 0.04 ms）就先算好，
+        /// 异步那段只负责解码 —— 免得排队期间用户换了句、拿着旧状态乱解。
+        /// 解码本身是 WIC 在后台线程做的（SetSourceAsync），所以不会把 UI 卡住。
+        ///
+        /// 【边界】只预热相邻两句、只预热立绘（不含背景图）：缓存上限 48 张、
+        /// 每张 1280px 位图约 5 MB，预加载太多会把有用的挤出去、也白占内存。
+        /// </summary>
+        private void ScheduleStoryPreviewPreload()
+        {
+            var paths = CollectStoryPreviewPreloadPaths();
+            if (paths.Count == 0)
+            {
+                return;
+            }
+
+            _storyPreviewPreloadCancellation?.Cancel();
+            _storyPreviewPreloadCancellation?.Dispose();
+            var cancellation = new CancellationTokenSource();
+            _storyPreviewPreloadCancellation = cancellation;
+            _ = PreloadStoryPreviewImagesAsync(paths, cancellation.Token);
+        }
+
+        private List<string> CollectStoryPreviewPreloadPaths()
+        {
+            var paths = new List<string>();
+            if (_currentStoryAssetLibrary is null || _storyRows.Count == 0)
+            {
+                return paths;
+            }
+
+            foreach (var offset in new[] { 1, -1 })
+            {
+                var index = _currentStoryRowIndex + offset;
+                if (index < 0 || index >= _storyRows.Count)
+                {
+                    continue;
+                }
+
+                var row = _storyRows[index];
+                AddStorySlotPreviewPaths(row, "Talk", paths);
+                var visibleSlots = GetVisibleStoryCharacterSlotCount();
+                for (var slotIndex = 1; slotIndex <= visibleSlots; slotIndex++)
+                {
+                    AddStorySlotPreviewPaths(row, slotIndex.ToString(CultureInfo.InvariantCulture), paths);
+                }
+            }
+
+            // 鼠标停着的那一位：把它**相邻索引**的图层也预热上。
+            // 用户是按 A/D/Z/C/Q/E 一路翻着挑的（日志里那种连按），
+            // 预热 ±1 之后"下一张"基本都命中缓存，只有这一串里的第一下要等解码。
+            if (_hoveredStoryCharacterSlotIndex is int hoveredSlot)
+            {
+                AddStorySlotNeighborPreviewPaths(_storyRows[_currentStoryRowIndex], hoveredSlot, paths);
+            }
+
+            return paths;
+        }
+
+        /// <summary>这一位当前索引 ±1 的图层路径（给"连按切换"预热用）。</summary>
+        private void AddStorySlotNeighborPreviewPaths(StoryRow row, int slotIndex, List<string> paths)
+        {
+            var columnSuffix = slotIndex == 0 ? "Talk" : slotIndex.ToString(CultureInfo.InvariantCulture);
+            var characterFieldName = slotIndex == 0 ? "TalkChar" : $"Chara{columnSuffix}";
+            var character = ResolveStoryCharacter(row.Get(characterFieldName));
+            if (character is null)
+            {
+                return;
+            }
+
+            foreach (var (layerKind, columnName) in new[]
+            {
+                (CharacterLayerKind.Cloth, $"Body{columnSuffix}"),
+                (CharacterLayerKind.Face, $"Face{columnSuffix}"),
+                (CharacterLayerKind.Adorn, $"Adorn{columnSuffix}")
+            })
+            {
+                var currentIndex = ParseInt(row.Get(columnName));
+                foreach (var delta in new[] { 1, -1 })
+                {
+                    // GetStoryLayerPath 自己管装饰的偏移与越界（越界返回 null）。
+                    var path = CharacterLayerAssetService.GetStoryLayerPath(character, layerKind, currentIndex + delta);
+                    if (IsPreviewableImagePath(path) && !paths.Contains(path!))
+                    {
+                        paths.Add(path!);
+                    }
+                }
+            }
+        }
+
+        /// <summary>把这一行某一位会用到的立绘图片路径收进来（<paramref name="columnSuffix"/> 是 "Talk" 或 "1"~"5"）。</summary>
+        private void AddStorySlotPreviewPaths(StoryRow row, string columnSuffix, List<string> paths)
+        {
+            var characterFieldName = columnSuffix == "Talk" ? "TalkChar" : $"Chara{columnSuffix}";
+            var character = ResolveStoryCharacter(row.Get(characterFieldName));
+            if (character is null)
+            {
+                return;
+            }
+
+            var candidates = new[]
+            {
+                CharacterLayerAssetService.GetStoryLayerPath(character, CharacterLayerKind.Cloth, ParseInt(row.Get($"Body{columnSuffix}"))),
+                CharacterLayerAssetService.GetStoryLayerPath(character, CharacterLayerKind.Face, ParseInt(row.Get($"Face{columnSuffix}"))),
+                CharacterLayerAssetService.GetStoryLayerPath(character, CharacterLayerKind.Adorn, ParseInt(row.Get($"Adorn{columnSuffix}")))
+            };
+
+            foreach (var path in candidates)
+            {
+                if (IsPreviewableImagePath(path) && !paths.Contains(path!))
+                {
+                    paths.Add(path!);
+                }
+            }
+        }
+
+        private async Task PreloadStoryPreviewImagesAsync(List<string> paths, CancellationToken cancellationToken)
+        {
+            try
+            {
+                // 停一下再开始：连续翻页时每一页都会取消上一次预加载，
+                // 所以这条只在"用户停在这一句上"时才真的跑。
+                await Task.Delay(StoryPreviewPreloadDelay, cancellationToken);
+                foreach (var path in paths)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (_storyPreviewImageCache.ContainsKey(path))
+                    {
+                        continue;
+                    }
+
+                    await GetCachedStoryPreviewImageAsync(path, cancellationToken);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch
+            {
+                // 预加载纯属加速：失败就当没做，绝不冒泡到界面。
             }
         }
 

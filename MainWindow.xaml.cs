@@ -415,8 +415,11 @@ namespace GalExcleTools
         private CancellationTokenSource? _assetLibraryLoadCancellation;
         private CancellationTokenSource? _characterDetailLoadCancellation;
         private CancellationTokenSource? _storyPreviewRefreshCancellation;
+        private CancellationTokenSource? _storyPreviewPreloadCancellation;
         private readonly Queue<string> _storyPreviewImageCacheOrder = new();
         private const int MaxStoryPreviewImageCacheCount = 48;
+        /// <summary>立绘预加载的"停一下再开始"延时：连续翻页时每一页都会取消上一次（见 ScheduleStoryPreviewPreload）。</summary>
+        private static readonly TimeSpan StoryPreviewPreloadDelay = TimeSpan.FromMilliseconds(250);
         private bool _isWindowActive = true;
         private bool _refreshBackgroundImagesAfterDelay;
         private bool _storyTextEditUndoCaptured;
