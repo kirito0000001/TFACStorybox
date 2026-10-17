@@ -110,6 +110,9 @@ namespace GalExcleTools
             RebuildStoryPersistentFunctionState(_currentStoryRowIndex);
             UpdateStoryCharacterSlotLayout();
             LoadStoryRowIntoUi();
+            // 打开章节就核一次素材引用的身份指纹（见 MainWindow.Story.AssetIdentity.cs）：
+            // 号还在、指向的图被换过（素材重排 / 改名 / 中间插了一张）时按记录修回来。
+            VerifyAndRepairStoryAssetIdentities();
 
             WorkbenchPage.Visibility = Visibility.Collapsed;
             ProjectDetailPage.Visibility = Visibility.Collapsed;

@@ -667,6 +667,8 @@ namespace GalExcleTools
             var changedCount = StoryAssetFieldService.ApplyForwardContiguousPlan(
                 _storyRows,
                 replacementPlan);
+            // 用户自己挑的素材 → 身份指纹重记成现状（指纹只跟"用户的意思"走）。
+            CaptureStoryAssetIdentities(replacementPlan.StartIndex, replacementPlan.EndIndex);
             QueueCurrentStoryDocumentSave();
             UpdateStoryToolbarCurrentInfo();
             await RefreshStoryPreviewAsync();

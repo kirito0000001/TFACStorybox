@@ -549,6 +549,8 @@ namespace GalExcleTools
 
             CaptureStoryUndoState(replacementPlan.Count > 1 ? $"连续粘贴{displayName}" : $"粘贴{displayName}");
             var changedCount = StoryAssetFieldService.ApplyForwardContiguousPlan(_storyRows, replacementPlan);
+            // 用户自己粘的素材 → 身份指纹重记成现状（指纹只跟"用户的意思"走）。
+            CaptureStoryAssetIdentities(replacementPlan.StartIndex, replacementPlan.EndIndex);
             QueueCurrentStoryDocumentSave();
             UpdateStoryToolbarCurrentInfo();
             ShowStoryStatus(

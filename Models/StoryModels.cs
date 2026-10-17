@@ -36,6 +36,19 @@ internal sealed class StoryRow
 
     public string StableId { get; set; } = CreateStableId();
 
+    /// <summary>
+    /// 素材引用的**身份指纹**：列名 → 记录当时那个号指向的文件名（含扩展名）。
+    ///
+    /// 【它解决什么】剧情里的 BGindex / BGM / Scene 存的是**位置**（排序后列表的下标），
+    /// 位置会因为"重排 / 改名 / 中间插进一张图"而变，而号本身照样能解析成一张合法图片 ——
+    /// 也就是错位**看不出来**（用户 2026-10-16 报的"换序后有些背景乱了、已经没法复原"）。
+    /// 记下"这一句当时要的是哪个文件"，下次打开章节就能发现"号还在、图换了"，
+    /// 并按记着的名字把号修回去。
+    ///
+    /// 只存在章节 JSON 里（CSV 不写、游戏侧看不到），所以**不碰引擎那边的约定**。
+    /// </summary>
+    public Dictionary<string, string> AssetIdentities { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     public static string CreateStableId()
     {
         return Guid.NewGuid().ToString("N");
@@ -57,6 +70,11 @@ internal sealed class StoryRow
         foreach (var pair in _cells)
         {
             clone.Set(pair.Key, pair.Value);
+        }
+
+        foreach (var pair in AssetIdentities)
+        {
+            clone.AssetIdentities[pair.Key] = pair.Value;
         }
 
         clone.StableId = StableId;

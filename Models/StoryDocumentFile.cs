@@ -33,4 +33,9 @@ internal sealed class StoryDocumentLineFile
 
     public Dictionary<string, string> Cells { get; set; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// 素材引用的身份指纹（列名 → 文件名）。**只在这份 JSON 里**，
+    /// 不写进剧情 CSV、游戏侧看不到 —— 见 StoryRow.AssetIdentities 的说明。
+    /// </summary>
+    public Dictionary<string, string> AssetIdentities { get; set; } = new(StringComparer.Ordinal);
 }

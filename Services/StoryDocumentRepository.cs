@@ -88,6 +88,11 @@ internal sealed class StoryDocumentRepository
                 line.Cells[column] = row.Get(column);
             }
 
+            foreach (var pair in row.AssetIdentities)
+            {
+                line.AssetIdentities[pair.Key] = pair.Value;
+            }
+
             currentSection.Lines.Add(line);
         }
 
@@ -144,6 +149,15 @@ internal sealed class StoryDocumentRepository
                     if (StorySchema.Columns.Contains(pair.Key, StringComparer.Ordinal))
                     {
                         row.Set(pair.Key, pair.Value ?? string.Empty);
+                    }
+                }
+
+                foreach (var pair in line.AssetIdentities)
+                {
+                    if (StorySchema.Columns.Contains(pair.Key, StringComparer.Ordinal) &&
+                        !string.IsNullOrWhiteSpace(pair.Value))
+                    {
+                        row.AssetIdentities[pair.Key] = pair.Value;
                     }
                 }
 

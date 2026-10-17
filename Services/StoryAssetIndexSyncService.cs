@@ -449,6 +449,12 @@ internal sealed class StoryAssetIndexSyncService
 
         var newStoryValue = newAssetIndex + newStoryIndexOffset;
         rowContext.Row.Set(columnName, newStoryValue.ToString());
+        // 改了"号"，同一件事也必须落到**身份指纹**上：否则下次打开章节，校验会把这次
+        // **有意的**重定向当成"被人动过"，白白报一片（指纹记的是文件名）。
+        if (newLabels.TryGetValue(newAssetIndex, out var newIdentity) && !string.IsNullOrWhiteSpace(newIdentity))
+        {
+            rowContext.Row.AssetIdentities[columnName] = newIdentity;
+        }
         rowContext.Changes.Add(rowContext.CreateChange(
             columnName,
             oldStoryValue.ToString(),
