@@ -28,6 +28,20 @@ public sealed partial class MainWindow
     private FrameworkElement? _moveTargetCard;
     private FrameworkElement? _moveSourceCard;
 
+    /// <summary>
+    /// 移动素材的**两个可替换零件**：取当前分类的路径列表、把新顺序落地。
+    /// 默认（null）= 背景图那一套；音频三类在各自的填充方法里 ConfigureMoveAsset 一次即可 ——
+    /// 交互（进入模式 / 悬停高亮 / 左键落位 / 右键取消）完全通用，不必按分类再写一遍。
+    /// </summary>
+    private Func<List<string>>? _movePathProvider;
+    private Func<List<string>, Task>? _moveOrderApplier;
+
+    private void ConfigureMoveAsset(Func<List<string>> pathProvider, Func<List<string>, Task> orderApplier)
+    {
+        _movePathProvider = pathProvider;
+        _moveOrderApplier = orderApplier;
+    }
+
     private bool IsMovingBackgroundImage => _movingBackgroundImagePath is not null;
 
     /// <summary>进入移动模式（右键菜单「移动素材」）。</summary>
@@ -89,7 +103,9 @@ public sealed partial class MainWindow
             return false;
         }
 
-        var orderedPaths = ImageSetService.GetFilePaths(GetBackgroundFolderPath(_currentAssetLibrary)).ToList();
+        // 路径列表与落地动作都走"可替换零件"：默认是背景图，音频三类各自配置过就用自己的。
+        var orderedPaths = _movePathProvider?.Invoke()
+            ?? ImageSetService.GetFilePaths(GetBackgroundFolderPath(_currentAssetLibrary)).ToList();
         ClearMoveTargetHighlight();
         RestoreMoveSourceCard();
         _movingBackgroundImagePath = null;
@@ -118,7 +134,7 @@ public sealed partial class MainWindow
         orderedPaths.Insert(Math.Clamp(targetIndex + 1, 0, orderedPaths.Count), movingPath);
         AssetLibraryStatusText.Text =
             $"移动素材：已把 {Path.GetFileNameWithoutExtension(movingPath)} 放到 {Path.GetFileNameWithoutExtension(targetPath)} 后面。";
-        await ApplyBackgroundImageOrderAsync(orderedPaths);
+        await (_moveOrderApplier?.Invoke(orderedPaths) ?? ApplyBackgroundImageOrderAsync(orderedPaths));
         return true;
     }
 

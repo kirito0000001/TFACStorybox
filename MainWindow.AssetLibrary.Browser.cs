@@ -123,6 +123,11 @@ public sealed partial class MainWindow
         var orderedPaths = AudioAssetService.GetFilePaths(folderPath);
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
+        // 「移动素材」的两个零件：取这一类的路径列表 + 用 ApplyAudioOrderAsync 落地
+        //（音乐 BGM、环境音 Scene、特殊音效 Scene_n —— 落地方自己按 kind 分）。
+        ConfigureMoveAsset(
+            () => AudioAssetService.GetFilePaths(GetAudioFolderPath(assetLibrary, kind)),
+            paths => ApplyAudioOrderAsync(kind, paths));
 
         var cards = new List<object>();
         foreach (var path in orderedPaths)
@@ -140,13 +145,22 @@ public sealed partial class MainWindow
             };
 
             var card = CardShell.CreateFlatCard(path, content);
-            card.Click += (_, _) =>
+            card.Click += async (_, _) =>
             {
+                // 移动模式下：点哪张就放到哪张后面（和背景图同一套交互），点完自动退出。
+                if (await TryCompleteMoveBackgroundImageAsync(path))
+                {
+                    return;
+                }
+
                 PlaySelectionSound();
                 ShowMusicPlayerPage(path, kind);
             };
+            card.PointerMoved += Card_PointerMoved;
+            card.ContextRequested += Card_ContextRequested;
             card.ContextFlyout = GridViewItemFactory.CreateMenu(
                 GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetAudioRemarkAsync(kind, path)),
+                GridViewItemFactory.CreateMenuItem("移动素材", (_, _) => BeginMoveBackgroundImage(path, card)),
                 GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceAudioAsync(kind, path)),
                 GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteAudioAsync(kind, path)));
             Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(card, System.IO.Path.GetFileNameWithoutExtension(path));
