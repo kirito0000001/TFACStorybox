@@ -50,7 +50,7 @@ namespace GalExcleTools
         private void RegisterAssetLibraryExpanderLazyLoading()
         {
             BackgroundImagesExpander.Expanding += BackgroundImagesExpander_Expanded;
-            PropImagesExpander.Expanding += PropImagesExpander_Expanded;
+            // PropImagesExpander.Expanding += PropImagesExpander_Expanded;  ← 旧网格的展开器入口，已退休
             MusicExpander.Expanding += MusicExpander_Expanded;
             AmbientSoundExpander.Expanding += AmbientSoundExpander_Expanded;
             SoundEffectExpander.Expanding += SoundEffectExpander_Expanded;
@@ -322,36 +322,11 @@ namespace GalExcleTools
                     GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(imagePath))));
         }
 
-        private void RefreshPropImageCards(AssetLibraryInfo assetLibrary)
-        {
-            RunAssetLibraryLoad(RefreshPropImageCardsAsync(assetLibrary, GetAssetLibraryLoadToken()));
-        }
+        // RefreshPropImageCards 与 PropImagesExpander_Expanded 已删：旧网格的同步包装与展开器入口，
+        // 两者互为闭环（包装只被那个处理器调用），外面没人用。
 
-        private void PropImagesExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
-        {
-            if (_currentAssetLibrary is not null)
-            {
-                RefreshPropImageCards(_currentAssetLibrary);
-            }
-        }
-
-        private GridViewItem CreateBackgroundImageCard(string imagePath)
-        {
-            return AssetCardFactory.CreateCard(
-                160,
-                190,
-                AssetCardContentFactory.CreateImageAssetCardContent(imagePath, 148, 148),
-                imagePath,
-                (_, _) =>
-                {
-                    PlaySelectionSound();
-                    ShowBackgroundImageViewerPage(imagePath);
-                },
-                GridViewItemFactory.CreateMenu(
-                    GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetBackgroundImageRemarkAsync(imagePath)),
-                    GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceBackgroundImageAsync(imagePath)),
-                    GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(imagePath))));
-        }
+        // CreateBackgroundImageCard 已删：旧背景图卡工厂（160x190 的 AssetCardFactory 版本），
+        // 旧网格退休后引用数为 0。新骨架的背景图卡在 CardShell.CreateBackgroundCard。
 
         private void RefreshMusicCards(AssetLibraryInfo assetLibrary)
         {
