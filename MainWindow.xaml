@@ -1144,6 +1144,13 @@
                                         DragItemsStarting="BackgroundImagesGridView_DragItemsStarting"
                                         DragOver="BackgroundImagesGridView_DragOver"
                                         DragItemsCompleted="BackgroundImagesGridView_DragItemsCompleted" />
+                                    <!--
+                                        新骨架（照零境）：路径栏 + 16:9 卡片网格。
+                                        这一步只**摆上来 + 只读填充**看观感：旧的 GridView 先留着不删、
+                                        拖拽也还没接（接线要连"改索引 → 同步剧情"一起做，
+                                        见 MainWindow.Story.Sync.cs 里那三处只认 GridViewItem 的代码）。
+                                    -->
+                                    <controls:AssetBrowser x:Name="BackgroundAssetBrowser" />
                                 </StackPanel>
                             </Expander>
 

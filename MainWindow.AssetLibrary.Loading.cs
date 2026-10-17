@@ -210,6 +210,13 @@ namespace GalExcleTools
             }
 
             await RefreshBackgroundImageCardsAsync(assetLibrary, GetAssetLibraryLoadToken(), forcePopulateCards);
+
+            // 新骨架（照零境）：路径栏 + 16:9 卡片。这一步只读填充，先和旧网格并排看观感；
+            // 接上拖拽（+ 改索引同步剧情）之前，两边都会显示同一批背景图。
+            if (BackgroundAssetBrowser is not null)
+            {
+                await FillAssetBrowserWithBackgroundsAsync(BackgroundAssetBrowser, assetLibrary);
+            }
         }
 
         private async void LoadMusicFiles(AssetLibraryInfo assetLibrary)
