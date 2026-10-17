@@ -27,6 +27,11 @@ internal static class CardShell
     public const double ImageCardWidth = 190;
     public const double ImageCardHeight = 220;
 
+    /// <summary>背景图专属尺寸：**严格 16:9**（272×153）。272 + 12 间距 = 284 ≤ 292（零境那套列宽）。
+    /// 用户 2026-10-17 定的：背景图卡按 16:9 出，方便一眼看构图。</summary>
+    public const double BackgroundCardWidth = 272;
+    public const double BackgroundCardHeight = 153;
+
     /// <summary>卡片间距（零境用 12；卡片自身不带外边距时靠 ItemsWrapGrid 的 ItemWidth 排）。</summary>
     public const double CardGap = 12;
 
@@ -47,6 +52,12 @@ internal static class CardShell
     public static Button CreateImageCard(object? tag = null, UIElement? content = null)
     {
         return CreateCardShell(ImageCardWidth, ImageCardHeight, new Thickness(12), tag, content);
+    }
+
+    /// <summary>背景图卡：**16:9**（272×153）、内边距 8（图要占满，别留大白边）。</summary>
+    public static Button CreateBackgroundCard(object? tag = null, UIElement? content = null)
+    {
+        return CreateCardShell(BackgroundCardWidth, BackgroundCardHeight, new Thickness(8), tag, content);
     }
 
     /// <summary>
