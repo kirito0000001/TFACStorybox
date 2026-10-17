@@ -112,10 +112,45 @@ public sealed partial class MainWindow
                 ShowAssetBrowserLayer();
                 FillAssetBrowserWithFunctions(AssetBrowserHost, _currentAssetLibrary);
                 break;
+            case "filters" when AssetBrowserHost is not null:
+                ShowAssetBrowserLayer();
+                FillAssetBrowserWithCharacterFilters(AssetBrowserHost, _currentAssetLibrary);
+                break;
             default:
-                AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架：背景图、道具图片、音频三类、函数已好，角色滤镜与立绘按顺序来。";
+                AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架：只剩立绘了（它是两级：角色卡 → 图层卡）。";
                 break;
         }
+    }
+
+    /// <summary>
+    /// 角色滤镜铺进浏览器：卡片直接复用 <c>CreateCharacterFilterCard</c>（VFX 编号 + 备注）
+    /// 与 <c>CreateAddCharacterFilterCard</c>（一枚居中加号）。
+    ///
+    /// 列表来源与旧界面**完全一致**：<c>ReadStored</c> → <c>CharacterFilterService.Normalize</c>，
+    /// 下标就是 VFX 序号（0 起；VFX00 固定为空，和旧界面同一套口径）。
+    ///
+    /// ⚠️ 滤镜**有顺序**（顺序就是 VFX 索引），排序要同步剧情里的 VFX 列 ——
+    /// 这一步还没接（要先读旧拖拽处理器里标签映射怎么算的），所以暂时没有「移动素材」。
+    /// </summary>
+    private void FillAssetBrowserWithCharacterFilters(Controls.AssetBrowser browser, AssetLibraryInfo assetLibrary)
+    {
+        var folderPath = GetCharacterFilterFolderPath(assetLibrary);
+        browser.SetPath(folderPath);
+        browser.SetUpEnabled(true);
+
+        var storedFilters = _characterFilterService.ReadStored(assetLibrary);
+        var filters = CharacterFilterService.Normalize(storedFilters);
+
+        var cards = new List<object>();
+        // 不用 LINQ：这个文件没有 using System.Linq（用下标循环，顺便和旧界面的
+        // Select((filter, index) => (filter, index)) 是同一个口径）。
+        for (var index = 0; index < filters.Count; index++)
+        {
+            cards.Add(CreateCharacterFilterCard(filters[index], index));
+        }
+
+        cards.Add(CreateAddCharacterFilterCard());
+        browser.SetCards(cards);
     }
 
     /// <summary>
