@@ -57,9 +57,7 @@ internal static class CardShell
     /// <summary>背景图卡：**16:9**（272×153）、内边距 8（图要占满，别留大白边）。</summary>
     public static Button CreateBackgroundCard(object? tag = null, UIElement? content = null)
     {
-        // canDrag: 背景图卡要参与**自写重排**（CanDrag 让框架替我们识别拖拽手势，
-        // 不需要长按阈值；按下不动仍是点击，见 MainWindow.AssetLibrary.Reorder.cs 的说明）。
-        return CreateCardShell(BackgroundCardWidth, BackgroundCardHeight, new Thickness(8), tag, content, canDrag: true);
+        return CreateCardShell(BackgroundCardWidth, BackgroundCardHeight, new Thickness(8), tag, content);
     }
 
     /// <summary>
