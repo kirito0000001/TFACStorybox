@@ -179,39 +179,6 @@ namespace GalExcleTools
 
         // LoadMusicFiles 已删：async void 包装，调用者（旧音乐 Expander）已随整段 Expander 删除。
 
-        private async Task ReloadMusicFilesAsync(AssetLibraryInfo assetLibrary)
-        {
-            await ReloadAudioFilesAsync(assetLibrary, AudioAssetKind.Music);
-        }
-
-        // LoadAmbientSoundFiles 已删：async void 包装，调用者（旧环境音 Expander）已删除。
-
-        // LoadSoundEffectFiles 已删：async void 包装，调用者（旧特殊音效 Expander）已删除。
-
-        private async Task ReloadAudioFilesAsync(AssetLibraryInfo assetLibrary, AudioAssetKind kind, bool forcePopulateCards = false)
-        {
-            var musicFolderPath = GetAudioFolderPath(assetLibrary, kind);
-            Directory.CreateDirectory(musicFolderPath);
-
-            if (!IsAudioNormalizing(kind))
-            {
-                SetAudioNormalizing(kind, true);
-                try
-                {
-                    // 音频这条**不需要**在这里同步索引：它的重命名顺序就是 GetFilePaths
-                    // （= 剧情索引认的那个列表），改名不动位置。
-                    // 背景图那条不一样（它的排序把 jpg/webp 也算进去，而剧情的位置只数 png），
-                    // 所以只有背景图这里必须配一次索引同步 —— 见上面 ReloadBackgroundImagesAsync。
-                    await NormalizeAudioFilesAsync(kind, musicFolderPath);
-                }
-                finally
-                {
-                    SetAudioNormalizing(kind, false);
-                }
-            }
-
-            await RefreshAudioCardsAsync(assetLibrary, kind, GetAssetLibraryLoadToken(), forcePopulateCards);
-        }
 
         // 背景图旧网格的填充方法（RefreshBackgroundImageCardsAsync）已删：
         // 通读确认它只做"清网格 / 设 Expander 标题 / 设状态条 / 分批加卡片 / 记一行日志"，
