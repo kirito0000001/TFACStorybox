@@ -106,6 +106,22 @@ namespace GalExcleTools
                 _isNormalizingBackgroundImages = false;
             }
 
+            // 改备注换掉的是文件名里的标签：号与位置都没变（剧情索引不用动），
+            // 但**身份指纹记的就是文件名**，必须跟着改 —— 否则下次打开章节会报一片
+            // 「记录里那张素材已不在列表里」（用户 2026-10-17 遇到的就是这个）。
+            if (_currentAssetLibrary is not null && updatedPath is not null)
+            {
+                var identityCount = _storyAssetIndexSyncService.RenameAssetIdentity(
+                    _currentAssetLibrary,
+                    "BGindex",
+                    Path.GetFileNameWithoutExtension(imagePath),
+                    Path.GetFileNameWithoutExtension(updatedPath));
+                if (identityCount > 0)
+                {
+                    AppendLog(LogKind.Info, $"背景图改备注：已更新 {identityCount} 个章节里的素材引用指纹。");
+                }
+            }
+
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshImageSetCardsFor(imagePath);
             RequestDelayedRefresh();
@@ -757,6 +773,27 @@ namespace GalExcleTools
             finally
             {
                 SetAudioNormalizing(kind, false);
+            }
+
+            // 和背景图那条同一个道理：改名同步身份指纹（音乐 → BGM 列、环境音 → Scene 列；
+            // 特殊音效没有剧情引用，不用管）。
+            var audioIdentityColumn = kind switch
+            {
+                AudioAssetKind.Music => "BGM",
+                AudioAssetKind.Ambient => "Scene",
+                _ => null
+            };
+            if (_currentAssetLibrary is not null && renamedPath is not null && audioIdentityColumn is not null)
+            {
+                var identityCount = _storyAssetIndexSyncService.RenameAssetIdentity(
+                    _currentAssetLibrary,
+                    audioIdentityColumn,
+                    Path.GetFileNameWithoutExtension(musicPath),
+                    Path.GetFileNameWithoutExtension(renamedPath));
+                if (identityCount > 0)
+                {
+                    AppendLog(LogKind.Info, $"{AudioAssetService.GetDisplayName(kind)}改备注：已更新 {identityCount} 个章节里的素材引用指纹。");
+                }
             }
 
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);

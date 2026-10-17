@@ -301,6 +301,18 @@ namespace GalExcleTools
                     "正在检查章节索引",
                     chapter,
                     progress => Task.Run(() => _chapterRepairService.Scan(project, chapter, BuildChapterRepairAssetContext(assetLibrary), repair: false, progress)));
+                // 先过一遍"素材引用身份指纹"（记录 vs 现状）。这块**要用户在窗口里决定**
+                //（能按记录修回的 / 记录里名字已经不在的，处理方式不一样），
+                // 所以放在自动修复之前，而不是替用户做决定。
+                if (await RepairStoryAssetIdentitiesAsync(chapter, assetLibrary) >= 0)
+                {
+                    // 处理窗口可能改了文档（修回或重记），重新扫一遍才知道最新状态。
+                    scanResult = await ShowChapterRepairProgressDialogAsync(
+                        "正在检查章节索引",
+                        chapter,
+                        progress => Task.Run(() => _chapterRepairService.Scan(project, chapter, BuildChapterRepairAssetContext(assetLibrary), repair: false, progress)));
+                }
+
                 if (scanResult.IssueCount == 0)
                 {
                     ShowChapterStatus(InfoBarSeverity.Success, "章节索引正常", $"{chapter.Name}（{chapter.Code}）没有发现错开的素材索引。");

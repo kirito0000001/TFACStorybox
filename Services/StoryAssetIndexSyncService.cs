@@ -339,6 +339,37 @@ internal sealed class StoryAssetIndexSyncService
         return result.OrderBy(file => file.ProjectName).ThenBy(file => file.ChapterCode).ThenBy(file => file.CsvPath).ToList();
     }
 
+    /// <summary>
+    /// 「只改了备注（文件名里的标签）」时用：号没变、位置没变，所以剧情里的**索引不用动**；
+    /// 但**身份指纹记的是文件名**，必须跟着改 —— 否则下次打开章节会报一片
+    /// 「记录里那张素材已不在列表里」（用户 2026-10-17 在工具箱里改备注后遇到的就是这个）。
+    /// </summary>
+    public int RenameAssetIdentity(
+        AssetLibraryInfo assetLibrary,
+        string columnName,
+        string oldFileName,
+        string newFileName)
+    {
+        if (string.IsNullOrWhiteSpace(oldFileName) ||
+            string.IsNullOrWhiteSpace(newFileName) ||
+            string.Equals(oldFileName, newFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        return UpdateStoryRowsForAssetLibrary(assetLibrary, row =>
+        {
+            if (!row.AssetIdentities.TryGetValue(columnName, out var recorded) ||
+                !string.Equals(recorded, oldFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            row.AssetIdentities[columnName] = newFileName;
+            return true;
+        });
+    }
+
     private int UpdateStoryRowsForAssetLibrary(AssetLibraryInfo assetLibrary, Func<StoryRow, bool> updateRow)
     {
         var changedFileCount = 0;
