@@ -628,18 +628,15 @@ namespace GalExcleTools
 
         private void DisableListItemEntranceTransitions()
         {
+            // 只列**还活着**的网格：素材页旧网格（背景图 / 立绘 / 音频三类 / 函数 / 滤镜）
+            // 已随整段 Expander 删除，它们的 XAML 字段不存在了，列在这里会编译失败。
+            // 新骨架的浏览器网格也顺手加上（AssetBrowserHost.CardsHost），保持观感一致。
             GridView[] gridViews =
             [
                 ProjectsGridView,
                 ChaptersGridView,
                 AssetLibrariesGridView,
-                BackgroundImagesGridView,
-                CharacterGridView,
-                MusicGridView,
-                AmbientSoundGridView,
-                SoundEffectGridView,
-                FunctionGridView,
-                CharacterFilterGridView,
+                AssetBrowserHost.CardsHost,
                 CharacterClothGridView,
                 CharacterFaceGridView,
                 CharacterAdornGridView,
