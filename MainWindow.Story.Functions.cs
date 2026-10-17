@@ -707,19 +707,24 @@ namespace GalExcleTools
         /// 不需要可视的关闭键，而且有撤回兜底。
         /// </summary>
         /// <summary>
-        /// 粘贴那条路要不要每次都问（判据在下面两个确认方法的开头）。
-        /// 用户 2026-10-16 的要求：Ctrl+V 之后要能自己选连续更换还是只换一句。
+        /// 范围里只有当前这一句时**一律不弹窗**：那种情况下"连续更换"和"只换一张"是同一件事，
+        /// 问了也没得选（用户 2026-10-16 之后的要求）。
+        ///
+        /// 注：以前这里还挂着一个 <c>_alwaysAskStoryReplacementConfirm</c> 开关（粘贴那条路
+        /// 强制每次都问）。这条规则一落地，那个开关就没有任何作用了，已删。
         /// </summary>
-        private bool _alwaysAskStoryReplacementConfirm;
+        private static bool ShouldSkipStoryReplacementConfirm(int count)
+        {
+            return count <= 1;
+        }
 
         private async Task<DialogResultKind> ConfirmStoryAssetReplacementAsync(
             StoryAssetReplacementPlan replacementPlan,
             string displayName,
             Func<int, string> formatValue)
         {
-            if (!_alwaysAskStoryReplacementConfirm && replacementPlan.Count <= 1)
+            if (ShouldSkipStoryReplacementConfirm(replacementPlan.Count))
             {
-                // 范围内本来就只有一句，"只换一张"和"连续更换"是同一件事，不必问。
                 return DialogResultKind.Primary;
             }
 
@@ -747,7 +752,7 @@ namespace GalExcleTools
             string displayName,
             Func<string, string> formatValue)
         {
-            if (!_alwaysAskStoryReplacementConfirm && replacementPlan.Count <= 1)
+            if (ShouldSkipStoryReplacementConfirm(replacementPlan.Count))
             {
                 return DialogResultKind.Primary;
             }
@@ -774,12 +779,17 @@ namespace GalExcleTools
         /// 载荷是**整份立绘数据**（角色 + 服装/表情/装饰/滤镜）；范围按"和当前句一模一样"划 ——
         /// 五列里任何一列不同就停，所以停止原因要带上**是哪一列不同**
         ///（用户 2026-10-16：「不能只看角色的变化，服装或者表情有变化也得停下」）。
-        /// 另外这条路**每次都问**（用户 2026-10-16 的要求），所以这里没有"范围内只有一句就不问"的短路。
+        /// 范围里只有当前这一句时不问（那种情况下三个按钮里有两个是同一件事）。
         /// </summary>
         private async Task<DialogResultKind> ConfirmStoryCharacterSlotReplacementAsync(
             StoryCharacterSlotReplacementPlan replacementPlan,
             string slotDisplayName)
         {
+            if (ShouldSkipStoryReplacementConfirm(replacementPlan.Count))
+            {
+                return DialogResultKind.Primary;
+            }
+
             var stopText = replacementPlan.StopReason switch
             {
                 StoryAssetReplacementStopReason.DifferentContext =>

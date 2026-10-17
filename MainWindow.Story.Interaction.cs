@@ -350,8 +350,8 @@ namespace GalExcleTools
                 return;
             }
 
-            // 粘贴一律弹窗让用户自己选（连续粘贴 / 只粘这一句）。
-            _alwaysAskStoryReplacementConfirm = true;
+            // 弹窗让用户自己选（连续粘贴 / 只粘这一句）——但**范围里只有当前这一句时不问**，
+            // 那种情况下两个按钮是同一件事（判据在 ConfirmStoryCharacterSlotReplacementAsync 里）。
 
             if (_storyCharacterSlotClipboard is null)
             {
@@ -480,8 +480,7 @@ namespace GalExcleTools
                 return;
             }
 
-            // 粘贴一律弹窗让用户自己选（连续更换 / 只换一句）。
-            _alwaysAskStoryReplacementConfirm = true;
+            // 弹窗让用户自己选（连续更换 / 只换这一句）——同样是**范围只有一句时不问**。
 
             if (_storyAssetClipboard is null)
             {
