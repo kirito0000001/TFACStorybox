@@ -274,25 +274,9 @@ namespace GalExcleTools
         /// 保持同构是刻意的：以后改"卡片怎么分批加载"这类逻辑，两处一起看清爽，
         /// 也不会出现"背景图修了、道具图片没修"这种分叉。
         /// </summary>
-        private async Task RefreshPropImageCardsAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
-        {
-            var propFolderPath = GetPropImageFolderPath(assetLibrary);
-            var imagePaths = ImageSetService.GetFilePaths(propFolderPath);
-
-            PropImagesGridView.Items.Clear();
-            PropImagesExpander.Header = $"道具图片 [数量：{imagePaths.Count}]";
-            if (forcePopulateCards || PropImagesExpander.IsExpanded)
-            {
-                await AddGridViewItemsInBatchesAsync(
-                    PropImagesGridView,
-                    imagePaths,
-                    CreatePropImageCard,
-                    cancellationToken,
-                    batchSize: 8);
-            }
-
-            AppendLog(LogKind.Info, $"已加载道具图片：{imagePaths.Count} 个文件。");
-        }
+        // RefreshPropImageCardsAsync 已删：通读确认它只做旧网格填充（清网格、设 Expander 标题、
+        // 分批加卡片、记一行日志），没有规范化或同步。日志那行已挪到新骨架的
+        // FillAssetBrowserWithPropImagesAsync。与背景图那条逐行同构 —— 删法也一样。
 
         /// <summary>
         /// 一张道具图片的卡片。
@@ -304,23 +288,8 @@ namespace GalExcleTools
         /// （显示、左右翻、改备注、替换、删除都按文件自己所在目录走）。
         /// 名字没跟着改是这一版刻意留的：改名会牵动好几处调用点，价值不大、风险不小。
         /// </summary>
-        private GridViewItem CreatePropImageCard(string imagePath)
-        {
-            return AssetCardFactory.CreateCard(
-                160,
-                190,
-                AssetCardContentFactory.CreateImageAssetCardContent(imagePath, 148, 148),
-                imagePath,
-                (_, _) =>
-                {
-                    PlaySelectionSound();
-                    ShowBackgroundImageViewerPage(imagePath);
-                },
-                GridViewItemFactory.CreateMenu(
-                    GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetBackgroundImageRemarkAsync(imagePath)),
-                    GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceBackgroundImageAsync(imagePath)),
-                    GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(imagePath))));
-        }
+        // CreatePropImageCard 已删：160x190 的旧道具卡工厂，只被上面的旧填充引用；
+        // 新骨架的道具卡是 CardShell.CreateImageCard（190x220 带图卡）。
 
         // RefreshPropImageCards 与 PropImagesExpander_Expanded 已删：旧网格的同步包装与展开器入口，
         // 两者互为闭环（包装只被那个处理器调用），外面没人用。

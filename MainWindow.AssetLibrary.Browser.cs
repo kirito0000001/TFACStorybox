@@ -344,6 +344,8 @@ public sealed partial class MainWindow
     {
         var folderPath = GetPropImageFolderPath(assetLibrary);
         var orderedPaths = ImageSetService.GetFilePaths(folderPath);
+        // 这行日志原来在旧网格的填充方法里（已退休），挪过来免得用户熟悉的日志消失。
+        AppendLog(LogKind.Info, $"已加载道具图片：{orderedPaths.Count} 个文件。");
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
         // 「移动素材」的两个零件：取道具图片列表 + 只重排编号（无 CSV 同步）。
