@@ -655,39 +655,9 @@ namespace GalExcleTools
             return string.IsNullOrWhiteSpace(remark) ? null : remark;
         }
 
-        private GridViewItem CreateAddCharacterCard()
-        {
-            return AssetCardFactory.CreateCard(
-                150,
-                220,
-                AssetCardContentFactory.CreateAddCharacterCardContent(),
-                tappedHandler: async (_, _) => await CreateCharacterAsync());
-        }
-
-        private GridViewItem CreateCharacterCard(CharacterInfo character)
-        {
-            var content = AssetCardContentFactory.CreateCharacterCardContent(
-                character.Code,
-                character.Name,
-                character.ColorHex);
-            var warningMessage = GetCharacterPortraitPreviewWarningMessage(character);
-            var cardContent = warningMessage is null
-                ? content
-                : CreateWarningBadgeOverlay(content, warningMessage);
-
-            return AssetCardFactory.CreateCard(
-                150,
-                220,
-                cardContent,
-                character,
-                (_, _) =>
-                {
-                    PlaySelectionSound();
-                    ShowCharacterDetailPage(character);
-                },
-                GridViewItemFactory.CreateMenu(
-                    GridViewItemFactory.CreateMenuItem("重命名", async (_, _) => await RenameCharacterAsync(character))));
-        }
+        // CreateAddCharacterCard 与 CreateCharacterCard 已删：旧立绘网格的卡片工厂
+        //（150×220 的 AssetCardFactory 版本，调用者 LoadCharactersAsync 已随旧网格删除）。
+        // 新骨架的立绘卡是 CardShell 扁平小卡（中文名 + 英文代号，点开进角色详情页）。
 
         private GridViewItem CreateMusicCard(string musicPath)
         {
