@@ -255,6 +255,14 @@ public sealed partial class MainWindow
 
         var storedFilters = _characterFilterService.ReadStored(assetLibrary);
         var filters = CharacterFilterService.Normalize(storedFilters);
+        // 旧加载器末尾藏着一步"回写修复"：规范化若改动过内容（数量或顺序不同），就把清单写回。
+        // 这是非显示行为，删旧网格时不能连它一起丢 —— 原样搬过来（含两个守卫判断）。
+        if (!_isRepairingCharacterFilters &&
+            !_isReorderingCharacterFilters &&
+            (filters.Count != storedFilters.Count || !filters.SequenceEqual(storedFilters)))
+        {
+            _ = RepairStoredCharacterFiltersAsync(assetLibrary, storedFilters, filters);
+        }
 
         var cards = new List<object>();
         // 不用 LINQ：这个文件没有 using System.Linq（用下标循环，顺便和旧界面的

@@ -56,7 +56,7 @@ namespace GalExcleTools
             // SoundEffectExpander.Expanding += SoundEffectExpander_Expanded;  ← 旧网格的展开器入口，已退休
             // CharactersExpander.Expanding += CharactersExpander_Expanded;  ← 旧网格的展开器入口，已退休
             // FunctionExpander.Expanding += FunctionExpander_Expanded;  ← 旧网格的展开器入口，已退休
-            CharacterFilterExpander.Expanding += CharacterFilterExpander_Expanded;
+            // CharacterFilterExpander.Expanding += CharacterFilterExpander_Expanded;  ← 旧网格的展开器入口，已退休
         }
 
         private void RegisterCharacterDetailExpanderLazyLoading()
@@ -77,7 +77,7 @@ namespace GalExcleTools
             // 打开素材库时不再刷新旧函数网格（浏览器由分类卡点击时填充，
             // 函数的"从关联项目收录"也在打开函数分类时做）。
             // 打开素材库时不再刷新旧角色网格（浏览器由分类卡点击时填充）。
-            RunAssetLibraryLoad(LoadCharacterFiltersAsync(assetLibrary, cancellationToken));
+            // 打开素材库时不再刷新旧滤镜网格（浏览器由分类卡点击时填充）。
         }
 
         private void BackgroundImagesExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)

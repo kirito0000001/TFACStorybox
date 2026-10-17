@@ -317,7 +317,7 @@ namespace GalExcleTools
 
             var syncResult = await SyncStoryCharacterFilterIndexesWithProgressAsync(_currentAssetLibrary, indexRemap, oldLabels, newLabels, filters.Count);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            LoadCharacterFilters(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
             if (syncResult.ChangedCsvCount > 0)
             {
