@@ -24,6 +24,10 @@ namespace GalExcleTools;
 /// </summary>
 public sealed partial class MainWindow
 {
+    /// <summary>当前正开着的分类 key（在分类层时为 null）—— 改备注 / 替换 / 删除 / 导入那些
+    /// 功能路径靠它决定重铺哪个分类的卡片，见 RefreshCurrentAssetCategoryAsync。</summary>
+    private string? _currentAssetCategoryKey;
+
     /// <summary>一个分类卡：key 用来分发到各自的叶子层，count 是卡上的副标题。</summary>
     private sealed record AssetCategoryEntry(string Key, string Title, string CountText);
 
