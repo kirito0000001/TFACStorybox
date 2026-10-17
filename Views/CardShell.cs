@@ -66,18 +66,20 @@ internal static class CardShell
             Padding = padding,
             Margin = new Thickness(0, 0, CardGap, CardGap),
             HorizontalAlignment = HorizontalAlignment.Left,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            VerticalContentAlignment = VerticalAlignment.Center,
-            BorderThickness = new Thickness(CardBorderThickness),
-            CornerRadius = new CornerRadius(CardCornerRadius),
             Tag = tag
         };
 
-        // ⚠️ 描边**不在这里取画笔**：代码里 Application.Current.Resources[...] 拿到的是
-        // **应用级主题**那一套，而本工具的夜间模式切的是元素的 RequestedTheme ——
-        // 取出来就是"浅色那套"，夜间模式下描边直接看不见（用户 2026-10-17 报的
-        // "文本/颜色不跟着夜间模式变" 就是这个坑，本项目以前也栽过一次）。
-        // Button 不设 BorderBrush 时用的是**主题自带的控件描边**，跟着元素主题走，正解。
+        // 外观走 App 级样式（和零境同构：描边 / 圆角 / 对齐都在 XAML 里用 {ThemeResource} 定）。
+        // ⚠️ 这里**只取 Style，不取画笔**：代码里 Application.Current.Resources[…] 拿到的是
+        // **应用级主题**那套画笔，而本工具的夜间模式切的是元素的 RequestedTheme ——
+        // 代码取画笔就会拿错（用户 2026-10-17 报的"黑底黑字"就是这个）。
+        if (Application.Current?.Resources is { } resources &&
+            resources.TryGetValue("CardButtonStyle", out var style) &&
+            style is Style cardStyle)
+        {
+            button.Style = cardStyle;
+        }
+
         if (content is not null)
         {
             button.Content = content;

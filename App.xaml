@@ -81,6 +81,20 @@
                     <Setter Property="CornerRadius" Value="6" />
                     <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
                 </Style>
+                <!--
+                    卡片外壳（列表卡 / 素材卡）：照隔壁零境那套 —— 卡片就是 Button 自己、
+                    不套 Border、**不设底色**（悬停 / 按下交给系统状态色）、1px 主题描边 + 圆角 8。
+                    描边**必须**走 ThemeResource：代码里 Application.Current.Resources[…]
+                    拿到的是**应用级主题**那套画笔，而本工具的夜间模式切的是元素的
+                    RequestedTheme —— 代码取画笔会拿错（2026-10-17 栽过一次）。
+                -->
+                <Style x:Key="CardButtonStyle" TargetType="Button">
+                    <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                    <Setter Property="BorderThickness" Value="1" />
+                    <Setter Property="CornerRadius" Value="8" />
+                    <Setter Property="HorizontalContentAlignment" Value="Left" />
+                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                </Style>
                 <Style x:Key="PageTitleStyle" TargetType="TextBlock">
                     <Setter Property="FontSize" Value="28" />
                     <Setter Property="FontWeight" Value="SemiBold" />
