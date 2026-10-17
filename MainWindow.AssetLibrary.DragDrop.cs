@@ -196,15 +196,9 @@ namespace GalExcleTools
             await AudioDropZone_Drop(AudioAssetKind.Ambient, e);
         }
 
-        private async void SoundEffectGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
-        {
-            await AudioGridView_DragItemsCompleted(AudioAssetKind.SoundEffect);
-        }
+        // SoundEffectGridView_DragItemsCompleted 已删：旧特殊音效网格的拖拽落位。
 
-        private void SoundEffectGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
-        {
-            AudioGridView_DragItemsStarting(AudioAssetKind.SoundEffect, sender, e);
-        }
+        // SoundEffectGridView_DragItemsStarting 已删：旧特殊音效网格的拖拽起手。
 
         private void SoundEffectGridView_DragOver(object sender, DragEventArgs e)
         {
