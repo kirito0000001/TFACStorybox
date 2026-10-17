@@ -145,26 +145,4 @@ internal static class AssetCardContentFactory
     }
 
 
-    private static Border CreateCharacterColorBlock(string text, Brush background, double fontSize)
-    {
-        return new Border
-        {
-            Width = 138,
-            Height = 178,
-            CornerRadius = new CornerRadius(8),
-            BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-            BorderThickness = new Thickness(1),
-            Background = background,
-            Child = new TextBlock
-            {
-                Text = text,
-                FontSize = fontSize,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                TextAlignment = TextAlignment.Center
-            }
-        };
-    }
 }

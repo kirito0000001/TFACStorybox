@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -134,15 +134,4 @@ internal static class CardShell
     /// 主题画笔按 key 取（和零境一个规矩：**不自造颜色**，能用系统主题键就用）。
     /// 取不到返回 null —— 保持控件默认外观，绝不写死一个灰色顶上去。
     /// </summary>
-    private static Brush? TryGetThemeBrush(string key)
-    {
-        if (Application.Current?.Resources is { } resources &&
-            resources.TryGetValue(key, out var value) &&
-            value is Brush brush)
-        {
-            return brush;
-        }
-
-        return null;
-    }
 }

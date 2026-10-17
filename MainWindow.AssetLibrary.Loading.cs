@@ -570,10 +570,6 @@ namespace GalExcleTools
         //（150×220 的 AssetCardFactory 版本，调用者 LoadCharactersAsync 已随旧网格删除）。
         // 新骨架的立绘卡是 CardShell 扁平小卡（中文名 + 英文代号，点开进角色详情页）。
 
-        private GridViewItem CreateMusicCard(string musicPath)
-        {
-            return CreateAudioCard(AudioAssetKind.Music, musicPath);
-        }
 
         private string? GetCharacterPortraitPreviewWarningMessage(CharacterInfo character)
         {
