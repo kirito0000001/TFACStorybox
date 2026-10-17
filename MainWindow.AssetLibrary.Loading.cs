@@ -1058,14 +1058,20 @@ namespace GalExcleTools
                 stretchContent: true);
         }
 
-        private GridViewItem CreateAddCharacterFilterCard()
+        private Button CreateAddCharacterFilterCard()
         {
-            return AssetCardFactory.CreateCard(
-                220,
-                64,
-                AssetCardContentFactory.CreateAddCharacterFilterCardContent(),
-                tappedHandler: async (_, _) => await AddCharacterFilterAsync(),
-                stretchContent: true);
+            // 和新建函数卡同一条口径（用户 2026-10-17 确认过）：一枚居中加号、不带文字、用途走 ToolTip。
+            var card = CardShell.CreateFlatCard(null, new FontIcon
+            {
+                FontSize = 20,
+                Glyph = "\uE710",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            card.HorizontalContentAlignment = HorizontalAlignment.Center;
+            ToolTipService.SetToolTip(card, "新建角色滤镜");
+            card.Click += async (_, _) => await AddCharacterFilterAsync();
+            return card;
         }
 
         private GridViewItem CreateAudioCard(AudioAssetKind kind, string musicPath)
