@@ -138,6 +138,11 @@ public sealed partial class MainWindow
         var folderPath = GetCharacterFilterFolderPath(assetLibrary);
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
+        // 「移动素材」的两个零件：滤镜的条目身份就是 CharacterFilterEntry（卡片 Tag 也是它），
+        // 落地走 ApplyCharacterFilterOrderAsync（写清单 + 同步所有章节的 VFX 索引）。
+        ConfigureMoveAsset(
+            () => CharacterFilterService.Normalize(_characterFilterService.ReadStored(assetLibrary)).Cast<object>().ToList(),
+            items => ApplyCharacterFilterOrderAsync(items.Cast<CharacterFilterEntry>().ToList()));
 
         var storedFilters = _characterFilterService.ReadStored(assetLibrary);
         var filters = CharacterFilterService.Normalize(storedFilters);
@@ -147,7 +152,19 @@ public sealed partial class MainWindow
         // Select((filter, index) => (filter, index)) 是同一个口径）。
         for (var index = 0; index < filters.Count; index++)
         {
-            cards.Add(CreateCharacterFilterCard(filters[index], index));
+            var filterCard = CreateCharacterFilterCard(filters[index], index);
+            // 滤镜卡自己**没有任何点击处理**（查过），所以挂"移动模式点击"不会双重触发：
+            // 不在移动模式时这里什么都不做，右键菜单与删除照旧。
+            filterCard.Tapped += async (_, _) =>
+            {
+                if (filterCard.Tag is { } identity)
+                {
+                    await TryCompleteMoveBackgroundImageAsync(identity);
+                }
+            };
+            filterCard.PointerMoved += Card_PointerMoved;
+            filterCard.ContextRequested += Card_ContextRequested;
+            cards.Add(filterCard);
         }
 
         cards.Add(CreateAddCharacterFilterCard());

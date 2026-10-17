@@ -1070,6 +1070,8 @@ namespace GalExcleTools
             var card = CardShell.CreateFlatCard(filter, content);
             card.ContextFlyout = canEdit
                 ? GridViewItemFactory.CreateMenu(
+                    // 空滤镜（VFX00 固定为空）不给「移动素材」：把第 0 位挪走会把所有索引顶掉。
+                    GridViewItemFactory.CreateMenuItem("移动素材", (_, _) => BeginMoveBackgroundImage(filter, card)),
                     GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteCharacterFilterAsync(filter)))
                 : null;
             return card;
