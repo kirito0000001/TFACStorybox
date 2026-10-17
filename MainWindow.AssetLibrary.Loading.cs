@@ -54,7 +54,7 @@ namespace GalExcleTools
             MusicExpander.Expanding += MusicExpander_Expanded;
             AmbientSoundExpander.Expanding += AmbientSoundExpander_Expanded;
             SoundEffectExpander.Expanding += SoundEffectExpander_Expanded;
-            CharactersExpander.Expanding += CharactersExpander_Expanded;
+            // CharactersExpander.Expanding += CharactersExpander_Expanded;  ← 旧网格的展开器入口，已退休
             // FunctionExpander.Expanding += FunctionExpander_Expanded;  ← 旧网格的展开器入口，已退休
             CharacterFilterExpander.Expanding += CharacterFilterExpander_Expanded;
         }
@@ -76,7 +76,7 @@ namespace GalExcleTools
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, AudioAssetKind.SoundEffect, cancellationToken));
             // 打开素材库时不再刷新旧函数网格（浏览器由分类卡点击时填充，
             // 函数的"从关联项目收录"也在打开函数分类时做）。
-            RunAssetLibraryLoad(LoadCharactersAsync(assetLibrary, cancellationToken));
+            // 打开素材库时不再刷新旧角色网格（浏览器由分类卡点击时填充）。
             RunAssetLibraryLoad(LoadCharacterFiltersAsync(assetLibrary, cancellationToken));
         }
 
@@ -116,7 +116,7 @@ namespace GalExcleTools
         {
             if (_currentAssetLibrary is not null)
             {
-                RunAssetLibraryLoad(LoadCharactersAsync(_currentAssetLibrary, GetAssetLibraryLoadToken(), true));
+                // 旧角色网格的展开器入口已退休（处理器与注册随方法本体一起删）。
             }
         }
 
