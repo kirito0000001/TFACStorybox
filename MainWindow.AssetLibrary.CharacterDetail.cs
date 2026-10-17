@@ -66,7 +66,7 @@ namespace GalExcleTools
             }
 
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            LoadCharacters(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             AppendLog(LogKind.User, $"创建角色：{input.Name}（{input.Code}）");
         }
 
@@ -103,7 +103,7 @@ namespace GalExcleTools
                 string.Empty,
                 input.Code);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            LoadCharacters(_currentAssetLibrary);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             if (_currentCharacter is not null && PathsEqual(_currentCharacter.Path, character.Path))
             {
                 ShowCharacterDetailPage(updatedCharacter);

@@ -112,13 +112,7 @@ namespace GalExcleTools
             }
         }
 
-        private void CharactersExpander_Expanded(Expander sender, ExpanderExpandingEventArgs e)
-        {
-            if (_currentAssetLibrary is not null)
-            {
-                // 旧角色网格的展开器入口已退休（处理器与注册随方法本体一起删）。
-            }
-        }
+        // CharactersExpander_Expanded 已删：旧网格的展开器入口（注册上一轮已注释）。
 
         // FunctionExpander_Expanded 已删：旧网格的展开器入口（注册已注释），随旧加载器退休。
 
@@ -335,29 +329,9 @@ namespace GalExcleTools
             RunAssetLibraryLoad(RefreshAudioCardsAsync(assetLibrary, kind, GetAssetLibraryLoadToken()));
         }
 
-        private async Task LoadCharactersAsync(AssetLibraryInfo assetLibrary, CancellationToken cancellationToken, bool forcePopulateCards = false)
-        {
-            var characters = _characterWorkspaceService.GetCharactersByName(assetLibrary);
-
-            CharacterGridView.Items.Clear();
-            CharactersExpander.Header = $"立绘 [数量：{characters.Count}]";
-            if (forcePopulateCards || CharactersExpander.IsExpanded)
-            {
-                await AddGridViewItemsInBatchesAsync(
-                    CharacterGridView,
-                    characters,
-                    CreateCharacterCard,
-                    cancellationToken);
-                CharacterGridView.Items.Add(CreateAddCharacterCard());
-            }
-
-            AppendLog(LogKind.Info, $"已加载角色卡：{characters.Count} 个。");
-        }
-
-        private void LoadCharacters(AssetLibraryInfo assetLibrary)
-        {
-            RunAssetLibraryLoad(LoadCharactersAsync(assetLibrary, GetAssetLibraryLoadToken()));
-        }
+        // LoadCharactersAsync 与 LoadCharacters 已删：旧角色网格的填充与其同步包装。
+        // 调用点（创建 / 重命名角色后、打开素材库时）都已改走统一重铺或删除。
+        // 日志"已加载角色卡：N 个"暂未搬 —— 下次连同两个旧角色卡工厂一起收尾。
 
         // LoadFunctionsAsync 已删：函数的来源与"从关联项目收录函数主项"都搬到了新骨架的
         // FillAssetBrowserWithFunctions（见 f2576d0），这里只剩旧网格填充，所以退休。
