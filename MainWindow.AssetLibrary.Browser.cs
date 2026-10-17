@@ -292,14 +292,37 @@ public sealed partial class MainWindow
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
 
+        // ⚠️ 函数的来源是**素材库自己的函数目录**（StoryFunctionService.ReadFunctions），
+        // 不是剧情侧那份（GetStoryFunctions 读的是 _currentStoryAssetLibrary）——
+        // 我一开始写成了后者，那样在素材页里很可能一张函数卡都不显示。
+        // 顺带把旧加载器里的"从关联项目收录函数主项"搬过来：那是**数据初始化**，不是显示。
+        var linkedChapters = _projectWorkspaceService.GetProjects(_projectRootPath)
+            .Where(project =>
+                string.Equals(project.AssetLibraryFolderName, assetLibrary.FolderName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(project.AssetLibraryName, assetLibrary.Name, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(_projectWorkspaceService.GetChapters)
+            .ToList();
+        var collectedCount = StoryFunctionService.CollectFunctionsFromChapters(
+            assetLibrary,
+            linkedChapters,
+            _storyDocumentRepository,
+            _jsonOptions);
+        var functions = StoryFunctionService.ReadFunctions(assetLibrary, _jsonOptions);
+
         var cards = new List<object>();
-        foreach (var function in GetStoryFunctions())
+        for (var index = 0; index < functions.Count; index++)
         {
-            cards.Add(CreateFunctionCard(function));
+            cards.Add(CreateFunctionCard(functions[index]));
         }
 
         cards.Add(CreateAddFunctionCard());
         browser.SetCards(cards);
+
+        AppendLog(LogKind.Info, $"已加载函数卡：{functions.Count} 个。");
+        if (collectedCount > 0)
+        {
+            AppendLog(LogKind.Info, $"已从关联项目收录函数主项：新增 {collectedCount} 个。");
+        }
     }
 
     /// <summary>
