@@ -660,63 +660,10 @@ namespace GalExcleTools
             return AssetBrowserHost?.CardsHost ?? BackgroundImagesGridView;
         }
 
-        private async void BackgroundImagesDropZone_Drop(object sender, DragEventArgs e)
-        {
-            if (_draggingBackgroundImageItem is not null)
-            {
-                MoveDraggingBackgroundImageToEnd(ResolveActiveBackgroundImageGrid());
-                e.Handled = true;
-                return;
-            }
-
-            if (!e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                return;
-            }
-
-            e.Handled = true;
-            var deferral = e.GetDeferral();
-            try
-            {
-                var storageItems = await e.DataView.GetStorageItemsAsync();
-                var droppedImagePaths = storageItems
-                    .OfType<StorageFile>()
-                    .Select(file => file.Path)
-                    .Where(ImageSetService.IsValidSourcePath)
-                    .ToList();
-
-                var importedCount = await ImportBackgroundImagesAsync(droppedImagePaths);
-                if (importedCount > 0)
-                {
-                    ShowFloatingTip(
-                        InfoBarSeverity.Success,
-                        "背景图已导入",
-                        $"已拖入导入 {importedCount} 个文件。",
-                        logMessage: $"拖入导入背景图：{importedCount} 个文件。");
-                }
-                else
-                {
-                    ShowFloatingTip(
-                        InfoBarSeverity.Warning,
-                        "没有导入背景图",
-                        "拖入内容中没有可导入的图片文件。",
-                        logMessage: "拖入内容中没有可导入的背景图文件。");
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowFloatingTip(
-                    InfoBarSeverity.Error,
-                    "背景图导入失败",
-                    "错误详情已复制到剪贴板，并写入 Log。",
-                    ex,
-                    "拖入导入背景图失败。");
-            }
-            finally
-            {
-                deferral.Complete();
-            }
-        }
+        // BackgroundImagesDropZone_Drop 已删：旧背景图拖放区的落下处理。
+        // 它带"拖入文件即导入背景图"的逻辑（调 ImportBackgroundImagesAsync）——
+        // 导入入口已记入 Docs/2026-10-17-素材页导入入口待补.md，服务方法都还在，
+        // 补入口时照那份文档做即可（写法可从 git 历史恢复）。
 
         private void MoveDraggingBackgroundImageToEnd(GridView grid)
         {
