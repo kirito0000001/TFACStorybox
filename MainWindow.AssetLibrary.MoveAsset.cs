@@ -103,6 +103,32 @@ public sealed partial class MainWindow
         return true;
     }
 
+    /// <summary>
+    /// 移动模式下**右键 = 取消**（用户 2026-10-17 定的：左键确定、右键取消）。
+    ///
+    /// ⚠️ 挂的是 <c>ContextRequested</c> 而不是 <c>RightTapped</c>：卡片的右键菜单是
+    /// 在 ContextRequested 上弹出的，只把 RightTapped 标记处理掉**拦不住菜单**。
+    /// 这里 args.Handled = true 才是"这次右键不弹菜单"的正解。
+    /// </summary>
+    private void Card_ContextRequested(UIElement sender, Microsoft.UI.Xaml.Input.ContextRequestedEventArgs args)
+    {
+        if (!IsMovingBackgroundImage)
+        {
+            return;
+        }
+
+        args.Handled = true;
+        CancelMoveBackgroundImage();
+    }
+
+    /// <summary>取消移动模式（右键，或点到自己那张）。</summary>
+    private void CancelMoveBackgroundImage()
+    {
+        ClearMoveTargetHighlight();
+        _movingBackgroundImagePath = null;
+        AssetLibraryStatusText.Text = "移动素材：已取消。";
+    }
+
     private void ClearMoveTargetHighlight()
     {
         if (_moveTargetCard is Control control)

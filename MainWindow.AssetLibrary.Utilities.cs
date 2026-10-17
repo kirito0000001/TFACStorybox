@@ -156,6 +156,8 @@ namespace GalExcleTools
                 ShowBackgroundImageViewerPage(path);
             };
             card.PointerMoved += Card_PointerMoved;
+            // 移动模式下右键 = 取消（要挂 ContextRequested 才拦得住卡片菜单，见 MoveAsset.cs）。
+            card.ContextRequested += Card_ContextRequested;
             card.ContextFlyout = GridViewItemFactory.CreateMenu(
                 GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetBackgroundImageRemarkAsync(path)),
                 GridViewItemFactory.CreateMenuItem("移动素材", (_, _) => BeginMoveBackgroundImage(path)),
