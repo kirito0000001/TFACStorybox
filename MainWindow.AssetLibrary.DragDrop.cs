@@ -543,16 +543,8 @@ namespace GalExcleTools
             }
         }
 
-        private void CharacterDropZone_Drop(object sender, DragEventArgs e)
-        {
-            if (!e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                return;
-            }
-
-            e.Handled = true;
-            AppendLog(LogKind.Warning, "角色拖入导入暂未实现：后续会用于识别角色压缩包。");
-        }
+        // CharacterDropZone_Drop 已删：旧立绘拖放区的落下处理（它本身是个空壳 ——
+        // 只打一行"角色拖入导入暂未实现"，没有真逻辑，所以删它零损失）。
 
         // AudioGridView_DragItemsCompleted 已删：旧音频网格的拖拽落位。
         // 它体内那套「算位置映射 → 重命名 → SyncStoryAudioIndexesAsync」逻辑，
