@@ -175,7 +175,33 @@ namespace GalExcleTools
                 _isNormalizingBackgroundImages = true;
                 try
                 {
+                    // ⚠️ 这一步会**给整个目录重新编号**（把 jpg/webp 转成 png，再按名字重排成 BG00…）。
+                    // 剧情里的 BGindex 是**位置**（排序后 png 列表的下标），所以"重新编号"
+                    // 必须和"把旧位置映射到新位置"一起做完 ——
+                    // 2026-10-16 的坑：这条自动规范化只改名、**不同步索引**，而它的排序把
+                    // jpg/webp 也算进去（剧情的位置只数 png），于是只要目录里有过一张 jpg，
+                    // 变动点之后的背景就整体错位一格 —— 用户报的"换序后有些背景乱了"。
+                    var beforeOrderedPaths = ImageSetService.GetFilePaths(backgroundFolderPath);
+                    var normalizeOrder = ImageSetService.GetNormalizeSourcePaths(backgroundFolderPath);
+                    var normalizeRemap = BuildPositionalAssetIndexRemap(beforeOrderedPaths, normalizeOrder);
                     await NormalizeBackgroundImagesAsync(backgroundFolderPath);
+                    if (normalizeRemap.Count > 0)
+                    {
+                        LogAssetIndexRemapEvidence("背景图（打开素材库时的自动规范化）", beforeOrderedPaths, normalizeOrder);
+                        var normalizeLabels = BuildPositionalLabelMaps(beforeOrderedPaths, normalizeOrder);
+                        var normalizeSyncResult = await SyncStoryGlobalAssetIndexesWithProgressAsync(
+                            assetLibrary,
+                            "背景图",
+                            "BGindex",
+                            normalizeRemap,
+                            normalizeLabels.OldLabels,
+                            normalizeLabels.NewLabels,
+                            normalizeOrder.Count);
+                        if (normalizeSyncResult.ChangedCsvCount > 0)
+                        {
+                            AppendLog(LogKind.Info, $"背景图重新编号后已同步 {normalizeSyncResult.ChangedCsvCount} 个章节 CSV 的背景图索引。");
+                        }
+                    }
                 }
                 finally
                 {
@@ -216,6 +242,10 @@ namespace GalExcleTools
                 SetAudioNormalizing(kind, true);
                 try
                 {
+                    // 音频这条**不需要**在这里同步索引：它的重命名顺序就是 GetFilePaths
+                    // （= 剧情索引认的那个列表），改名不动位置。
+                    // 背景图那条不一样（它的排序把 jpg/webp 也算进去，而剧情的位置只数 png），
+                    // 所以只有背景图这里必须配一次索引同步 —— 见上面 ReloadBackgroundImagesAsync。
                     await NormalizeAudioFilesAsync(kind, musicFolderPath);
                 }
                 finally

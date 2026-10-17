@@ -226,6 +226,13 @@ Require-MethodPattern "MainWindow.Story.Assets.cs" "GetStoryBackgroundChoices" '
 Require-SourcePattern "Services/StoryDialogService.cs" 'CreateLazyImagePreviewToolTip' "Story asset selection must attach lazy image previews when a preview path is available."
 Require-MethodPattern "Views/StoryDialogContentFactory.cs" "CreateLazyImagePreviewToolTip" 'toolTip\.Opened[\s\S]*?LoadPreviewImageAsync[\s\S]*?toolTip\.Closed[\s\S]*?image\.Source\s*=\s*null' "Story image preview tooltips must load on hover and release the bitmap after closing."
 Require-MethodPattern "Views/StoryDialogContentFactory.cs" "CreateStoryPreviewChoiceRequestAsync" 'PreviewPaths is \{ Count: > 0 \}[\s\S]*?CreateStoryChoicePreviewToolTipAsync' "Choice preview tooltips must be skipped when an item has no preview paths: the character and filter pickers pass none, and a null list throws inside Where (右键→角色点不开面板)."
+# 剧情里的素材索引（BGindex / BGM / Scene / Scene_n）存的是**位置**：任何一次"给素材改名或重排"
+# 都必须同时把旧位置映射到新位置。2026-10-16 的坑：拖拽那条同步了，
+# **打开素材库时的自动规范化**没有 —— 而且它的排序把 jpg/webp 也算进去，剧情的位置只数 png，
+# 于是只要目录里有过一张 jpg，变动点之后的背景就整体错位一格（用户报的"换序后有些背景乱了"）。
+Require-MethodPattern "MainWindow.AssetLibrary.Loading.cs" "ReloadBackgroundImagesAsync" 'BuildPositionalAssetIndexRemap[\s\S]*?NormalizeBackgroundImagesAsync[\s\S]*?SyncStoryGlobalAssetIndexesWithProgressAsync' "Renumbering background files must remap the positional BGindex of every related chapter."
+Require-SourcePattern "MainWindow.AssetLibrary.Loading.cs" 'BuildAssetIndexRemap\(' "Background normalization must compute the remap by position, not by the number inside the file name." -NotMatch
+Require-MethodPattern "MainWindow.Story.Sync.cs" "SyncStoryAudioIndexesAsync" 'AudioAssetKind\.SoundEffect[\s\S]*?SyncStorySoundEffectIndexesWithProgressAsync[\s\S]*?BGM[\s\S]*?Scene' "Reordering audio must remap every landing spot: BGM column, Scene column and the Scene_n sound-effect tokens."
 Require-MethodPattern "Services/StoryEditorService.cs" "InsertAfterCurrent" 'InsertRelativeToCurrent\([\s\S]*?insertAfter:\s*true' "Right insertion must insert after the current story row."
 Require-MethodPattern "Services/StoryEditorService.cs" "InsertRelativeToCurrent" 'insertIndex\s*=\s*currentRowIndex\s*\+\s*\(insertAfter\s*\?\s*1\s*:\s*0\)[\s\S]*?rows\.Insert\(insertIndex, insertedRow\)[\s\S]*?StoryRowsEditResult\(insertIndex' "Story row insertion must return and select the actual left or right insertion index."
 Require-SourcePattern "ViewModels/StoryEditorViewModel.cs" 'InsertAfterRowCommand[\s\S]*?!IsDebugModeEnabled' "The story editor must expose a debug-safe right-insert command."

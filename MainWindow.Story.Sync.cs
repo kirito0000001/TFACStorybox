@@ -92,6 +92,73 @@ namespace GalExcleTools
             return result;
         }
 
+        /// <summary>
+        /// 音频重排后把剧情里对应的位置索引一起改掉 —— **每种素材各有落点**：
+        /// 音乐 → BGM 列、环境音 → Scene 列、特殊音效 → 函数串里的 Scene_n 标记。
+        ///
+        /// 【为什么非做不可】这三种索引都是**位置**（第 n 个文件），拖拽一改顺序，
+        /// 同一个号就指向另一个素材了。2026-10-16 之前只有「环境音」那条同步过 ——
+        /// 也就是说：换完音乐顺序，剧情里的 BGM 会**静默**全部错位。
+        /// </summary>
+        private async Task SyncStoryAudioIndexesAsync(
+            AssetLibraryInfo assetLibrary,
+            AudioAssetKind kind,
+            IReadOnlyDictionary<int, int> indexRemap,
+            (Dictionary<int, string> OldLabels, Dictionary<int, string> NewLabels) assetLabels,
+            int assetCount)
+        {
+            if (indexRemap.Count == 0)
+            {
+                return;
+            }
+
+            AssetIndexSyncResult syncResult;
+            string assetLabel;
+            if (kind == AudioAssetKind.SoundEffect)
+            {
+                assetLabel = "特殊音效";
+                syncResult = await SyncStorySoundEffectIndexesWithProgressAsync(
+                    assetLibrary,
+                    indexRemap,
+                    assetLabels.OldLabels,
+                    assetLabels.NewLabels,
+                    assetCount);
+            }
+            else
+            {
+                var isMusic = kind == AudioAssetKind.Music;
+                assetLabel = isMusic ? "BGM" : "环境音";
+                syncResult = await SyncStoryGlobalAssetIndexesWithProgressAsync(
+                    assetLibrary,
+                    assetLabel,
+                    isMusic ? "BGM" : "Scene",
+                    indexRemap,
+                    assetLabels.OldLabels,
+                    assetLabels.NewLabels,
+                    assetCount);
+            }
+
+            if (syncResult.ChangedCsvCount > 0)
+            {
+                AppendLog(LogKind.Info, $"已同步 {syncResult.ChangedCsvCount} 个章节 CSV 的{assetLabel}索引。");
+            }
+        }
+
+        private async Task<AssetIndexSyncResult> SyncStorySoundEffectIndexesWithProgressAsync(
+            AssetLibraryInfo assetLibrary,
+            IReadOnlyDictionary<int, int> indexRemap,
+            IReadOnlyDictionary<int, string> oldLabels,
+            IReadOnlyDictionary<int, string> newLabels,
+            int assetCount)
+        {
+            var result = await ShowAssetIndexSyncProgressDialogAsync(
+                "特殊音效索引同步",
+                progress => Task.Run(() => _storyAssetIndexSyncService.SyncSoundEffectIndexes(assetLibrary, indexRemap, oldLabels, newLabels, assetCount, progress)));
+            RefreshOpenStoryRowsAfterIndexSync(result.ChangedCsvPaths);
+            await ShowAssetIndexSyncResultDialogAsync(result);
+            return result;
+        }
+
         private void RefreshOpenStoryRowsAfterIndexSync(IReadOnlyList<string> changedCsvPaths)
         {
             if (_currentStoryChapter is null || changedCsvPaths.Count == 0)
@@ -167,6 +234,94 @@ namespace GalExcleTools
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 按**位置**算"旧下标 → 新下标"。剧情里的 BGindex / BGM / Scene 存的全是
+        /// 位置（排序后文件列表里的下标），不是文件名里的编号 —— 映射必须在同一个坐标系里算。
+        ///
+        /// 【为什么不能按文件名里的编号算】目录规范（BG00…BGnn 连续）时两者相等；
+        /// 一旦有文件名里没有编号、编号重复或有洞，按编号算出来的就是**错的键**
+        ///（下面 BuildAssetIndexRemap 保留着旧口径，新代码一律用这一个）。
+        /// </summary>
+        private static Dictionary<int, int> BuildPositionalAssetIndexRemap(
+            IReadOnlyList<string> beforeOrderedPaths,
+            IReadOnlyList<string> afterOrderedPaths)
+        {
+            var beforePositions = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (var index = 0; index < beforeOrderedPaths.Count; index++)
+            {
+                beforePositions.TryAdd(beforeOrderedPaths[index], index);
+            }
+
+            var remap = new Dictionary<int, int>();
+            for (var newIndex = 0; newIndex < afterOrderedPaths.Count; newIndex++)
+            {
+                if (beforePositions.TryGetValue(afterOrderedPaths[newIndex], out var oldIndex) && oldIndex != newIndex)
+                {
+                    remap[oldIndex] = newIndex;
+                }
+            }
+
+            return remap;
+        }
+
+        /// <summary>按位置做的标签表：(旧位置 → 文件名)、(新位置 → 文件名)。同步结果框里显示"从哪张改到哪张"用。</summary>
+        private static (Dictionary<int, string> OldLabels, Dictionary<int, string> NewLabels) BuildPositionalLabelMaps(
+            IReadOnlyList<string> beforeOrderedPaths,
+            IReadOnlyList<string> afterOrderedPaths)
+        {
+            var oldLabels = new Dictionary<int, string>();
+            for (var index = 0; index < beforeOrderedPaths.Count; index++)
+            {
+                oldLabels.TryAdd(index, Path.GetFileNameWithoutExtension(beforeOrderedPaths[index]));
+            }
+
+            var newLabels = new Dictionary<int, string>();
+            for (var index = 0; index < afterOrderedPaths.Count; index++)
+            {
+                newLabels.TryAdd(index, Path.GetFileNameWithoutExtension(afterOrderedPaths[index]));
+            }
+
+            return (oldLabels, newLabels);
+        }
+
+        /// <summary>
+        /// 把这一次"重命名 / 重排"的完整映射写进日志。
+        ///
+        /// 剧情索引是位置，改错了**当场看不出来**（图照样显示，只是显示成了另一张）——
+        /// 用户 2026-10-16 就是"已经没办法复原了"。所以每次重排都留一份
+        /// 「文件名：旧位置 → 新位置」，万一出事能照着它手工改回来。
+        /// </summary>
+        private void LogAssetIndexRemapEvidence(
+            string assetLabel,
+            IReadOnlyList<string> beforeOrderedPaths,
+            IReadOnlyList<string> afterOrderedPaths)
+        {
+            var beforePositions = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (var index = 0; index < beforeOrderedPaths.Count; index++)
+            {
+                beforePositions.TryAdd(beforeOrderedPaths[index], index);
+            }
+
+            var moved = new List<string>();
+            for (var newIndex = 0; newIndex < afterOrderedPaths.Count; newIndex++)
+            {
+                var path = afterOrderedPaths[newIndex];
+                if (beforePositions.TryGetValue(path, out var oldIndex) && oldIndex != newIndex)
+                {
+                    moved.Add($"{Path.GetFileName(path)}：{oldIndex} → {newIndex}");
+                }
+            }
+
+            if (moved.Count == 0)
+            {
+                return;
+            }
+
+            AppendLog(
+                LogKind.Info,
+                $"{assetLabel}重排映射（共 {moved.Count} 项，旧位置 → 新位置）：{string.Join("；", moved)}");
         }
 
         private static List<string> GetOrderedExistingTaggedPaths(GridView gridView)

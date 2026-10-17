@@ -64,6 +64,26 @@ internal sealed class ImageSetService
         return validSourcePaths.Count;
     }
 
+    /// <summary>
+    /// 规范化（转换 + 重命名）时的**输入顺序**。抽出来是因为"改名"和"算旧→新映射"
+    /// 必须用同一个顺序 —— 以前两处各写一遍，口径一旦不同就是静默错位
+    ///（2026-10-16「换序后有些背景乱了」就是这条：这里把 jpg/webp 也算进来排序，
+    ///  而剧情的位置只数 png，于是变动点之后的位置整体差一格）。
+    /// </summary>
+    public static List<string> GetNormalizeSourcePaths(string folderPath)
+    {
+        if (!Directory.Exists(folderPath))
+        {
+            return [];
+        }
+
+        return Directory
+            .EnumerateFiles(folderPath)
+            .Where(IsSupportedExtension)
+            .OrderBy(Path.GetFileName)
+            .ToList();
+    }
+
     public async Task<int> NormalizeFilesAsync(
         string folderPath,
         Func<string, string, Task> convertToPngAsync,
@@ -71,11 +91,7 @@ internal sealed class ImageSetService
         string prefix = ImageSetPrefix.Background)
     {
         var sourcePaths = orderedPaths is null
-            ? Directory
-                .EnumerateFiles(folderPath)
-                .Where(IsSupportedExtension)
-                .OrderBy(Path.GetFileName)
-                .ToList()
+            ? GetNormalizeSourcePaths(folderPath)
             : orderedPaths.ToList();
 
         var entries = new List<ImageSetEntry>();
@@ -92,7 +108,9 @@ internal sealed class ImageSetService
                 convertedCount++;
             }
 
-            var parsed = ParseFileName(pngPath, prefix);
+            // ⚠️ 备注要从**原文件名**里解析：转换过的文件此刻叫 __bg_convert_xxx.png，
+            // 从临时名解析会把用户填的备注丢掉（名字一变，人也认不出是哪张了）。
+            var parsed = ParseFileName(sourcePath, prefix);
             entries.Add(parsed with { Path = pngPath });
         }
 

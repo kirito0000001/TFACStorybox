@@ -58,8 +58,13 @@ namespace GalExcleTools
                 return;
             }
 
-            var indexRemap = BuildAssetIndexRemap(orderedPaths, ImageSetService.GetAssetIndex);
-            var assetLabels = StoryAssetIndexSyncService.BuildLabelMaps(orderedPaths, ImageSetService.GetAssetIndex);
+            // ⚠️ 映射按**位置**算，不按文件名里的编号（剧情里的 BGindex 是位置）。
+            // 旧位置 = 改名**之前** GetFilePaths 的下标；新位置 = 这次拖出来的顺序里的下标
+            //（改完名后 BG{i} 正好排在位置 i，两者是同一个坐标系）。
+            var beforeOrderedPaths = ImageSetService.GetFilePaths(GetBackgroundFolderPath(_currentAssetLibrary));
+            var indexRemap = BuildPositionalAssetIndexRemap(beforeOrderedPaths, orderedPaths);
+            var assetLabels = BuildPositionalLabelMaps(beforeOrderedPaths, orderedPaths);
+            LogAssetIndexRemapEvidence("背景图", beforeOrderedPaths, orderedPaths);
             _isNormalizingBackgroundImages = true;
             try
             {
@@ -707,34 +712,25 @@ namespace GalExcleTools
                 return;
             }
 
-            var indexRemap = BuildAssetIndexRemap(orderedPaths, path => AudioAssetService.GetAssetIndex(kind, path));
-            var assetLabels = StoryAssetIndexSyncService.BuildLabelMaps(orderedPaths, path => AudioAssetService.GetAssetIndex(kind, path));
+            // ⚠️ 映射按**位置**算（剧情里的 BGM / Scene / 特殊音效 Scene_n 全是位置），
+            // 而且**每种素材都要同步**：以前只有「环境音」那条同步了 —— 音乐拖完顺序后
+            // BGM 列还指着旧位置（= 换完音乐顺序，剧情里的 BGM 全部错位），同一类坑。
+            var audioFolderPath = GetAudioFolderPath(_currentAssetLibrary, kind);
+            var beforeOrderedPaths = AudioAssetService.GetFilePaths(kind, audioFolderPath);
+            var indexRemap = BuildPositionalAssetIndexRemap(beforeOrderedPaths, orderedPaths);
+            var assetLabels = BuildPositionalLabelMaps(beforeOrderedPaths, orderedPaths);
+            LogAssetIndexRemapEvidence(AudioAssetService.GetDisplayName(kind), beforeOrderedPaths, orderedPaths);
             SetAudioNormalizing(kind, true);
             try
             {
-                await NormalizeAudioFilesAsync(kind, GetAudioFolderPath(_currentAssetLibrary, kind), orderedPaths);
+                await NormalizeAudioFilesAsync(kind, audioFolderPath, orderedPaths);
             }
             finally
             {
                 SetAudioNormalizing(kind, false);
             }
 
-            if (kind == AudioAssetKind.Ambient)
-            {
-                var syncResult = await SyncStoryGlobalAssetIndexesWithProgressAsync(
-                    _currentAssetLibrary,
-                    "环境音",
-                    "Scene",
-                    indexRemap,
-                    assetLabels.OldLabels,
-                    assetLabels.NewLabels,
-                    orderedPaths.Count);
-                if (syncResult.ChangedCsvCount > 0)
-                {
-                    AppendLog(LogKind.Info, $"已同步 {syncResult.ChangedCsvCount} 个章节 CSV 的环境音索引。");
-                }
-            }
-
+            await SyncStoryAudioIndexesAsync(_currentAssetLibrary, kind, indexRemap, assetLabels, orderedPaths.Count);
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
             RefreshAudioCards(_currentAssetLibrary, kind);
             RequestDelayedRefresh();

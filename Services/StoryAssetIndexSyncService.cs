@@ -195,6 +195,74 @@ internal sealed class StoryAssetIndexSyncService
         return (oldLabels, newLabels);
     }
 
+    /// <summary>
+    /// 特殊音效的索引重定向。它**不在剧情列里**，而是藏在函数串里的 <c>Scene_n</c> 标记
+    ///（见 StoryFunctionService.TryParseSoundEffectIndex —— 播放时按这个号在
+    ///  特殊音效目录里取第 n 个文件）。
+    /// 所以拖拽重排特殊音效 = 位置变了，这些标记必须跟着改，否则"某句放的那个音效"
+    /// 会静默换成另一个（和背景图/BGM 是同一类坑）。
+    /// </summary>
+    public AssetIndexSyncResult SyncSoundEffectIndexes(
+        AssetLibraryInfo assetLibrary,
+        IReadOnlyDictionary<int, int> indexRemap,
+        IReadOnlyDictionary<int, string> oldLabels,
+        IReadOnlyDictionary<int, string> newLabels,
+        int assetCount,
+        IProgress<AssetIndexSyncProgress>? progress)
+    {
+        return SyncStoryRowsForAssetLibrary(
+            assetLibrary,
+            "特殊音效索引同步",
+            progress,
+            rowContext =>
+            {
+                var functions = StoryFunctionService.SplitFunctionValues(rowContext.Row.Get("Custom")).ToList();
+                if (functions.Count == 0)
+                {
+                    return false;
+                }
+
+                var changed = false;
+                for (var index = 0; index < functions.Count; index++)
+                {
+                    if (!StoryFunctionService.TryParseSoundEffectIndex(functions[index], out var oldIndex))
+                    {
+                        continue;
+                    }
+
+                    if (oldIndex < 0 || oldIndex >= assetCount)
+                    {
+                        rowContext.Warnings.Add(rowContext.CreateWarning(
+                            "Custom",
+                            $"特殊音效 索引 {oldIndex} 超出当前素材数量 {assetCount}，未自动改动。可在章节卡右键使用“修复”检查。"));
+                        continue;
+                    }
+
+                    if (!indexRemap.TryGetValue(oldIndex, out var newIndex) || oldIndex == newIndex)
+                    {
+                        continue;
+                    }
+
+                    functions[index] = $"Scene_{newIndex}";
+                    changed = true;
+                    rowContext.Changes.Add(rowContext.CreateChange(
+                        "Custom",
+                        oldIndex.ToString(),
+                        newIndex.ToString(),
+                        FormatAssetIndexLabel(oldIndex, oldLabels.TryGetValue(oldIndex, out var oldLabel) ? oldLabel : string.Empty),
+                        FormatAssetIndexLabel(newIndex, newLabels.TryGetValue(newIndex, out var newLabel) ? newLabel : string.Empty)));
+                }
+
+                if (changed)
+                {
+                    // 函数串的分隔符就是 "/"（SplitFunctionValues 按它切）。
+                    rowContext.Row.Set("Custom", string.Join("/", functions));
+                }
+
+                return changed;
+            });
+    }
+
     private AssetIndexSyncResult SyncStoryRowsForAssetLibrary(
         AssetLibraryInfo assetLibrary,
         string title,
