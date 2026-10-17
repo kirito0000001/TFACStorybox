@@ -68,7 +68,7 @@ namespace GalExcleTools
             var folder = GetImageSetFolderOf(imagePath);
             if (string.Equals(folder, GetBackgroundFolderPath(_currentAssetLibrary), StringComparison.OrdinalIgnoreCase))
             {
-                RefreshBackgroundImageCards(_currentAssetLibrary);
+                RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             }
             else if (string.Equals(folder, GetPropImageFolderPath(_currentAssetLibrary), StringComparison.OrdinalIgnoreCase))
             {
@@ -802,7 +802,7 @@ namespace GalExcleTools
             if (_currentAssetLibrary is not null)
             {
                 TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-                RefreshAudioCards(_currentAssetLibrary, kind);
+                RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             }
 
             RequestDelayedRefresh();
@@ -849,7 +849,7 @@ namespace GalExcleTools
             }
 
             TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RefreshAudioCards(_currentAssetLibrary, kind);
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
             RequestDelayedRefresh();
             var displayName = AudioAssetService.GetDisplayName(kind);
             ShowFloatingTip(
@@ -898,7 +898,7 @@ namespace GalExcleTools
                 }
 
                 TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-                RefreshAudioCards(_currentAssetLibrary, kind);
+                RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
                 RequestDelayedRefresh();
                 if (_playingMusicPath is not null && PathsEqual(_playingMusicPath, musicPath))
                 {
