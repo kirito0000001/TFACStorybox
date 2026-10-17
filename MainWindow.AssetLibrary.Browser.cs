@@ -115,13 +115,42 @@ public sealed partial class MainWindow
     }
 
     /// <summary>
+    /// 道具图片的"顺序落地"：**只按新顺序重命名**，没有同步步骤 ——
+    /// 道具图片不进剧情 CSV、编号没有外部含义（ImageSetService.GetAssetIndex 的注释写明了），
+    /// 排序纯属素材库内部顺序。前缀用 <c>ImageSetPrefix.Prop</c>，png 转换复用背景图那支。
+    /// </summary>
+    private async Task ApplyPropImageOrderAsync(IReadOnlyList<string> orderedPaths)
+    {
+        if (_currentAssetLibrary is null || orderedPaths.Count == 0)
+        {
+            return;
+        }
+
+        var folderPath = GetPropImageFolderPath(_currentAssetLibrary);
+        var beforeOrderedPaths = ImageSetService.GetFilePaths(folderPath);
+        LogAssetIndexRemapEvidence("道具图片", beforeOrderedPaths, orderedPaths);
+
+        await _imageSetService.NormalizeFilesAsync(
+            folderPath,
+            ImportBackgroundImageAsPngAsync,
+            orderedPaths,
+            ImageSetPrefix.Prop);
+
+        TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
+        RefreshPropImageCards(_currentAssetLibrary);
+        if (AssetBrowserHost is not null)
+        {
+            await FillAssetBrowserWithPropImagesAsync(AssetBrowserHost, _currentAssetLibrary);
+        }
+
+        RequestDelayedRefresh();
+        AppendLog(LogKind.User, "已调整道具图片顺序（不进剧情 CSV，只重排编号）。");
+    }
+
+    /// <summary>
     /// 道具图片铺进浏览器：和背景图**同一批方法** —— 点击看图、右键改备注/替换/删除
     /// 都按"文件自己所在目录"找分类（Editing.cs 的注释写明了），所以不需要另写一套。
     /// 卡片用带图卡 190×220（道具图通常不是宽幅，用背景图那个 16:9 会显得很扁）。
-    ///
-    /// ⚠️ 道具图片**没有**「移动素材」：它不进剧情 CSV、编号没有外部含义
-    /// （ImageSetService.GetAssetIndex 的注释写明了），排序纯属素材库内部顺序，
-    /// 没有要同步的东西 —— 真需要调顺序时直接改文件名即可。
     /// </summary>
     private async Task FillAssetBrowserWithPropImagesAsync(Controls.AssetBrowser browser, AssetLibraryInfo assetLibrary)
     {
@@ -129,6 +158,10 @@ public sealed partial class MainWindow
         var orderedPaths = ImageSetService.GetFilePaths(folderPath);
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
+        // 「移动素材」的两个零件：取道具图片列表 + 只重排编号（无 CSV 同步）。
+        ConfigureMoveAsset(
+            () => ImageSetService.GetFilePaths(GetPropImageFolderPath(assetLibrary)),
+            paths => ApplyPropImageOrderAsync(paths));
 
         var cards = new List<object>();
         foreach (var path in orderedPaths)
@@ -136,13 +169,22 @@ public sealed partial class MainWindow
             var card = CardShell.CreateImageCard(
                 path,
                 AssetCardContentFactory.CreateImageAssetCardContent(path, 148, 148));
-            card.Click += (_, _) =>
+            card.Click += async (_, _) =>
             {
+                // 移动模式下：点哪张就放到哪张后面（和背景图同一套交互）。
+                if (await TryCompleteMoveBackgroundImageAsync(path))
+                {
+                    return;
+                }
+
                 PlaySelectionSound();
                 ShowBackgroundImageViewerPage(path);
             };
+            card.PointerMoved += Card_PointerMoved;
+            card.ContextRequested += Card_ContextRequested;
             card.ContextFlyout = GridViewItemFactory.CreateMenu(
                 GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetBackgroundImageRemarkAsync(path)),
+                GridViewItemFactory.CreateMenuItem("移动素材", (_, _) => BeginMoveBackgroundImage(path, card)),
                 GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceBackgroundImageAsync(path)),
                 GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(path)));
             Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(card, System.IO.Path.GetFileNameWithoutExtension(path));
