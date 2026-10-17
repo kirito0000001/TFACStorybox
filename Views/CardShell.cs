@@ -57,7 +57,9 @@ internal static class CardShell
     /// <summary>背景图卡：**16:9**（272×153）、内边距 8（图要占满，别留大白边）。</summary>
     public static Button CreateBackgroundCard(object? tag = null, UIElement? content = null)
     {
-        return CreateCardShell(BackgroundCardWidth, BackgroundCardHeight, new Thickness(8), tag, content);
+        // canDrag: 背景图卡要参与**自写重排**（CanDrag 让框架替我们识别拖拽手势，
+        // 不需要长按阈值；按下不动仍是点击，见 MainWindow.AssetLibrary.Reorder.cs 的说明）。
+        return CreateCardShell(BackgroundCardWidth, BackgroundCardHeight, new Thickness(8), tag, content, canDrag: true);
     }
 
     /// <summary>
@@ -68,7 +70,8 @@ internal static class CardShell
         double height,
         Thickness padding,
         object? tag = null,
-        UIElement? content = null)
+        UIElement? content = null,
+        bool canDrag = false)
     {
         var button = new Button
         {
@@ -77,7 +80,10 @@ internal static class CardShell
             Padding = padding,
             Margin = new Thickness(0, 0, CardGap, CardGap),
             HorizontalAlignment = HorizontalAlignment.Left,
-            Tag = tag
+            Tag = tag,
+            // CanDrag = true：框架会把"按住后移动"识别成拖拽手势（自己写重排要用），
+            // 而"按住不动再松手"仍然是点击 —— 不需要长按阈值那套。
+            CanDrag = canDrag
         };
 
         // 外观走 App 级样式（和零境同构：描边 / 圆角 / 对齐都在 XAML 里用 {ThemeResource} 定）。

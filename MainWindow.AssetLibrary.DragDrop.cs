@@ -60,6 +60,23 @@ namespace GalExcleTools
                 return;
             }
 
+            // 应用新顺序这一段抽成独立方法：**自写重排**（卡片 CanDrag + 网格 Drop）
+            // 走的是同一条链，不能只在框架的 DragItemsCompleted 里有一份。
+            await ApplyBackgroundImageOrderAsync(orderedPaths);
+            _draggingBackgroundImageItem = null;
+        }
+
+        /// <summary>
+        /// 把"用户拖出来的这个新顺序"落地：算位置映射 → 记证据日志 → 重命名 → 同步所有章节的 BGindex。
+        /// 两条入口共用：框架的 DragItemsCompleted（旧网格）与自写重排的 Drop（新骨架卡片）。
+        /// </summary>
+        private async Task ApplyBackgroundImageOrderAsync(IReadOnlyList<string> orderedPaths)
+        {
+            if (_currentAssetLibrary is null || orderedPaths.Count == 0)
+            {
+                return;
+            }
+
             // ⚠️ 映射按**位置**算，不按文件名里的编号（剧情里的 BGindex 是位置）。
             // 旧位置 = 改名**之前** GetFilePaths 的下标；新位置 = 这次拖出来的顺序里的下标
             //（改完名后 BG{i} 正好排在位置 i，两者是同一个坐标系）。
@@ -99,7 +116,6 @@ namespace GalExcleTools
                 AppendLog(LogKind.Info, $"已同步 {syncResult.ChangedCsvCount} 个章节 CSV 的背景图索引。");
             }
             AppendLog(LogKind.User, "已调整背景图顺序并触发自动命名。");
-            _draggingBackgroundImageItem = null;
         }
 
         private void BackgroundImagesGridView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
