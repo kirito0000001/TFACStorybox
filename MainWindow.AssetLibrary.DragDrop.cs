@@ -249,15 +249,7 @@ namespace GalExcleTools
         // CharacterFilterGridView_DragItemsStarting 已删：旧滤镜网格的拖拽起手。
         // 素材页的滤镜排序由「移动素材」接管（ApplyCharacterFilterOrderAsync）。
 
-        private void CharacterFilterGridView_DragOver(object sender, DragEventArgs e)
-        {
-            if (_draggingCharacterFilterItem is null || CharacterFilterGridView.Items.Count <= 2)
-            {
-                return;
-            }
-
-            e.AcceptedOperation = DataPackageOperation.Move;
-        }
+        // CharacterFilterGridView_DragOver 已删：旧滤镜网格的拖拽悬停。
 
         private async void CharacterClothGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
         {
