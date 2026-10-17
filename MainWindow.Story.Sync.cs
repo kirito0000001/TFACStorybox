@@ -338,8 +338,8 @@ namespace GalExcleTools
         private static FrameworkElement? ResolveDraggedGridViewItem(GridView gridView, DragItemsStartingEventArgs e)
         {
             var draggedObject = e.Items.FirstOrDefault();
-            return draggedObject as GridViewItem ??
-                   (draggedObject is null ? null : gridView.ContainerFromItem(draggedObject) as GridViewItem) ??
+            return draggedObject as FrameworkElement ??
+                   (draggedObject is null ? null : gridView.ContainerFromItem(draggedObject) as FrameworkElement) ??
                    gridView.Items
                        .OfType<FrameworkElement>()
                        .FirstOrDefault(item => ReferenceEquals(item.Content, draggedObject));

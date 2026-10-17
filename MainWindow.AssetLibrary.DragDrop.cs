@@ -259,7 +259,7 @@ namespace GalExcleTools
             }
 
             var filters = CharacterFilterGridView.Items
-                .OfType<GridViewItem>()
+                .OfType<FrameworkElement>()
                 .Select(item => item.Tag as CharacterFilterEntry)
                 .Where(entry => entry is not null)
                 .Cast<CharacterFilterEntry>()
@@ -902,7 +902,7 @@ namespace GalExcleTools
             MoveGridViewItemToEnd(BackgroundImagesGridView, _draggingBackgroundImageItem);
         }
 
-        private bool IsPointerInTrailingBlankArea(Windows.Foundation.Point pointerPosition, GridViewItem draggingItem)
+        private bool IsPointerInTrailingBlankArea(Windows.Foundation.Point pointerPosition, FrameworkElement draggingItem)
         {
             return IsPointerInTrailingBlankArea(BackgroundImagesGridView, pointerPosition, draggingItem);
         }
@@ -910,10 +910,10 @@ namespace GalExcleTools
         private static bool IsPointerInTrailingBlankArea(
             GridView gridView,
             Windows.Foundation.Point pointerPosition,
-            GridViewItem draggingItem)
+            FrameworkElement draggingItem)
         {
             var visibleItems = gridView.Items
-                .OfType<GridViewItem>()
+                .OfType<FrameworkElement>()
                 .Where(item => !ReferenceEquals(item, draggingItem))
                 .ToList();
 
