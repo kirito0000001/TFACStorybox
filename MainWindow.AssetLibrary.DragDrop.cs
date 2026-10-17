@@ -199,52 +199,10 @@ namespace GalExcleTools
             await AudioDropZone_Drop(AudioAssetKind.SoundEffect, e);
         }
 
-        private async void CharacterFilterGridView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
-        {
-            if (_currentAssetLibrary is null || _isReorderingCharacterFilters)
-            {
-                _draggingCharacterFilterItem = null;
-                return;
-            }
-
-            var filters = CharacterFilterGridView.Items
-                .OfType<FrameworkElement>()
-                .Select(item => item.Tag as CharacterFilterEntry)
-                .Where(entry => entry is not null)
-                .Cast<CharacterFilterEntry>()
-                .ToList();
-            filters = CharacterFilterService.Normalize(filters);
-            if (filters.Count == 0)
-            {
-                _draggingCharacterFilterItem = null;
-                return;
-            }
-
-            var oldFilters = _characterFilterService.Read(_currentAssetLibrary);
-            var indexRemap = CharacterFilterService.BuildIndexRemap(oldFilters, filters);
-            var oldLabels = oldFilters.Select((filter, index) => (filter, index)).ToDictionary(item => item.index, item => item.filter.Remark);
-            var newLabels = filters.Select((filter, index) => (filter, index)).ToDictionary(item => item.index, item => item.filter.Remark);
-            _isReorderingCharacterFilters = true;
-            try
-            {
-                _characterFilterService.Write(_currentAssetLibrary, filters);
-            }
-            finally
-            {
-                _isReorderingCharacterFilters = false;
-            }
-
-            var syncResult = await SyncStoryCharacterFilterIndexesWithProgressAsync(_currentAssetLibrary, indexRemap, oldLabels, newLabels, filters.Count);
-            TouchAssetLibraryLastEditedAt(_currentAssetLibrary);
-            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
-            RequestDelayedRefresh();
-            if (syncResult.ChangedCsvCount > 0)
-            {
-                AppendLog(LogKind.Info, $"已同步 {syncResult.ChangedCsvCount} 个章节 CSV 的角色滤镜索引。");
-            }
-            AppendLog(LogKind.User, "已调整角色滤镜顺序。");
-            _draggingCharacterFilterItem = null;
-        }
+        // CharacterFilterGridView_DragItemsCompleted 已删：旧滤镜网格的拖拽落位。
+        // 它体内那套「读清单 → Normalize → BuildIndexRemap → 写回（带守卫）→
+        // SyncStoryCharacterFilterIndexesWithProgressAsync → 重铺」逻辑，
+        // 新骨架的「移动素材」走 ApplyCharacterFilterOrderAsync（已完整复刻）。
 
         // CharacterFilterGridView_DragItemsStarting 已删：旧滤镜网格的拖拽起手。
         // 素材页的滤镜排序由「移动素材」接管（ApplyCharacterFilterOrderAsync）。
