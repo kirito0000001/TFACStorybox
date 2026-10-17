@@ -99,42 +99,9 @@ namespace GalExcleTools
         // BackgroundImagesGridView_DragItemsStarting 与 _DragOver 已删：旧背景图网格的拖拽接线。
         // MoveDraggingBackgroundImageToEnd 暂时还有人用（旧拖放区），留到第 5 步一起清。
 
-        private void BackgroundImagesDropZone_DragOver(object sender, DragEventArgs e)
-        {
-            if (_draggingBackgroundImageItem is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-                return;
-            }
+        // BackgroundImagesDropZone_DragOver 已删：旧背景图拖放区的悬停。
 
-            if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
-        }
-
-        private void BackgroundImagesDropZone_DragEnter(object sender, DragEventArgs e)
-        {
-            var containsStorageItems = e.DataView.Contains(StandardDataFormats.StorageItems);
-            AppendLog(
-                LogKind.Info,
-                _draggingBackgroundImageItem is not null
-                    ? "拖入背景图区：检测到内部背景图拖拽。"
-                    : $"拖入背景图区：外部数据进入，StorageItems={containsStorageItems}。");
-
-            if (_draggingBackgroundImageItem is not null)
-            {
-                e.AcceptedOperation = DataPackageOperation.Move;
-                e.Handled = true;
-            }
-            else if (containsStorageItems)
-            {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.Handled = true;
-            }
-        }
+        // BackgroundImagesDropZone_DragEnter 已删：旧背景图拖放区的进入。
 
         // MusicGridView_DragItemsCompleted 已删：旧音乐网格的拖拽落位。
 
