@@ -200,10 +200,7 @@ namespace GalExcleTools
 
         // SoundEffectGridView_DragItemsStarting 已删：旧特殊音效网格的拖拽起手。
 
-        private void SoundEffectGridView_DragOver(object sender, DragEventArgs e)
-        {
-            AudioGridView_DragOver(AudioAssetKind.SoundEffect, e);
-        }
+        // SoundEffectGridView_DragOver 已删：旧特殊音效网格的拖拽悬停。
 
         private void SoundEffectDropZone_DragEnter(object sender, DragEventArgs e)
         {
