@@ -154,6 +154,10 @@ namespace GalExcleTools
                 GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceBackgroundImageAsync(path)),
                 GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(path)));
             Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(card, Path.GetFileNameWithoutExtension(path));
+            // 自写重排：卡片自己发起拖拽（CanDrag），所以要挂卡片上的 DragStarting
+            // 才能知道"被拖的是哪张"（GridView 的 DragItemsStarting 不会响）。
+            card.DragStarting -= Card_DragStarting;
+            card.DragStarting += Card_DragStarting;
             cards.Add(card);
             }
 
@@ -173,6 +177,10 @@ namespace GalExcleTools
             grid.DragOver += BackgroundImagesGridView_DragOver;
             grid.DragItemsCompleted -= BackgroundImagesGridView_DragItemsCompleted;
             grid.DragItemsCompleted += BackgroundImagesGridView_DragItemsCompleted;
+
+            // 卡片是纯 Button（CanDrag 由 CardShell 打开）→ 用**自写重排**接落位：
+            // 框架那套（DragItemsStarting/DragItemsCompleted）对 Button 发起的拖拽不会响。
+            AttachCardReorder(grid);
         }
 
     }
