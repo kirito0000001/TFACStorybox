@@ -1135,14 +1135,14 @@
                                     </Grid>
                                     <GridView
                                         x:Name="BackgroundImagesGridView"
-                                        Style="{StaticResource AssetGridViewStyle}"
-                                        AllowDrop="True"
-                                        CanDragItems="True"
-                                        CanReorderItems="True"
-                                        ReorderMode="Enabled"
-                                        DragItemsStarting="BackgroundImagesGridView_DragItemsStarting"
-                                        DragOver="BackgroundImagesGridView_DragOver"
-                                        DragItemsCompleted="BackgroundImagesGridView_DragItemsCompleted" />
+                                        Style="{StaticResource AssetGridViewStyle}" />
+                                    <!--
+                                        旧背景图网格已退休：拖拽接线（AllowDrop / CanDragItems /
+                                        CanReorderItems / ReorderMode / DragItemsStarting / DragOver /
+                                        DragItemsCompleted）已摘掉 —— 素材页排序由「移动素材」接管。
+                                        网格元素本体先留着（ResolveActiveBackgroundImageGrid 还引用它），
+                                        等第 5 步随整段 Expander 一起删。
+                                    -->
                                     <!--
                                         新骨架的浏览器已经移到页面级（AssetBrowserHost，Grid.Row=1），
                                         点分类卡时才显示并填充；这里不再放一份。
