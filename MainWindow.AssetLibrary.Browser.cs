@@ -104,10 +104,52 @@ public sealed partial class MainWindow
                 ShowAssetBrowserLayer();
                 FillAssetBrowserWithAudio(AssetBrowserHost, AudioAssetKind.SoundEffect, _currentAssetLibrary);
                 break;
+            case "props" when AssetBrowserHost is not null:
+                ShowAssetBrowserLayer();
+                await FillAssetBrowserWithPropImagesAsync(AssetBrowserHost, _currentAssetLibrary);
+                break;
             default:
-                AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架：背景图、音乐、环境音、特殊音效已好，其余按顺序来。";
+                AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架：背景图、道具图片、音乐、环境音、特殊音效已好，其余按顺序来。";
                 break;
         }
+    }
+
+    /// <summary>
+    /// 道具图片铺进浏览器：和背景图**同一批方法** —— 点击看图、右键改备注/替换/删除
+    /// 都按"文件自己所在目录"找分类（Editing.cs 的注释写明了），所以不需要另写一套。
+    /// 卡片用带图卡 190×220（道具图通常不是宽幅，用背景图那个 16:9 会显得很扁）。
+    ///
+    /// ⚠️ 道具图片**没有**「移动素材」：它不进剧情 CSV、编号没有外部含义
+    /// （ImageSetService.GetAssetIndex 的注释写明了），排序纯属素材库内部顺序，
+    /// 没有要同步的东西 —— 真需要调顺序时直接改文件名即可。
+    /// </summary>
+    private async Task FillAssetBrowserWithPropImagesAsync(Controls.AssetBrowser browser, AssetLibraryInfo assetLibrary)
+    {
+        var folderPath = GetPropImageFolderPath(assetLibrary);
+        var orderedPaths = ImageSetService.GetFilePaths(folderPath);
+        browser.SetPath(folderPath);
+        browser.SetUpEnabled(true);
+
+        var cards = new List<object>();
+        foreach (var path in orderedPaths)
+        {
+            var card = CardShell.CreateImageCard(
+                path,
+                AssetCardContentFactory.CreateImageAssetCardContent(path, 148, 148));
+            card.Click += (_, _) =>
+            {
+                PlaySelectionSound();
+                ShowBackgroundImageViewerPage(path);
+            };
+            card.ContextFlyout = GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("设置备注", async (_, _) => await SetBackgroundImageRemarkAsync(path)),
+                GridViewItemFactory.CreateMenuItem("替换素材", async (_, _) => await ReplaceBackgroundImageAsync(path)),
+                GridViewItemFactory.CreateMenuItem("删除", async (_, _) => await DeleteBackgroundImageAsync(path)));
+            Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(card, System.IO.Path.GetFileNameWithoutExtension(path));
+            cards.Add(card);
+        }
+
+        browser.SetCards(cards);
     }
 
     /// <summary>
