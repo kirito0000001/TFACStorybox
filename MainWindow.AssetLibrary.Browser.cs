@@ -86,7 +86,9 @@ public sealed partial class MainWindow
             return;
         }
 
-        // TODO（叶子层迁移）：每个分类迁完就把这里换成它自己的填充方法。
+        // 记下"现在开着哪个分类"：改备注 / 替换 / 删除 / 导入那些功能路径靠它决定重铺谁。
+        _currentAssetCategoryKey = key;
+
         switch (key)
         {
             case "backgrounds" when AssetBrowserHost is not null:
@@ -123,6 +125,50 @@ public sealed partial class MainWindow
                 break;
             default:
                 AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架。";
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 重铺"当前正开着的那个分类"的卡片。
+    ///
+    /// 为什么需要它：改备注 / 替换素材 / 删除 / 导入这些**功能路径**（共 12 处）
+    /// 以前是重铺旧网格的；旧网格退休后它们得重铺新骨架，但它们只知道文件路径或音频 kind，
+    /// 不知道用户此刻在哪个分类 —— 所以按 key 在这里统一分发，各处只调这一个方法。
+    /// （返回分类层时 key 会被清空，这时什么都不用做。）
+    /// </summary>
+    private async Task RefreshCurrentAssetCategoryAsync()
+    {
+        if (AssetBrowserHost is null || _currentAssetLibrary is null || _currentAssetCategoryKey is null)
+        {
+            return;
+        }
+
+        switch (_currentAssetCategoryKey)
+        {
+            case "backgrounds":
+                await FillAssetBrowserWithBackgroundsAsync(AssetBrowserHost, _currentAssetLibrary);
+                break;
+            case "props":
+                await FillAssetBrowserWithPropImagesAsync(AssetBrowserHost, _currentAssetLibrary);
+                break;
+            case "portraits":
+                FillAssetBrowserWithCharacters(AssetBrowserHost, _currentAssetLibrary);
+                break;
+            case "music":
+                FillAssetBrowserWithAudio(AssetBrowserHost, AudioAssetKind.Music, _currentAssetLibrary);
+                break;
+            case "ambient":
+                FillAssetBrowserWithAudio(AssetBrowserHost, AudioAssetKind.Ambient, _currentAssetLibrary);
+                break;
+            case "soundeffects":
+                FillAssetBrowserWithAudio(AssetBrowserHost, AudioAssetKind.SoundEffect, _currentAssetLibrary);
+                break;
+            case "functions":
+                FillAssetBrowserWithFunctions(AssetBrowserHost, _currentAssetLibrary);
+                break;
+            case "filters":
+                FillAssetBrowserWithCharacterFilters(AssetBrowserHost, _currentAssetLibrary);
                 break;
         }
     }
@@ -406,6 +452,8 @@ public sealed partial class MainWindow
         AssetBrowserHost.SetPath(assetLibrary.Path);
         AssetBrowserHost.SetUpEnabled(false);
         AssetBrowserHost.SetCards(BuildAssetCategoryCards(assetLibrary));
+        // 回到分类层：当前分类清空（这时不需要重铺某个分类的素材卡）。
+        _currentAssetCategoryKey = null;
         EnsureAssetBrowserHandlers();
     }
 
