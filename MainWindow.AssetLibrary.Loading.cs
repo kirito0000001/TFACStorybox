@@ -1025,10 +1025,14 @@ namespace GalExcleTools
 
         private Button CreateAddFunctionCard()
         {
+            // 照零境那张新建卡：**内容居中**（零境是一枚居中大加号）。
+            // 这里保留"+ 新建函数"两段（函数区光一个加号看不出要建什么），
+            // 但要的是同一套手感：居中、无自绘底色、圆角 8。
             var content = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 Spacing = 10,
+                HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
@@ -1038,6 +1042,7 @@ namespace GalExcleTools
             };
 
             var card = CardShell.CreateFlatCard(null, content);
+            card.HorizontalContentAlignment = HorizontalAlignment.Center;
             card.Click += async (_, _) => await AddFunctionAsync();
             return card;
         }

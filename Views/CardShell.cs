@@ -73,11 +73,11 @@ internal static class CardShell
             Tag = tag
         };
 
-        if (TryGetThemeBrush("CardStrokeColorDefaultBrush") is { } stroke)
-        {
-            button.BorderBrush = stroke;
-        }
-
+        // ⚠️ 描边**不在这里取画笔**：代码里 Application.Current.Resources[...] 拿到的是
+        // **应用级主题**那一套，而本工具的夜间模式切的是元素的 RequestedTheme ——
+        // 取出来就是"浅色那套"，夜间模式下描边直接看不见（用户 2026-10-17 报的
+        // "文本/颜色不跟着夜间模式变" 就是这个坑，本项目以前也栽过一次）。
+        // Button 不设 BorderBrush 时用的是**主题自带的控件描边**，跟着元素主题走，正解。
         if (content is not null)
         {
             button.Content = content;
@@ -99,23 +99,18 @@ internal static class CardShell
         };
     }
 
-    /// <summary>卡片副标题 / 说明（次要色，取系统主题键）。</summary>
+    /// <summary>卡片副标题 / 说明。用**不透明度**压暗，而不是取主题画笔 ——
+    /// 见上面那段说明：代码里取画笔不跟夜间模式，继承主文字色 + 降透明度才是主题安全的。</summary>
     public static TextBlock CreateSubtitle(string text)
     {
-        var block = new TextBlock
+        return new TextBlock
         {
             Text = text,
             FontSize = SubtitleFontSize,
+            Opacity = 0.72,
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.NoWrap
         };
-
-        if (TryGetThemeBrush("TextFillColorSecondaryBrush") is { } secondary)
-        {
-            block.Foreground = secondary;
-        }
-
-        return block;
     }
 
     /// <summary>
