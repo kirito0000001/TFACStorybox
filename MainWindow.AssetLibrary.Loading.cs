@@ -214,15 +214,9 @@ namespace GalExcleTools
             // 新骨架的浏览器已经移到页面级（AssetBrowserHost）：点分类卡时才填充，
             // 所以这里不再顺手填一份（那会白解一遍缩略图）。
 
-            // 第一层的分类卡：每次载入素材库都按当前数量重建（计数会变）。
-            if (AssetCategoryGridView is not null)
-            {
-                AssetCategoryGridView.Items.Clear();
-                foreach (var card in BuildAssetCategoryCards(assetLibrary))
-                {
-                    AssetCategoryGridView.Items.Add(card);
-                }
-            }
+            // 分类卡不在这里铺：详情页只有那一个浏览器，铺分类卡是**打开素材库**那条路的事
+            // （MainWindow.Navigation.cs 里的 FillAssetBrowserWithCategories），
+            // 而且这条懒加载在一个被折叠、永不展开的 Expander 上，本来也跑不到。
         }
 
         private async void LoadMusicFiles(AssetLibraryInfo assetLibrary)

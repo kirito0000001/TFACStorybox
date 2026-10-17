@@ -98,39 +98,59 @@ public sealed partial class MainWindow
         }
     }
 
-    /// <summary>切到第二层（浏览器）：收起分类卡、显示浏览器。旧的 Expander 堆叠保持折叠（它是退路）。</summary>
-    private void ShowAssetBrowserLayer()
+    /// <summary>
+    /// 打开素材库时铺的是**分类文件夹卡**（零境那种：图标 + 名字 + 数量），路径栏显示素材库根目录。
+    /// 详情页现在只有这一个浏览器，所以这层就是"第一层"（外层选库那页是最外面那层）。
+    /// </summary>
+    private void FillAssetBrowserWithCategories(AssetLibraryInfo assetLibrary)
     {
-        if (AssetBrowserHost is not null)
+        if (AssetBrowserHost is null)
         {
-            // -= 再 += ：这个入口可能被点很多次，不能一次挂一个处理器。
-            AssetBrowserHost.BackRequested -= AssetBrowser_BackRequested;
-            AssetBrowserHost.BackRequested += AssetBrowser_BackRequested;
-            AssetBrowserHost.Visibility = Visibility.Visible;
+            return;
         }
 
-        if (AssetCategoryGridView is not null)
+        AssetBrowserHost.SetPath(assetLibrary.Path);
+        AssetBrowserHost.SetUpEnabled(false);
+        AssetBrowserHost.SetCards(BuildAssetCategoryCards(assetLibrary));
+        EnsureAssetBrowserHandlers();
+    }
+
+    /// <summary>进到某个分类里：只把事件处理器挂好（卡片内容由各分类自己的填充方法负责）。</summary>
+    private void ShowAssetBrowserLayer()
+    {
+        EnsureAssetBrowserHandlers();
+    }
+
+    /// <summary>退回分类层（路径栏的「上一层」与左侧返回箭头都走这里；已在分类层时等于重铺一次）。</summary>
+    private void ReturnToAssetCategoryLayer()
+    {
+        if (_currentAssetLibrary is not null)
         {
-            AssetCategoryGridView.Visibility = Visibility.Collapsed;
+            FillAssetBrowserWithCategories(_currentAssetLibrary);
         }
     }
 
-    /// <summary>第二层返回第一层（浏览器左上角那个返回箭头）。</summary>
-    private void CloseAssetBrowser()
+    /// <summary>事件只挂一次：先 -= 再 += 是幂等的（这个入口会被反复走到）。</summary>
+    private void EnsureAssetBrowserHandlers()
     {
-        if (AssetBrowserHost is not null)
+        if (AssetBrowserHost is null)
         {
-            AssetBrowserHost.Visibility = Visibility.Collapsed;
+            return;
         }
 
-        if (AssetCategoryGridView is not null)
-        {
-            AssetCategoryGridView.Visibility = Visibility.Visible;
-        }
+        AssetBrowserHost.BackRequested -= AssetBrowser_BackRequested;
+        AssetBrowserHost.BackRequested += AssetBrowser_BackRequested;
+        AssetBrowserHost.UpRequested -= AssetBrowser_UpRequested;
+        AssetBrowserHost.UpRequested += AssetBrowser_UpRequested;
     }
 
     private void AssetBrowser_BackRequested(object? sender, EventArgs e)
     {
-        CloseAssetBrowser();
+        ReturnToAssetCategoryLayer();
+    }
+
+    private void AssetBrowser_UpRequested(object? sender, EventArgs e)
+    {
+        ReturnToAssetCategoryLayer();
     }
 }

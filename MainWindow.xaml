@@ -1080,41 +1080,22 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Button
-                            Width="36"
-                            Height="36"
-                            Padding="0"
-                            Click="BackToAssetLibraryPageButton_Click"
-                            ToolTipService.ToolTip="返回素材库">
-                            <SymbolIcon Symbol="Back" />
-                        </Button>
-                        <StackPanel Grid.Column="1" Spacing="6">
-                            <TextBlock x:Name="AssetLibraryDetailTitleText" Style="{StaticResource PageTitleStyle}" />
-                            <TextBlock Text="分类会和素材库文件夹保持同步。当前先实现背景图导入和展示，后续分类会沿用同一套结构。" Style="{StaticResource SubtleTextStyle}" />
-                        </StackPanel>
-                    </Grid>
+                    <!--
+                        这里原来有一块页头（返回素材库 + 库名 + 说明）。
+                        用户 2026-10-17：最外面的素材库列表已经是第一层，进来再放一遍库名与返回键是重复 ——
+                        整块去掉：库名看外层，返回看左侧导航与浏览器自己的路径栏。
+                        行 0 因此空着（RowDefinitions 保持三行不动，少改一处是一处）。
+                    -->
 
                     <!--
-                        新骨架第一层（照零境「一个库一张卡」那页）：分类卡。
-                        旧的 Expander 堆叠（下面那个 ScrollViewer）先**折叠不删**，便于对照与回退；
-                        两者都占 Grid.Row=1，靠可见性互斥。
+                        新骨架：**详情页只剩这一层浏览器**（照零境那页：一条路径栏 + 一片卡片网格）。
+                        打开素材库时铺的是**分类文件夹卡**；点进某个分类换成该分类的素材卡，
+                        路径栏文字跟着变、路径栏的「上一层」退回分类层。
+                        （原来这里还有一块「分类网格 + 大标题」，用户 2026-10-17 指出那是重复，已删。）
                     -->
-                    <GridView
-                        x:Name="AssetCategoryGridView"
-                        Grid.Row="1"
-                        Style="{StaticResource AssetGridViewStyle}"
-                        Padding="2,4,16,16" />
-
-                    <!-- 新骨架第二层：某个分类的浏览器（路径栏 + 卡片网格），点分类卡时才显示并填充。 -->
                     <controls:AssetBrowser
                         x:Name="AssetBrowserHost"
-                        Grid.Row="1"
-                        Visibility="Collapsed" />
+                        Grid.Row="1" />
 
                     <ScrollViewer
                         x:Name="AssetLibraryDetailScrollViewer"
