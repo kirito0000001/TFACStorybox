@@ -183,9 +183,14 @@ namespace GalExcleTools
             ProjectTextToolSwitchLanguageButton.Visibility = _projectTextToolMode == ProjectTextToolMode.Localization
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            ProjectTextToolVoiceFilterButton.Visibility = _projectTextToolMode == ProjectTextToolMode.Voice
+            // 语音模式的三个按钮一起藏：过滤、检查DB规范、一键规整语音。
+            // 本地化页没有音频可查/可规整，露出来只会让人点出一句「没有可检查的语音」。
+            var voiceToolVisibility = _projectTextToolMode == ProjectTextToolMode.Voice
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+            ProjectTextToolVoiceFilterButton.Visibility = voiceToolVisibility;
+            VoiceLoudnessCheckButton.Visibility = voiceToolVisibility;
+            VoiceLoudnessNormalizeButton.Visibility = voiceToolVisibility;
             ProjectTextToolVoiceFilterButton.Content = _showOnlyConfiguredVoices ? "显示全部" : "仅看已设置";
             if (_selectedTextToolChapter is null)
             {

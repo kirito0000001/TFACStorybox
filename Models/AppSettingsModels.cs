@@ -43,6 +43,14 @@ internal sealed class AppSettings
     public string? UnrealContentFolderPath { get; set; }
 
     public string? UnrealToolProjectFolderName { get; set; }
+
+    /// <summary>
+    /// 语音规整用的 ffmpeg.exe。留空 = 用随包副本（<c>Tools\Audio\ffmpeg\ffmpeg.exe</c>）。
+    ///
+    /// 配过就**只认配的那个**、不偷偷回落到随包版本 —— 否则用户「明明改了路径却没生效」，
+    /// 而且不知道为什么。解析顺序的唯一实现在 <c>Services/Audio/FfmpegLocator</c>。
+    /// </summary>
+    public string? FFmpegPath { get; set; }
 }
 
 internal sealed class ProjectMeta

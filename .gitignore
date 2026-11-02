@@ -21,3 +21,10 @@ Desktop.ini
 *.msix
 *.msixbundle
 *.cer
+
+# 语音规整用的 ffmpeg（150 MB，LGPL 共享构建）。**不提交，但必须留在工作目录里**：
+#   · csproj 把 Tools\** 当 Content 复制到输出目录，文件不在就打包少这一块，
+#     客户端一用就报「没找到 ffmpeg」；
+#   · 它是可再生的 —— 用 BtbN 的 ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip 解压即得。
+# 复现：把 zip 里的 bin/*.exe 与 bin/*.dll 摊平到 Tools/Audio/ffmpeg/。
+Tools/Audio/ffmpeg/

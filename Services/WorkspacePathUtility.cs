@@ -27,6 +27,9 @@ internal static class WorkspacePathUtility
     private const string ChaptersFolderName = "Chapters";
     private const string UnrealBackupsFolderName = "UnrealBackups";
 
+    /// <summary>语音规整的备份目录名（连同 <see cref="ToolsFolderName"/> 一起落盘）。</summary>
+    private const string AudioBackupsFolderName = "AudioBackups";
+
     public static string GetFolderBackupsPath(string folderPath, string backupsFolderName)
     {
         return Path.Combine(folderPath, ToolsFolderName, backupsFolderName);
@@ -131,6 +134,18 @@ internal static class WorkspacePathUtility
     public static string GetCharacterFolderPath(AssetLibraryInfo assetLibrary)
     {
         return Path.Combine(assetLibrary.Path, CharacterFolderName);
+    }
+
+    /// <summary>
+    /// 语音规整前的备份根目录：<c>{项目}/Tools/AudioBackups</c>。
+    ///
+    /// 落在项目的 <c>Tools</c> 下是刻意的：这是**工具箱自己的中间产物**，不是项目内容，
+    /// 同步到 Unreal 的清单也不认这个目录（<c>UnrealSyncPathPolicy</c> 只认 Voice/Chapters）。
+    /// 一次规整建一个带时间戳的子目录，用户想回退就把里面的 wav 拷回 Voice/{章节}。
+    /// </summary>
+    public static string GetProjectAudioBackupsFolderPath(ProjectInfo project)
+    {
+        return Path.Combine(project.Path, ToolsFolderName, AudioBackupsFolderName);
     }
 
     /// <summary>

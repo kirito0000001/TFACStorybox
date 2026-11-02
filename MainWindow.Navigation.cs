@@ -242,6 +242,7 @@ namespace GalExcleTools
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Visible;
+            UpdateFFmpegStatusText();
             PlayPageEntrance(SettingsPage);
         }
 

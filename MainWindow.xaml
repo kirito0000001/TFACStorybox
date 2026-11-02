@@ -312,6 +312,8 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <Button
                             Width="36"
@@ -332,8 +334,26 @@
                             Content="仅看已设置"
                             Click="ProjectTextToolVoiceFilterButton_Click"
                             ToolTipService.ToolTip="切换语音显示范围" />
-                        <Button Grid.Column="4" Content="重新加载" Click="ReloadProjectTextToolButton_Click" />
-                        <Button Grid.Column="5" Content="切换章节" Click="SwitchProjectTextToolChapterButton_Click" />
+                        <!--
+                            语音响度规范的两块（2026-11-02 从隔壁工具箱搬来）：
+                            · 检查DB规范 —— 只量不改，按游戏语音口径（−12 LUFS ±2、峰值 ≤ −3 dBTP）出报告；
+                            · 一键规整语音 —— 两遍 loudnorm 就地拉平，先整章备份再动手。
+                            只在「文本语音」模式可见：本地化页没有音频可查。
+                        -->
+                        <Button
+                            x:Name="VoiceLoudnessCheckButton"
+                            Grid.Column="4"
+                            Content="检查DB规范"
+                            Click="CheckVoiceLoudnessButton_Click"
+                            ToolTipService.ToolTip="测量本章语音的积分响度与真峰值，按游戏语音口径给出判定（不改文件）" />
+                        <Button
+                            x:Name="VoiceLoudnessNormalizeButton"
+                            Grid.Column="5"
+                            Content="一键规整语音"
+                            Click="NormalizeVoiceLoudnessButton_Click"
+                            ToolTipService.ToolTip="把本章语音就地规整到 −12 LUFS、真峰值 ≤ −3 dBTP（原文件先备份）" />
+                        <Button Grid.Column="6" Content="重新加载" Click="ReloadProjectTextToolButton_Click" />
+                        <Button Grid.Column="7" Content="切换章节" Click="SwitchProjectTextToolChapterButton_Click" />
                     </Grid>
 
                     <Border Grid.Row="1" Style="{StaticResource PanelBorderStyle}">
@@ -1666,6 +1686,50 @@
                                 Message="{Binding Settings.ProjectRootStatusMessage, Mode=OneWay}"
                                 Severity="{Binding Settings.ProjectRootStatusSeverity, Mode=OneWay}"
                                 Title="{Binding Settings.ProjectRootStatusTitle, Mode=OneWay}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!--
+                        语音响度规范依赖 ffmpeg（随包 Tools\Audio\ffmpeg，150 MB，不进仓库）。
+                        设置里填了路径就**只认填的那个**，不偷偷回落到随包版本 ——
+                        否则「明明改了路径却没生效」这种问题根本查不出来。
+                    -->
+                    <Border HorizontalAlignment="Stretch" Style="{StaticResource PanelBorderStyle}">
+                        <StackPanel Padding="16" Spacing="12">
+                            <TextBlock Text="音频工具（ffmpeg）" Style="{StaticResource SectionTitleStyle}" />
+                            <TextBlock
+                                Text="「检查DB规范」与「一键规整语音」都要用 ffmpeg。留空则使用随包副本。"
+                                Style="{StaticResource SubtleTextStyle}"
+                                TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox
+                                    x:Name="FFmpegPathTextBox"
+                                    Header="ffmpeg.exe 路径"
+                                    IsReadOnly="True"
+                                    Text="{Binding Settings.FFmpegPath, Mode=OneWay}"
+                                    PlaceholderText="留空 = 使用 Tools\Audio\ffmpeg\ffmpeg.exe" />
+                                <Button
+                                    Grid.Column="1"
+                                    Margin="0,28,0,0"
+                                    Content="选择"
+                                    Click="ChooseFFmpegPathButton_Click"
+                                    ToolTipService.ToolTip="指定 ffmpeg.exe；保存前会真起一次 -version 验明正身。" />
+                                <Button
+                                    Grid.Column="2"
+                                    Margin="0,28,0,0"
+                                    Content="清除"
+                                    Click="ClearFFmpegPathButton_Click"
+                                    ToolTipService.ToolTip="清空设置里的路径，改回随包副本。" />
+                            </Grid>
+                            <TextBlock
+                                x:Name="FFmpegStatusText"
+                                Style="{StaticResource SubtleTextStyle}"
+                                TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
 

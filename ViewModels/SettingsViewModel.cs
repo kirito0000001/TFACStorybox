@@ -29,6 +29,7 @@ internal sealed class SettingsViewModel : ObservableObject
     private UpdateChannel _updateChannel = UpdateChannel.Stable;
     private bool _updateAutoCheckEnabled = true;
     private double _updateConnectionTimeoutSeconds = 60;
+    private string _ffmpegPath = string.Empty;
     private bool _isLoadingSettings;
 
     public SettingsViewModel(
@@ -248,6 +249,23 @@ internal sealed class SettingsViewModel : ObservableObject
 
     public string StoryTextFontSizeText => $"{Math.Round(StoryTextFontSize)}";
 
+    /// <summary>
+    /// 语音规整用的 ffmpeg.exe。空串 = 用随包副本（<c>Tools\Audio\ffmpeg\ffmpeg.exe</c>）。
+    /// 落到 <c>settings.json</c> 时把空串归一成 null，免得配置文件里留一个没意义的 ""。
+    /// </summary>
+    public string FFmpegPath
+    {
+        get => _ffmpegPath;
+        set
+        {
+            if (SetProperty(ref _ffmpegPath, value ?? string.Empty))
+            {
+                _settings.FFmpegPath = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+                SaveUnlessLoading();
+            }
+        }
+    }
+
     public bool ShowFullStoryChapterLength
     {
         get => _showFullStoryChapterLength;
@@ -458,6 +476,7 @@ internal sealed class SettingsViewModel : ObservableObject
             UpdateChannel = Enum.IsDefined(settings.UpdateChannel) ? settings.UpdateChannel : UpdateChannel.Stable;
             UpdateAutoCheckEnabled = settings.UpdateAutoCheckEnabled;
             UpdateConnectionTimeoutSeconds = Math.Clamp(settings.UpdateConnectionTimeoutSeconds, 10, 180);
+            FFmpegPath = settings.FFmpegPath ?? string.Empty;
         }
         finally
         {
