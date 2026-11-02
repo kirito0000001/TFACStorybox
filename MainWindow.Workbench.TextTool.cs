@@ -379,6 +379,7 @@ namespace GalExcleTools
             grid.Children.Add(CreateProjectTextCell(valueHeader, 1, isHeader: true, hasRightBorder: true));
             if (includeLoudness)
             {
+                grid.Children.Add(CreateVoiceDurationHeaderCell());
                 grid.Children.Add(CreateVoiceDbHeaderCell());
             }
 
@@ -386,7 +387,7 @@ namespace GalExcleTools
             {
                 grid.Children.Add(CreateProjectTextCell(
                     "试听",
-                    includeLoudness ? 3 : 2,
+                    includeLoudness ? 4 : 2,
                     isHeader: true,
                     centerContent: true));
             }
@@ -475,9 +476,11 @@ namespace GalExcleTools
                 }
             };
             grid.Children.Add(CreateProjectTextScrollableCell(button, 1, hasRightBorder: true));
-            // DB 列：把这一行语音的响度元数据常驻显示出来（数据来自缓存/后台测量，
-            // 见 MainWindow.VoiceTool.cs）。没有语音的行给一个灰色的占位横线。
-            grid.Children.Add(CreateVoiceDbCell(row, hasVoice ? value : string.Empty));
+            // 时长列（DB 前面）+ DB 列：两格都是「测量后才知道」的信息，
+            // 一起登记、一起回填，见 MainWindow.VoiceTool.cs。
+            var (durationCell, loudnessCell) = CreateVoiceMetricsCells(row, hasVoice ? value : string.Empty);
+            grid.Children.Add(durationCell);
+            grid.Children.Add(loudnessCell);
             grid.Children.Add(CreateProjectVoicePreviewCell(previewButton));
             return grid;
         }
@@ -528,16 +531,17 @@ namespace GalExcleTools
 
             if (includeLoudness)
             {
-                // 语音页（2026-11-02 改版）：文本 4 : 语音 3 : DB 固定 320 : 试听 72。
-                // 起因是用户看截图后要求「文本砍 1/3、语音砍一半」——原来的 1:1 太宽，
-                // 而两列都吃满剩余空间、没有第三列来吸收，所以空出来的位置就是 DB。
-                // 星号列永远吃满剩余，因此 DB 必须是**固定宽**，否则文本根本窄不下来。
-                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4, GridUnitType.Star), MinWidth = 200 });
-                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star), MinWidth = 220 });
-                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(320) });
+                // 语音页（2026-11-02 二次改版）：文本 3 : 语音 2 : 时长 96 : DB 230 : 试听 64。
+                // 起因是用户看完第一版截图后要求「文本再缩 1/3、语音再缩 2/5，并在 DB 前面加一列时长」。
+                // 必须知道的账：星号列永远吃满剩余，所以「两列同时绝对变窄」只有把空间让给固定列才成立
+                // —— 这一版让出的就是新增的时长列（DB 反而按用户要求收紧了 90）。
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star), MinWidth = 200 });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star), MinWidth = 180 });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(96) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
                 if (includeVoicePreview)
                 {
-                    grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
+                    grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
                 }
 
                 return grid;
@@ -676,8 +680,8 @@ namespace GalExcleTools
             {
                 Child = button
             };
-            // 列 3：语音页现在的列序是 文本 / 语音 / DB / 试听。
-            Grid.SetColumn(border, 3);
+            // 列 4：语音页现在的列序是 文本 / 语音 / 时长 / DB / 试听。
+            Grid.SetColumn(border, 4);
             return border;
         }
 

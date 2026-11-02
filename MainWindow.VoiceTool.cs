@@ -49,9 +49,13 @@ namespace GalExcleTools
         /// </summary>
         private bool _isVoiceLoudnessBusy;
 
-        /// <summary>DB 列里一行的三个数字控件。存控件而不是字符串，是为了后台测完能就地回填。</summary>
+        /// <summary>
+        /// 一行语音的「时长 + DB」两格控件。存控件而不是字符串，是为了测量回来能就地回填。
+        /// 没设语音的行不登记（只造两个占位横线），所以登记进来的这三个 TextBlock 一定非空。
+        /// </summary>
         private sealed record VoiceDbCell(
             string FileName,
+            TextBlock DurationText,
             TextBlock LoudnessText,
             TextBlock PeakText,
             TextBlock RangeText);
@@ -98,6 +102,26 @@ namespace GalExcleTools
             }
         }
 
+        /// <summary>表头的时长列（在 DB 前面）。</summary>
+        private static Border CreateVoiceDurationHeaderCell()
+        {
+            var border = new Border
+            {
+                Padding = new Thickness(8, 8, 8, 8),
+                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
+                BorderThickness = new Thickness(0, 0, 1, 0),
+                Child = new TextBlock
+                {
+                    Text = "时长",
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    TextAlignment = TextAlignment.Right,
+                    Foreground = Application.Current.Resources["TextFillColorPrimaryBrush"] as Brush
+                }
+            };
+            Grid.SetColumn(border, 2);
+            return border;
+        }
+
         /// <summary>表头的 DB 列。列名就叫 DB，下面一行小字说明这三个数字分别是什么。</summary>
         private static Border CreateVoiceDbHeaderCell()
         {
@@ -117,39 +141,36 @@ namespace GalExcleTools
 
             var border = new Border
             {
-                Padding = new Thickness(10, 8, 10, 8),
+                Padding = new Thickness(8, 8, 8, 8),
                 BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
                 BorderThickness = new Thickness(0, 0, 1, 0),
                 Child = panel
             };
-            Grid.SetColumn(border, 2);
+            Grid.SetColumn(border, 3);
             return border;
         }
 
         /// <summary>
-        /// 一行语音的 DB 单元格。**先按当前已知数据填一次**（缓存命中就立刻有数字），
-        /// 再登记到 <see cref="_voiceDbCells"/> 等后台补测回填。
+        /// 一行语音的「时长」与「DB」两格。没设语音的行各给一个灰色横线，
+        /// **不登记**进字典（366 行里只有 26 行有语音，省下的控件很可观）。
         /// </summary>
-        private Border CreateVoiceDbCell(ProjectTextRow row, string voicePath)
+        private (Border DurationCell, Border DbCell) CreateVoiceMetricsCells(ProjectTextRow row, string voicePath)
         {
-            // 没设语音的行占绝大多数（366 行里只有 26 行有语音），
-            // 给它们造三个 TextBlock 纯属浪费 —— 一个灰色横线就够了，也不登记进字典。
             if (string.IsNullOrWhiteSpace(voicePath))
             {
-                return WrapVoiceDbColumn(new TextBlock
-                {
-                    Text = "—",
-                    TextAlignment = TextAlignment.Right,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Foreground = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush
-                });
+                return (
+                    WrapVoiceColumn(CreateVoicePlaceholder(), 2),
+                    WrapVoiceColumn(CreateVoicePlaceholder(), 3));
             }
 
+            var durationText = CreateVoiceDbValueText(12, TextAlignment.Right);
             var loudnessText = CreateVoiceDbValueText(13, TextAlignment.Right);
             var peakText = CreateVoiceDbValueText(11, TextAlignment.Right);
             var rangeText = CreateVoiceDbValueText(11, TextAlignment.Right);
 
-            var grid = new Grid { ColumnSpacing = 8 };
+            // 间距从 8 收到 4：用户的原话是 DB 列「可以收紧一点」，
+            // 收的是三个数之间的空隙，不是把数字缩小。
+            var grid = new Grid { ColumnSpacing = 4 };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -159,23 +180,36 @@ namespace GalExcleTools
             Grid.SetColumn(rangeText, 2);
             grid.Children.Add(rangeText);
 
-            var cell = new VoiceDbCell(Path.GetFileName(voicePath), loudnessText, peakText, rangeText);
+            var cell = new VoiceDbCell(
+                Path.GetFileName(voicePath),
+                durationText,
+                loudnessText,
+                peakText,
+                rangeText);
             _voiceDbCells[row.Id] = cell;
             UpdateVoiceDbCell(cell);
 
-            return WrapVoiceDbColumn(grid);
+            return (WrapVoiceColumn(durationText, 2), WrapVoiceColumn(grid, 3));
         }
 
-        private static Border WrapVoiceDbColumn(UIElement content)
+        private static TextBlock CreateVoicePlaceholder() => new()
+        {
+            Text = "—",
+            TextAlignment = TextAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush
+        };
+
+        private static Border WrapVoiceColumn(UIElement content, int column)
         {
             var border = new Border
             {
-                Padding = new Thickness(10, 8, 10, 8),
+                Padding = new Thickness(8, 8, 8, 8),
                 BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
                 BorderThickness = new Thickness(0, 0, 1, 0),
                 Child = content
             };
-            Grid.SetColumn(border, 2);
+            Grid.SetColumn(border, column);
             return border;
         }
 
@@ -189,51 +223,72 @@ namespace GalExcleTools
         };
 
         /// <summary>
-        /// 刷新一个 DB 单元格。三态：
+        /// 刷新一行的「时长 + DB」。三态：
         /// · 没有语音文件 → 灰色横线；
         /// · 没查过（或语音刚被换过、缓存已失效）→ 灰色横线，等用户手动检查；
-        /// · 有值 → 数字 + 颜色（红=比目标响、黄=比目标轻、绿=容差内）。
+        /// · 有值 → 时长 + 三个数字（只有 LUFS 染色：红=比目标响、黄=比目标轻、绿=容差内）。
         ///
         /// 颜色**不在这里重新判**，走的是 <see cref="VoiceLoudnessCompliance.ClassifyLoudness"/>，
-        /// 与「检查DB规范」的报告同一把尺子 —— 否则会出现「报告说达标、列表却是红的」。
+        /// 与「检查DB规范」同一把尺子 —— 否则会出现「报告说达标、列表却是红的」。
         /// </summary>
         private void UpdateVoiceDbCell(VoiceDbCell cell)
         {
             var mutedBrush = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush;
 
-            if (string.IsNullOrEmpty(cell.FileName))
+            if (string.IsNullOrEmpty(cell.FileName) ||
+                !_chapterVoiceLoudness.TryGetValue(cell.FileName, out var item))
             {
-                SetVoiceDbText(cell, "—", string.Empty, string.Empty, mutedBrush);
-                return;
-            }
-
-            if (!_chapterVoiceLoudness.TryGetValue(cell.FileName, out var item))
-            {
-                SetVoiceDbText(cell, "—", string.Empty, string.Empty, mutedBrush);
+                SetVoiceDbText(cell, "—", "—", string.Empty, string.Empty, mutedBrush);
                 return;
             }
 
             if (!item.Measurement.IsUsable)
             {
-                SetVoiceDbText(cell, "测不出", string.Empty, string.Empty, mutedBrush);
+                SetVoiceDbText(
+                    cell,
+                    FormatVoiceDuration(item.Measurement.Duration),
+                    "测不出",
+                    string.Empty,
+                    string.Empty,
+                    mutedBrush);
                 return;
             }
 
             SetVoiceDbText(
                 cell,
+                FormatVoiceDuration(item.Measurement.Duration),
                 item.Measurement.IntegratedLufs.ToString("0.0", CultureInfo.InvariantCulture),
                 item.Measurement.TruePeakDb.ToString("0.0", CultureInfo.InvariantCulture),
                 item.Measurement.LoudnessRangeLu.ToString("0.0", CultureInfo.InvariantCulture),
                 BrushForDbLoudness(item));
         }
 
+        /// <summary>
+        /// 时长的显示口径：60 秒以内报「3.2s」（语音几乎都在这一档），更长的退回「1:23」。
+        /// 没读到就一条横线，不拿 0 秒冒充。
+        /// </summary>
+        private static string FormatVoiceDuration(TimeSpan? duration)
+        {
+            if (duration is not { } value || value <= TimeSpan.Zero)
+            {
+                return "—";
+            }
+
+            return value.TotalSeconds < 60d
+                ? value.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + "s"
+                : $"{(int)value.TotalMinutes}:{value.Seconds:00}";
+        }
+
         private static void SetVoiceDbText(
             VoiceDbCell cell,
+            string duration,
             string loudness,
             string peak,
             string range,
             Brush? loudnessBrush)
         {
+            cell.DurationText.Text = duration;
+            cell.DurationText.Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush;
             cell.LoudnessText.Text = loudness;
             cell.LoudnessText.Foreground = loudnessBrush;
             cell.PeakText.Text = peak;
@@ -244,7 +299,7 @@ namespace GalExcleTools
                 cell.LoudnessText,
                 string.IsNullOrEmpty(peak)
                     ? "这一行还没有响度数据"
-                    : $"积分响度 {loudness} LUFS / 真峰值 {peak} dBTP / 响度范围 {range} LU");
+                    : $"时长 {duration} / 积分响度 {loudness} LUFS / 真峰值 {peak} dBTP / 响度范围 {range} LU");
         }
 
         private static Brush? BrushForDbLoudness(VoiceComplianceItem item)

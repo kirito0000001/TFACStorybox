@@ -96,6 +96,15 @@ internal sealed record VoiceLoudnessMeasurement(
     /// <summary>loudnorm 第一遍才有：目标偏移量（LU），两遍法必须原样喂回第二遍。</summary>
     public double TargetOffsetLu { get; init; }
 
+    /// <summary>
+    /// 音频时长。从同一次 <c>-i</c> 的输出头里读（<c>Duration: 00:00:03.24</c>），
+    /// **不额外起进程** —— 它只是那句 stderr 里现成的一行。
+    ///
+    /// 放这里而不是单独存一份：时长和响度是同一批测量一起拿到的，
+    /// 分开存只会多一处可能不同步的地方。null = 没读到（流式/损坏文件）。
+    /// </summary>
+    public TimeSpan? Duration { get; init; }
+
     /// <summary>量不出来（NaN）不算「通过」，调用方据此判 Off。</summary>
     public bool IsUsable => !double.IsNaN(IntegratedLufs) && !double.IsNaN(TruePeakDb);
 }
@@ -328,12 +337,18 @@ internal sealed class VoiceLoudnessCacheEntry
 
     public double LoudnessRangeLu { get; set; }
 
+    /// <summary>时长（秒）。迁移时没有这一项的旧缓存按 0 处理，页面上会显示成缺省横线。</summary>
+    public double DurationSeconds { get; set; }
+
     /// <summary>这份缓存还能不能直接用（文件没被换过/改过）。</summary>
     public bool Matches(long length, long lastWriteUtcTicks) =>
         Length == length && LastWriteUtcTicks == lastWriteUtcTicks;
 
     public VoiceLoudnessMeasurement ToMeasurement() =>
-        new(IntegratedLufs, TruePeakDb, LoudnessRangeLu);
+        new(IntegratedLufs, TruePeakDb, LoudnessRangeLu)
+        {
+            Duration = DurationSeconds > 0d ? TimeSpan.FromSeconds(DurationSeconds) : null
+        };
 
     public static VoiceLoudnessCacheEntry FromMeasurement(
         string fileName,
@@ -346,7 +361,8 @@ internal sealed class VoiceLoudnessCacheEntry
             LastWriteUtcTicks = lastWriteUtcTicks,
             IntegratedLufs = measurement.IntegratedLufs,
             TruePeakDb = measurement.TruePeakDb,
-            LoudnessRangeLu = measurement.LoudnessRangeLu
+            LoudnessRangeLu = measurement.LoudnessRangeLu,
+            DurationSeconds = measurement.Duration?.TotalSeconds ?? 0d
         };
 }
 
@@ -356,8 +372,12 @@ internal sealed class VoiceLoudnessCacheEntry
 /// </summary>
 internal sealed class VoiceLoudnessCacheDocument
 {
-    /// <summary>缓存格式版本。改结构就 +1，旧文件直接被丢弃。</summary>
-    public const int CurrentVersion = 1;
+    /// <summary>
+    /// 缓存格式版本。改结构就 +1，旧文件直接被丢弃。
+    /// v2（2026-11-02）：加了 <see cref="VoiceLoudnessCacheEntry.DurationSeconds"/> ——
+    /// v1 的条目没有时长，留着会让「时长」列整列显示横线，不如重测一遍。
+    /// </summary>
+    public const int CurrentVersion = 2;
 
     public int Version { get; set; } = CurrentVersion;
 

@@ -41,6 +41,15 @@ internal sealed class VoiceBatchProcessor
     private static readonly Regex SampleRatePattern = new(@"(?<rate>\d{4,6})\s*Hz", RegexOptions.Compiled);
 
     /// <summary>
+    /// <c>-i</c> 输出头里的时长（<c>Duration: 00:00:03.24, start: …</c>）。
+    /// 只认「两位:两位:两位.小数」这种完整形态 —— <c>Duration: N/A</c> 自然匹配不上，
+    /// 那种流式/损坏文件的时长就当没有，而不是瞎填一个 0。
+    /// </summary>
+    private static readonly Regex DurationPattern = new(
+        @"Duration:\s*(?<value>\d{2}:\d{2}:\d{2}\.\d+)",
+        RegexOptions.Compiled);
+
+    /// <summary>
     /// 测量一批文件，出三段判定。
     /// <b>不改任何文件</b>：只跑 <c>loudnorm=…:print_format=json</c> 到 <c>-f null</c>。
     /// </summary>
@@ -186,7 +195,38 @@ internal sealed class VoiceBatchProcessor
     {
         var invocation = AudioFfmpegArguments.BuildLoudnessProbe(filePath, preset);
         var result = await RunFfmpegAsync(ffmpegPath, invocation, cancellationToken).ConfigureAwait(false);
-        return AudioLoudnormJson.Parse(result.Output);
+        var measurement = AudioLoudnormJson.Parse(result.Output);
+        if (measurement is null)
+        {
+            return null;
+        }
+
+        // 时长白捡：它和响度在**同一次** ffmpeg 调用的输出里，多解析一行而已。
+        // 为它单独起一次进程（或加 ffprobe）纯属浪费 —— 语音页每行都要显示它。
+        return ParseDuration(result.Output) is { } duration
+            ? measurement with { Duration = duration }
+            : measurement;
+    }
+
+    /// <summary>
+    /// 从 ffmpeg 的 stderr 里读 <c>Duration: 00:00:02.40</c>。纯函数，回归里直接喂字符串断言。
+    /// </summary>
+    internal static TimeSpan? ParseDuration(string ffmpegOutput)
+    {
+        if (string.IsNullOrWhiteSpace(ffmpegOutput))
+        {
+            return null;
+        }
+
+        var match = DurationPattern.Match(ffmpegOutput);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        return TimeSpan.TryParse(match.Groups["value"].Value, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
     }
 
     /// <summary>
