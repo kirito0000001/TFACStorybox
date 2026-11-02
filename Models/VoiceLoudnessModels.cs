@@ -280,10 +280,15 @@ internal sealed record VoiceNormalizeOutcome(
     public string FileName => Path.GetFileName(SourcePath);
 }
 
-/// <summary>一次规整的总结果。</summary>
+/// <summary>
+/// 一次规整的总结果。
+///
+/// 这里刻意**没有**「备份目录」字段：备份已由「原始版」制度接管
+/// （<see cref="Services.VoiceOriginalArchiveService"/>，每个工作文件固定一份最初副本），
+/// 不再有「每次规整一个时间戳目录」那套。
+/// </summary>
 internal sealed record VoiceNormalizeResult(
     VoiceLoudnessPreset Preset,
-    string? BackupDirectory,
     IReadOnlyList<VoiceNormalizeOutcome> Outcomes)
 {
     public int SuccessCount => Outcomes.Count(item => item.Succeeded);

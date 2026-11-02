@@ -28,6 +28,7 @@ namespace GalExcleTools
     {
         private readonly VoiceBatchProcessor _voiceBatchProcessor = new();
         private readonly VoiceLoudnessCacheService _voiceLoudnessCacheService = new();
+        private readonly VoiceOriginalArchiveService _voiceOriginalArchive = new();
 
         /// <summary>
         /// 当前章节每条语音的判定结果，key = 文件名。
@@ -673,25 +674,37 @@ namespace GalExcleTools
 
             var preset = VoiceLoudnessPreset.GameDialogue;
             var chapterCode = _selectedTextToolChapter.Code;
-            var backupDirectory = Path.Combine(
-                WorkspacePathUtility.GetProjectAudioBackupsFolderPath(_currentProject),
-                $"{DateTime.Now:yyyyMMdd-HHmmss}_{TextUtility.SanitizeCharacterFolderName(chapterCode)}");
 
-            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
-                "规整语音",
-                $"将把「{chapterCode}」的 {files.Count} 条语音就地拉到 {preset.Summary}。\n\n"
-                + $"· 原文件会先整章备份到：{backupDirectory}\n"
-                + "· 每条语音会重写一遍（16bit WAV，原采样率），文件名与目录不变；\n"
-                + "· 处理期间不要关闭程序，可以点环形进度条取消（已处理的条目不会回滚）。",
-                "开始规整",
-                "取消"));
-            if (!confirmed)
+            // 不再弹确认框（2026-11-02 用户定案）：有「原始版」兜底之后，
+            // 「就地覆盖」不再是不可逆操作，确认框只是每次多点一下。
+            PlaySelectionSound();
+            StopProjectVoicePreview();
+
+            // 只留一份「最初版」：还没有原始版的，先把**当前状态**补存下来（已有的绝不覆盖）。
+            // 这一步失败就不开工 —— 没有回退点的批量覆盖不该开始。
+            int createdOriginals;
+            try
             {
+                createdOriginals = _voiceOriginalArchive.EnsureOriginals(_currentProject, chapterCode, files);
+            }
+            catch (Exception ex)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "没能建立语音原始版备份",
+                    "没有备份就不开始规整。错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "建立语音原始版失败");
                 return;
             }
 
-            PlaySelectionSound();
-            StopProjectVoicePreview();
+            if (createdOriginals > 0)
+            {
+                AppendLog(
+                    LogKind.Info,
+                    $"为 {createdOriginals} 条语音补存了原始版（{chapterCode}）——"
+                    + $"存量语音第一次规整前的兜底，之后一直复用这一份。");
+            }
 
             var progress = new Progress<VoiceBatchProgress>(item =>
                 UpdateGlobalProgress(
@@ -703,11 +716,11 @@ namespace GalExcleTools
             VoiceNormalizeResult result;
             try
             {
+                // 不做整章备份：回退由「原始版」制度负责（每个文件固定一份最初副本）。
                 result = await _voiceBatchProcessor.NormalizeAsync(
                     ffmpegPath,
                     files,
                     preset,
-                    backupDirectory,
                     progress,
                     GetGlobalProgressCancellationToken());
             }
@@ -740,9 +753,21 @@ namespace GalExcleTools
             ApplyVoiceNormalizeResult(result);
             await HideGlobalProgressAfterDelayAsync();
 
+            if (result.FailureCount == 0)
+            {
+                // 全成功只留一条浮条；有失败才弹窗 —— 那几行失败原因必须能逐条读到。
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "规整完成",
+                    result.StillOffCount > 0
+                        ? $"{summary}；其中 {result.StillOffCount} 条受峰值天花板限制未到目标（详见 DB 列）。"
+                        : summary);
+                return;
+            }
+
             await _dialogService.ShowContentAsync(new ContentDialogRequest(
                 "语音规整完成",
-                BuildVoiceNormalizeResultView(result),
+                BuildVoiceNormalizeResultView(result, chapterCode),
                 string.Empty,
                 "关闭",
                 DefaultButton: ContentDialogButton.Close,
@@ -750,7 +775,7 @@ namespace GalExcleTools
                 ConfigureDialog: dialog => dialog.MaxWidth = 760));
         }
 
-        private static UIElement BuildVoiceNormalizeResultView(VoiceNormalizeResult result)
+        private UIElement BuildVoiceNormalizeResultView(VoiceNormalizeResult result, string chapterCode)
         {
             var root = new StackPanel
             {
@@ -767,11 +792,13 @@ namespace GalExcleTools
                 TextWrapping = TextWrapping.Wrap
             });
 
-            if (!string.IsNullOrWhiteSpace(result.BackupDirectory))
+            // 不再有「每次一个时间戳目录」的备份；这里只说清「最初版还在哪」。
+            if (_currentProject is not null)
             {
                 root.Children.Add(new TextBlock
                 {
-                    Text = $"原文件备份：{result.BackupDirectory}",
+                    Text = $"原始版仍保存在：{WorkspacePathUtility.GetProjectVoiceOriginalsFolderPath(_currentProject, chapterCode)}"
+                        + "（只保留最初那一份，之后规整不会再复制）",
                     TextWrapping = TextWrapping.Wrap,
                     Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
                 });
@@ -811,6 +838,74 @@ namespace GalExcleTools
             });
 
             return root;
+        }
+
+        /// <summary>
+        /// 右键「还原最初版」：把原始版复制回工作文件。
+        ///
+        /// 还原之后**旧响度结论必须作废**（文件内容变了），所以顺手把它从 DB 字典里删掉，
+        /// 那一行退回横线，等用户再点一次检查 —— 不能让它继续显示还原前的数字。
+        /// </summary>
+        private async Task RestoreProjectVoiceOriginalAsync(ProjectTextRow row)
+        {
+            if (_currentProject is null || _selectedTextToolChapter is null)
+            {
+                return;
+            }
+
+            if (!_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) || !File.Exists(voicePath))
+            {
+                ShowFloatingTip(InfoBarSeverity.Warning, "没有可还原的语音", "这一行还没有有效的语音文件。");
+                return;
+            }
+
+            if (!_voiceOriginalArchive.HasOriginal(_currentProject, _selectedTextToolChapter.Code, voicePath))
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Warning,
+                    "这条语音没有原始版",
+                    "它是在原始版机制之前导入的。下次点「规整语音」会自动把当前状态补存成原始版。");
+                return;
+            }
+
+            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                "还原最初版",
+                $"把「{Path.GetFileName(voicePath)}」还原成导入时的原始版本？\n"
+                + "当前的响度处理结果会被覆盖（文件名、备注、映射都不变）。",
+                "还原",
+                "取消"));
+            if (!confirmed)
+            {
+                return;
+            }
+
+            StopProjectVoicePreview();
+            try
+            {
+                if (!_voiceOriginalArchive.TryRestore(_currentProject, _selectedTextToolChapter.Code, voicePath))
+                {
+                    ShowFloatingTip(InfoBarSeverity.Warning, "还原失败", "原始版文件已经不在了。");
+                    return;
+                }
+
+                _chapterVoiceLoudness.Remove(Path.GetFileName(voicePath));
+                UpdateVoiceDbCells();
+                AppendLog(LogKind.Info, $"已还原语音原始版：{Path.GetFileName(voicePath)}");
+                PlaySelectionSound();
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "已还原为最初版",
+                    $"{Path.GetFileName(voicePath)}，重新点「检查DB规范」可刷新 DB 列。");
+            }
+            catch (Exception ex)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "还原失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    $"还原语音原始版失败：{Path.GetFileName(voicePath)}");
+            }
         }
 
         // ---------------------------------------------------------------------

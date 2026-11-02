@@ -27,11 +27,14 @@ internal static class WorkspacePathUtility
     private const string ChaptersFolderName = "Chapters";
     private const string UnrealBackupsFolderName = "UnrealBackups";
 
-    /// <summary>语音规整的备份目录名（连同 <see cref="ToolsFolderName"/> 一起落盘）。</summary>
-    private const string AudioBackupsFolderName = "AudioBackups";
-
     /// <summary>语音响度缓存（DB 列）的目录名。</summary>
     private const string VoiceLoudnessFolderName = "VoiceLoudness";
+
+    /// <summary>
+    /// 语音「原始版」的目录名（只读副本，永不参与同步）。
+    /// 旧的 <c>AudioBackups</c>（时间戳目录，每次规整复制一整章）已废弃，目录里有历史文件可直接删。
+    /// </summary>
+    private const string VoiceOriginalsFolderName = "VoiceOriginals";
 
     public static string GetFolderBackupsPath(string folderPath, string backupsFolderName)
     {
@@ -140,18 +143,6 @@ internal static class WorkspacePathUtility
     }
 
     /// <summary>
-    /// 语音规整前的备份根目录：<c>{项目}/Tools/AudioBackups</c>。
-    ///
-    /// 落在项目的 <c>Tools</c> 下是刻意的：这是**工具箱自己的中间产物**，不是项目内容，
-    /// 同步到 Unreal 的清单也不认这个目录（<c>UnrealSyncPathPolicy</c> 只认 Voice/Chapters）。
-    /// 一次规整建一个带时间戳的子目录，用户想回退就把里面的 wav 拷回 Voice/{章节}。
-    /// </summary>
-    public static string GetProjectAudioBackupsFolderPath(ProjectInfo project)
-    {
-        return Path.Combine(project.Path, ToolsFolderName, AudioBackupsFolderName);
-    }
-
-    /// <summary>
     /// 语音页 DB 列的缓存目录：<c>{项目}/Tools/VoiceLoudness</c>。
     ///
     /// 一章一个 json（按章节代号命名）。它是**可丢弃的派生数据** —— 删掉只会让下次进页面
@@ -168,6 +159,23 @@ internal static class WorkspacePathUtility
         return Path.Combine(
             GetProjectVoiceLoudnessFolderPath(project),
             TextUtility.SanitizeCharacterFolderName(chapterCode) + ".json");
+    }
+
+    /// <summary>
+    /// 语音「原始版」的存放目录：<c>{项目}/Tools/VoiceOriginals/{章节}</c>。
+    ///
+    /// 为什么放 Tools 而不是 Voice 里：<b>它绝对不能参与同步</b>。
+    /// Voice 目录的枚举是 AllDirectories（见 <c>GetCurrentChapterVoiceFiles</c>），
+    /// 放进去会被当成一条语音一起检查、一起规整、一起同步进 Unreal —— 那就成灾难了。
+    /// Tools 是工具箱私有区，同步清单不认。
+    /// </summary>
+    public static string GetProjectVoiceOriginalsFolderPath(ProjectInfo project, string chapterCode)
+    {
+        return Path.Combine(
+            project.Path,
+            ToolsFolderName,
+            VoiceOriginalsFolderName,
+            TextUtility.SanitizeCharacterFolderName(chapterCode));
     }
 
     /// <summary>

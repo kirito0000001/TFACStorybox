@@ -89,14 +89,14 @@ internal sealed class VoiceBatchProcessor
     /// <summary>
     /// 规整一批文件：全部拉到目标响度、真峰值压到天花板以下，<b>就地覆盖</b>。
     ///
-    /// <paramref name="backupDirectory"/> 非空时，先把每一条原样复制进去再动手。
-    /// 备份失败直接抛 —— 没有回退点的批量替换不该开始。
+    /// <b>这里不做备份</b>：回退由「原始版」（<see cref="VoiceOriginalArchiveService"/>）负责 ——
+    /// 每个工作文件固定一份最初副本，规整只覆盖工作版。上一版是「每规整一次复制一整章」，
+    /// 十次之后目录就没法看了（2026-11-02 用户定案改掉）。
     /// </summary>
     public async Task<VoiceNormalizeResult> NormalizeAsync(
         string ffmpegPath,
         IReadOnlyList<string> files,
         VoiceLoudnessPreset preset,
-        string? backupDirectory,
         IProgress<VoiceBatchProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -106,12 +106,7 @@ internal sealed class VoiceBatchProcessor
 
         if (files.Count == 0)
         {
-            return new VoiceNormalizeResult(preset, null, []);
-        }
-
-        if (!string.IsNullOrWhiteSpace(backupDirectory))
-        {
-            CreateBackup(files, backupDirectory);
+            return new VoiceNormalizeResult(preset, []);
         }
 
         var outcomes = new VoiceNormalizeOutcome[files.Count];
@@ -123,30 +118,7 @@ internal sealed class VoiceBatchProcessor
             progress,
             cancellationToken).ConfigureAwait(false);
 
-        return new VoiceNormalizeResult(preset, backupDirectory, outcomes);
-    }
-
-    /// <summary>
-    /// 把一批文件复制到 <paramref name="backupDirectory"/>。
-    /// 重名（不同子目录的同名文件）加序号避开，不允许互相覆盖 —— 备份少一份就等于没备份。
-    /// </summary>
-    public static void CreateBackup(IReadOnlyList<string> files, string backupDirectory)
-    {
-        Directory.CreateDirectory(backupDirectory);
-        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in files)
-        {
-            var name = Path.GetFileName(file);
-            var candidate = name;
-            var suffix = 1;
-            while (!usedNames.Add(candidate))
-            {
-                candidate = $"{Path.GetFileNameWithoutExtension(name)} ({suffix}){Path.GetExtension(name)}";
-                suffix++;
-            }
-
-            File.Copy(file, Path.Combine(backupDirectory, candidate), overwrite: true);
-        }
+        return new VoiceNormalizeResult(preset, outcomes);
     }
 
     private async Task RunWorkersAsync<T>(
