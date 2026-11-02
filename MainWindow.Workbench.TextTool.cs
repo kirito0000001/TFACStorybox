@@ -180,10 +180,16 @@ namespace GalExcleTools
         private void RefreshProjectTextToolPage()
         {
             ProjectTextToolTablePanel.Children.Clear();
+            // 重铺会把行控件全部新造一遍，旧的 DB 单元格引用必须一起作废，
+            // 否则后台测量回来会往已经不在界面上的 TextBlock 里写字（改了也看不见）。
+            ResetVoiceLoudnessColumnState();
+            // 缓存**在铺行之前**就读进来：这样第一屏画出来就带着数字，
+            // 不会先闪一片「…」再被后台填上（那看起来像在卡）。
+            PrefillVoiceLoudnessFromCache();
             ProjectTextToolSwitchLanguageButton.Visibility = _projectTextToolMode == ProjectTextToolMode.Localization
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            // 语音模式的三个按钮一起藏：过滤、检查DB规范、一键规整语音。
+            // 语音模式的三个按钮一起藏：过滤、检查DB规范、规整语音。
             // 本地化页没有音频可查/可规整，露出来只会让人点出一句「没有可检查的语音」。
             var voiceToolVisibility = _projectTextToolMode == ProjectTextToolMode.Voice
                 ? Visibility.Visible
@@ -219,6 +225,7 @@ namespace GalExcleTools
                 : $"当前语言：{_selectedLocalizationLanguage}，章节：{_selectedTextToolChapter.Code}，文本 {rows.Count} 行。";
             ProjectTextToolTablePanel.Children.Add(CreateProjectTextTableHeader(
                 _projectTextToolMode == ProjectTextToolMode.Voice ? "语音文件" : _selectedLocalizationLanguage,
+                _projectTextToolMode == ProjectTextToolMode.Voice,
                 _projectTextToolMode == ProjectTextToolMode.Voice));
             if (rows.Count == 0)
             {
@@ -241,6 +248,10 @@ namespace GalExcleTools
                     ProjectTextToolTablePanel.Children.Add(CreateProjectTextLocalizationTableRow(row, value, languageMap));
                 }
             }
+
+            // 「规整语音」的可用性只取决于 DB 列里有没有超差项。行铺完之后才判一次：
+            // 缓存里带回来的旧结果也算数，所以「什么都没点、但上次查出有问题」时它是能点的。
+            UpdateVoiceNormalizeButtonsState();
         }
 
         private Dictionary<string, string> GetCurrentLocalizationLanguageMap()
@@ -357,15 +368,27 @@ namespace GalExcleTools
                 logMessage: $"已移除语音映射：{Path.GetFileName(removedPath ?? voicePath)}");
         }
 
-        private static UIElement CreateProjectTextTableHeader(string valueHeader, bool includeVoicePreview)
+        private static UIElement CreateProjectTextTableHeader(
+            string valueHeader,
+            bool includeVoicePreview,
+            bool includeLoudness)
         {
-            var grid = CreateProjectTextGrid(includeVoicePreview);
+            var grid = CreateProjectTextGrid(includeVoicePreview, includeLoudness);
             grid.Background = Application.Current.Resources["SolidBackgroundFillColorSecondaryBrush"] as Brush;
             grid.Children.Add(CreateProjectTextCell("文本", 0, isHeader: true, hasRightBorder: true));
-            grid.Children.Add(CreateProjectTextCell(valueHeader, 1, isHeader: true, hasRightBorder: includeVoicePreview));
+            grid.Children.Add(CreateProjectTextCell(valueHeader, 1, isHeader: true, hasRightBorder: true));
+            if (includeLoudness)
+            {
+                grid.Children.Add(CreateVoiceDbHeaderCell());
+            }
+
             if (includeVoicePreview)
             {
-                grid.Children.Add(CreateProjectTextCell("试听", 2, isHeader: true, centerContent: true));
+                grid.Children.Add(CreateProjectTextCell(
+                    "试听",
+                    includeLoudness ? 3 : 2,
+                    isHeader: true,
+                    centerContent: true));
             }
 
             return grid;
@@ -390,12 +413,13 @@ namespace GalExcleTools
 
         private Grid CreateProjectTextVoiceTableRow(ProjectTextRow row, string value, int rowCount)
         {
-            var grid = CreateProjectTextGrid(includeVoicePreview: true);
+            var grid = CreateProjectTextGrid(includeVoicePreview: true, includeLoudness: true);
             grid.Children.Add(CreateProjectTextSourceCell(row));
             var hasVoice = !string.IsNullOrWhiteSpace(value) && File.Exists(value);
             var button = new Button
             {
-                MinWidth = 520,
+                // 520 → 240：语音列砍半之后，520 会把这一列顶回去，DB 列就没地方站了。
+                MinWidth = 240,
                 Margin = new Thickness(8),
                 Tag = row.Id
             };
@@ -451,6 +475,9 @@ namespace GalExcleTools
                 }
             };
             grid.Children.Add(CreateProjectTextScrollableCell(button, 1, hasRightBorder: true));
+            // DB 列：把这一行语音的响度元数据常驻显示出来（数据来自缓存/后台测量，
+            // 见 MainWindow.VoiceTool.cs）。没有语音的行给一个灰色的占位横线。
+            grid.Children.Add(CreateVoiceDbCell(row, hasVoice ? value : string.Empty));
             grid.Children.Add(CreateProjectVoicePreviewCell(previewButton));
             return grid;
         }
@@ -491,13 +518,32 @@ namespace GalExcleTools
             return grid;
         }
 
-        private static Grid CreateProjectTextGrid(bool includeVoicePreview = false)
+        private static Grid CreateProjectTextGrid(bool includeVoicePreview = false, bool includeLoudness = false)
         {
             var grid = new Grid
             {
                 BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
                 BorderThickness = new Thickness(0, 0, 0, 1)
             };
+
+            if (includeLoudness)
+            {
+                // 语音页（2026-11-02 改版）：文本 4 : 语音 3 : DB 固定 320 : 试听 72。
+                // 起因是用户看截图后要求「文本砍 1/3、语音砍一半」——原来的 1:1 太宽，
+                // 而两列都吃满剩余空间、没有第三列来吸收，所以空出来的位置就是 DB。
+                // 星号列永远吃满剩余，因此 DB 必须是**固定宽**，否则文本根本窄不下来。
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4, GridUnitType.Star), MinWidth = 200 });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star), MinWidth = 220 });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(320) });
+                if (includeVoicePreview)
+                {
+                    grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
+                }
+
+                return grid;
+            }
+
+            // 文本本地化页维持原来的 1:1（这次只动语音页）。
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 240 });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 240 });
             if (includeVoicePreview)
@@ -630,7 +676,8 @@ namespace GalExcleTools
             {
                 Child = button
             };
-            Grid.SetColumn(border, 2);
+            // 列 3：语音页现在的列序是 文本 / 语音 / DB / 试听。
+            Grid.SetColumn(border, 3);
             return border;
         }
 

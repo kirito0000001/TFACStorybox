@@ -349,9 +349,10 @@
                         <Button
                             x:Name="VoiceLoudnessNormalizeButton"
                             Grid.Column="5"
-                            Content="一键规整语音"
+                            Content="规整语音"
+                            IsEnabled="False"
                             Click="NormalizeVoiceLoudnessButton_Click"
-                            ToolTipService.ToolTip="把本章语音就地规整到 −12 LUFS、真峰值 ≤ −3 dBTP（原文件先备份）" />
+                            ToolTipService.ToolTip="把本章语音就地规整到 −12 LUFS、真峰值 ≤ −3 dBTP（原文件先备份）。只有 DB 列里有超差项时才可点。" />
                         <Button Grid.Column="6" Content="重新加载" Click="ReloadProjectTextToolButton_Click" />
                         <Button Grid.Column="7" Content="切换章节" Click="SwitchProjectTextToolChapterButton_Click" />
                     </Grid>

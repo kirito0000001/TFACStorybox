@@ -302,3 +302,74 @@ internal sealed record VoiceBatchProgress(
         ? 0d
         : Math.Clamp((double)CompletedCount / TotalCount, 0d, 1d);
 }
+
+// ---------------------------------------------------------------------------
+// 章节级响度缓存（语音页 DB 列的「常驻」数据）
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// 一条缓存的响度。**新鲜度靠前三个字段判**：文件名 + 字节数 + 最后写入时间戳，
+/// 三者都对得上才敢复用 —— 语音被替换过（哪怕同长度）时间戳也会变。
+///
+/// 为什么要缓存而不是每次进页面就量：一章二十几条语音，跑一遍 ffmpeg 要好几秒，
+/// 用户只是想看列表；而响度对同一个文件是个**不变的事实**，重复测量纯属浪费。
+/// </summary>
+internal sealed class VoiceLoudnessCacheEntry
+{
+    public string FileName { get; set; } = string.Empty;
+
+    public long Length { get; set; }
+
+    public long LastWriteUtcTicks { get; set; }
+
+    public double IntegratedLufs { get; set; }
+
+    public double TruePeakDb { get; set; }
+
+    public double LoudnessRangeLu { get; set; }
+
+    /// <summary>这份缓存还能不能直接用（文件没被换过/改过）。</summary>
+    public bool Matches(long length, long lastWriteUtcTicks) =>
+        Length == length && LastWriteUtcTicks == lastWriteUtcTicks;
+
+    public VoiceLoudnessMeasurement ToMeasurement() =>
+        new(IntegratedLufs, TruePeakDb, LoudnessRangeLu);
+
+    public static VoiceLoudnessCacheEntry FromMeasurement(
+        string fileName,
+        long length,
+        long lastWriteUtcTicks,
+        VoiceLoudnessMeasurement measurement) => new()
+        {
+            FileName = fileName,
+            Length = length,
+            LastWriteUtcTicks = lastWriteUtcTicks,
+            IntegratedLufs = measurement.IntegratedLufs,
+            TruePeakDb = measurement.TruePeakDb,
+            LoudnessRangeLu = measurement.LoudnessRangeLu
+        };
+}
+
+/// <summary>
+/// 一个章节的缓存文件内容。带 <see cref="Version"/> 与 <see cref="TargetLufs"/>：
+/// 口径（目标）变了的话旧数字虽然在、但判定会变，所以读到不同目标时整份作废重测。
+/// </summary>
+internal sealed class VoiceLoudnessCacheDocument
+{
+    /// <summary>缓存格式版本。改结构就 +1，旧文件直接被丢弃。</summary>
+    public const int CurrentVersion = 1;
+
+    public int Version { get; set; } = CurrentVersion;
+
+    public string? ChapterCode { get; set; }
+
+    public double TargetLufs { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public List<VoiceLoudnessCacheEntry> Entries { get; set; } = [];
+
+    public bool IsUsableFor(double targetLufs) =>
+        Version == CurrentVersion && Math.Abs(TargetLufs - targetLufs) < 0.001d;
+}
+

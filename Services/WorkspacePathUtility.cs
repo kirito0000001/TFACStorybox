@@ -30,6 +30,9 @@ internal static class WorkspacePathUtility
     /// <summary>语音规整的备份目录名（连同 <see cref="ToolsFolderName"/> 一起落盘）。</summary>
     private const string AudioBackupsFolderName = "AudioBackups";
 
+    /// <summary>语音响度缓存（DB 列）的目录名。</summary>
+    private const string VoiceLoudnessFolderName = "VoiceLoudness";
+
     public static string GetFolderBackupsPath(string folderPath, string backupsFolderName)
     {
         return Path.Combine(folderPath, ToolsFolderName, backupsFolderName);
@@ -146,6 +149,25 @@ internal static class WorkspacePathUtility
     public static string GetProjectAudioBackupsFolderPath(ProjectInfo project)
     {
         return Path.Combine(project.Path, ToolsFolderName, AudioBackupsFolderName);
+    }
+
+    /// <summary>
+    /// 语音页 DB 列的缓存目录：<c>{项目}/Tools/VoiceLoudness</c>。
+    ///
+    /// 一章一个 json（按章节代号命名）。它是**可丢弃的派生数据** —— 删掉只会让下次进页面
+    /// 重新量一遍，不影响任何项目内容；所以不放进 Voice/ 里，免得被当成素材同步出去。
+    /// </summary>
+    public static string GetProjectVoiceLoudnessFolderPath(ProjectInfo project)
+    {
+        return Path.Combine(project.Path, ToolsFolderName, VoiceLoudnessFolderName);
+    }
+
+    /// <summary>某一章的响度缓存文件路径。</summary>
+    public static string GetProjectVoiceLoudnessCachePath(ProjectInfo project, string chapterCode)
+    {
+        return Path.Combine(
+            GetProjectVoiceLoudnessFolderPath(project),
+            TextUtility.SanitizeCharacterFolderName(chapterCode) + ".json");
     }
 
     /// <summary>

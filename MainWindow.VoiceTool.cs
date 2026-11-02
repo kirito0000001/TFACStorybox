@@ -8,6 +8,9 @@ using GalExcleTools.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+// PickerLocationId 在这个命名空间里。本项目其它 partial 都是逐个文件自己 using，
+// 没有 global using —— 漏了就是 CS0103（2026-11-02 编译时就是这么撞的）。
+using Windows.Storage.Pickers;
 
 namespace GalExcleTools
 {
@@ -24,12 +27,34 @@ namespace GalExcleTools
     public sealed partial class MainWindow
     {
         private readonly VoiceBatchProcessor _voiceBatchProcessor = new();
+        private readonly VoiceLoudnessCacheService _voiceLoudnessCacheService = new();
+
+        /// <summary>
+        /// 当前章节每条语音的判定结果，key = 文件名。
+        ///
+        /// 为什么按「文件名」而不是「行」：同一章里两行引用同一个 wav 是允许的，
+        /// 量和判定都只该做一次；行只是它的显示位置。也正因为这样，DB 列的数据范围
+        /// 与「检查DB规范」完全一致（整个章节文件夹的 wav），不会出现两套口径。
+        /// </summary>
+        private readonly Dictionary<string, VoiceComplianceItem> _chapterVoiceLoudness =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>当前页面上登记的 DB 单元格，key = 行 Id。重铺时必须整体作废。</summary>
+        private readonly Dictionary<string, VoiceDbCell> _voiceDbCells =
+            new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// 「正在跑一批语音」的互斥标记。全局进度条不是模态的，
         /// 双击能把同一章的两批 ffmpeg 叠起来跑 —— 那会把同一批文件写两遍。
         /// </summary>
         private bool _isVoiceLoudnessBusy;
+
+        /// <summary>DB 列里一行的三个数字控件。存控件而不是字符串，是为了后台测完能就地回填。</summary>
+        private sealed record VoiceDbCell(
+            string FileName,
+            TextBlock LoudnessText,
+            TextBlock PeakText,
+            TextBlock RangeText);
 
         /// <summary>当前章节的语音文件夹（<c>{项目}/Voice/{章节代号}</c>）里的全部 wav。</summary>
         private IReadOnlyList<string> GetCurrentChapterVoiceFiles()
@@ -51,6 +76,345 @@ namespace GalExcleTools
                 .EnumerateFiles(folderPath, "*.wav", SearchOption.AllDirectories)
                 .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        // ---------------------------------------------------------------------
+        // DB 列
+        // ---------------------------------------------------------------------
+
+        /// <summary>
+        /// 重铺页面时把 DB 列的现场整体作废：控件引用、数字、按钮状态。
+        /// 数字随即由 <see cref="PrefillVoiceLoudnessFromCache"/> 从上次手动检测的缓存里读回来
+        /// —— 这里**不触发任何测量**：量不量由用户点「检查DB规范」决定。
+        /// </summary>
+        private void ResetVoiceLoudnessColumnState()
+        {
+            _voiceDbCells.Clear();
+            _chapterVoiceLoudness.Clear();
+            if (VoiceLoudnessNormalizeButton is not null)
+            {
+                // 没有数据时按钮必须是灰的：它现在只在「DB 列里真有超差项」时才亮。
+                VoiceLoudnessNormalizeButton.IsEnabled = false;
+            }
+        }
+
+        /// <summary>表头的 DB 列。列名就叫 DB，下面一行小字说明这三个数字分别是什么。</summary>
+        private static Border CreateVoiceDbHeaderCell()
+        {
+            var panel = new StackPanel { Spacing = 1 };
+            panel.Children.Add(new TextBlock
+            {
+                Text = "DB",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = Application.Current.Resources["TextFillColorPrimaryBrush"] as Brush
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = "LUFS · dBTP · LRA",
+                FontSize = 11,
+                Foreground = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush
+            });
+
+            var border = new Border
+            {
+                Padding = new Thickness(10, 8, 10, 8),
+                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
+                BorderThickness = new Thickness(0, 0, 1, 0),
+                Child = panel
+            };
+            Grid.SetColumn(border, 2);
+            return border;
+        }
+
+        /// <summary>
+        /// 一行语音的 DB 单元格。**先按当前已知数据填一次**（缓存命中就立刻有数字），
+        /// 再登记到 <see cref="_voiceDbCells"/> 等后台补测回填。
+        /// </summary>
+        private Border CreateVoiceDbCell(ProjectTextRow row, string voicePath)
+        {
+            // 没设语音的行占绝大多数（366 行里只有 26 行有语音），
+            // 给它们造三个 TextBlock 纯属浪费 —— 一个灰色横线就够了，也不登记进字典。
+            if (string.IsNullOrWhiteSpace(voicePath))
+            {
+                return WrapVoiceDbColumn(new TextBlock
+                {
+                    Text = "—",
+                    TextAlignment = TextAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush
+                });
+            }
+
+            var loudnessText = CreateVoiceDbValueText(13, TextAlignment.Right);
+            var peakText = CreateVoiceDbValueText(11, TextAlignment.Right);
+            var rangeText = CreateVoiceDbValueText(11, TextAlignment.Right);
+
+            var grid = new Grid { ColumnSpacing = 8 };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.Children.Add(loudnessText);
+            Grid.SetColumn(peakText, 1);
+            grid.Children.Add(peakText);
+            Grid.SetColumn(rangeText, 2);
+            grid.Children.Add(rangeText);
+
+            var cell = new VoiceDbCell(Path.GetFileName(voicePath), loudnessText, peakText, rangeText);
+            _voiceDbCells[row.Id] = cell;
+            UpdateVoiceDbCell(cell);
+
+            return WrapVoiceDbColumn(grid);
+        }
+
+        private static Border WrapVoiceDbColumn(UIElement content)
+        {
+            var border = new Border
+            {
+                Padding = new Thickness(10, 8, 10, 8),
+                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
+                BorderThickness = new Thickness(0, 0, 1, 0),
+                Child = content
+            };
+            Grid.SetColumn(border, 2);
+            return border;
+        }
+
+        private static TextBlock CreateVoiceDbValueText(double fontSize, TextAlignment alignment) => new()
+        {
+            FontSize = fontSize,
+            TextAlignment = alignment,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            Text = string.Empty
+        };
+
+        /// <summary>
+        /// 刷新一个 DB 单元格。三态：
+        /// · 没有语音文件 → 灰色横线；
+        /// · 没查过（或语音刚被换过、缓存已失效）→ 灰色横线，等用户手动检查；
+        /// · 有值 → 数字 + 颜色（红=比目标响、黄=比目标轻、绿=容差内）。
+        ///
+        /// 颜色**不在这里重新判**，走的是 <see cref="VoiceLoudnessCompliance.ClassifyLoudness"/>，
+        /// 与「检查DB规范」的报告同一把尺子 —— 否则会出现「报告说达标、列表却是红的」。
+        /// </summary>
+        private void UpdateVoiceDbCell(VoiceDbCell cell)
+        {
+            var mutedBrush = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush;
+
+            if (string.IsNullOrEmpty(cell.FileName))
+            {
+                SetVoiceDbText(cell, "—", string.Empty, string.Empty, mutedBrush);
+                return;
+            }
+
+            if (!_chapterVoiceLoudness.TryGetValue(cell.FileName, out var item))
+            {
+                SetVoiceDbText(cell, "—", string.Empty, string.Empty, mutedBrush);
+                return;
+            }
+
+            if (!item.Measurement.IsUsable)
+            {
+                SetVoiceDbText(cell, "测不出", string.Empty, string.Empty, mutedBrush);
+                return;
+            }
+
+            SetVoiceDbText(
+                cell,
+                item.Measurement.IntegratedLufs.ToString("0.0", CultureInfo.InvariantCulture),
+                item.Measurement.TruePeakDb.ToString("0.0", CultureInfo.InvariantCulture),
+                item.Measurement.LoudnessRangeLu.ToString("0.0", CultureInfo.InvariantCulture),
+                BrushForDbLoudness(item));
+        }
+
+        private static void SetVoiceDbText(
+            VoiceDbCell cell,
+            string loudness,
+            string peak,
+            string range,
+            Brush? loudnessBrush)
+        {
+            cell.LoudnessText.Text = loudness;
+            cell.LoudnessText.Foreground = loudnessBrush;
+            cell.PeakText.Text = peak;
+            cell.RangeText.Text = range;
+            cell.PeakText.Foreground = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush;
+            cell.RangeText.Foreground = cell.PeakText.Foreground;
+            ToolTipService.SetToolTip(
+                cell.LoudnessText,
+                string.IsNullOrEmpty(peak)
+                    ? "这一行还没有响度数据"
+                    : $"积分响度 {loudness} LUFS / 真峰值 {peak} dBTP / 响度范围 {range} LU");
+        }
+
+        private static Brush? BrushForDbLoudness(VoiceComplianceItem item)
+        {
+            var preset = VoiceLoudnessPreset.GameDialogue;
+
+            if (item.LoudnessVerdict != VoiceLoudnessVerdict.Off)
+            {
+                return Application.Current.Resources["SystemFillColorSuccessBrush"] as Brush;
+            }
+
+            // 超出容差之后才分方向：比目标响 = 红（容易在混音里盖住别人），
+            // 比目标轻 = 黄（听不见，但通常只是要抬一点）。
+            return item.Measurement.IntegratedLufs > preset.TargetLufs
+                ? Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush
+                : Application.Current.Resources["SystemFillColorCautionBrush"] as Brush;
+        }
+
+        private void UpdateVoiceDbCells()
+        {
+            foreach (var cell in _voiceDbCells.Values)
+            {
+                UpdateVoiceDbCell(cell);
+            }
+
+            UpdateVoiceNormalizeButtonsState();
+        }
+
+        /// <summary>
+        /// 「规整语音」平时是灰的，只有 DB 列里真有**能修的**超差项才亮。
+        ///
+        /// 刻意排除「测不出」的条目：它们也会被判成 NeedsFix，但规整同样修不了 ——
+        /// 让按钮为它们常亮，等于给用户一个点了也没用的入口。
+        /// </summary>
+        private void UpdateVoiceNormalizeButtonsState()
+        {
+            if (VoiceLoudnessNormalizeButton is null)
+            {
+                return;
+            }
+
+            var needsFix = _chapterVoiceLoudness.Values.Any(item =>
+                item.Measurement.IsUsable && item.NeedsFix);
+            VoiceLoudnessNormalizeButton.IsEnabled = needsFix;
+        }
+
+        /// <summary>
+        /// 铺行之前把上一次**手动检测**的结果读回来，让第一屏就带数字。
+        ///
+        /// 这里刻意不测量：量不量由用户点「检查DB规范」决定（2026-11-02 用户定案）。
+        /// 缓存按「文件名 + 字节数 + 最后写入时间」判新鲜度，语音被换过就会自然失效，
+        /// 那一行退回「—」，等用户下次手动检查。
+        /// </summary>
+        private void PrefillVoiceLoudnessFromCache()
+        {
+            if (_projectTextToolMode != ProjectTextToolMode.Voice ||
+                _currentProject is null ||
+                _selectedTextToolChapter is null)
+            {
+                return;
+            }
+
+            var preset = VoiceLoudnessPreset.GameDialogue;
+            var cached = _voiceLoudnessCacheService.Read(_currentProject, _selectedTextToolChapter.Code, preset.TargetLufs);
+            if (cached is null || cached.Entries.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var file in GetCurrentChapterVoiceFiles())
+            {
+                var name = Path.GetFileName(file);
+                var info = new FileInfo(file);
+                var hit = cached.Entries.FirstOrDefault(entry =>
+                    string.Equals(entry.FileName, name, StringComparison.OrdinalIgnoreCase) &&
+                    entry.Matches(info.Length, info.LastWriteTimeUtc.Ticks));
+                if (hit is not null)
+                {
+                    _chapterVoiceLoudness[name] = BuildVoiceComplianceItem(file, hit.ToMeasurement(), preset);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 用判定层的同一套规则造一条结果，保证「列表里的颜色」与「报告里的判定」同源。
+        /// Evaluate 对单条也只是纯算术，开销可以忽略。
+        /// </summary>
+        private static VoiceComplianceItem BuildVoiceComplianceItem(
+            string filePath,
+            VoiceLoudnessMeasurement? measurement,
+            VoiceLoudnessPreset preset)
+        {
+            return VoiceLoudnessCompliance.Evaluate(preset, [(filePath, measurement)]).Items[0];
+        }
+
+        /// <summary>把当前章节量到的数字写进缓存。只写「文件还在、值有效」的条目。</summary>
+        private void WriteVoiceLoudnessCache(IReadOnlyList<string> files, VoiceLoudnessPreset preset)
+        {
+            if (_currentProject is null || _selectedTextToolChapter is null)
+            {
+                return;
+            }
+
+            var entries = new List<VoiceLoudnessCacheEntry>(files.Count);
+            foreach (var file in files)
+            {
+                var name = Path.GetFileName(file);
+                if (!_chapterVoiceLoudness.TryGetValue(name, out var item) || !item.Measurement.IsUsable)
+                {
+                    continue;
+                }
+
+                var info = new FileInfo(file);
+                if (!info.Exists)
+                {
+                    continue;
+                }
+
+                entries.Add(VoiceLoudnessCacheEntry.FromMeasurement(
+                    name,
+                    info.Length,
+                    info.LastWriteTimeUtc.Ticks,
+                    item.Measurement));
+            }
+
+            _voiceLoudnessCacheService.Write(
+                _currentProject,
+                _selectedTextToolChapter.Code,
+                preset.TargetLufs,
+                entries);
+        }
+
+        /// <summary>把一次检查的结论灌进 DB 列并落缓存。</summary>
+        private void ApplyVoiceLoudnessReport(VoiceComplianceReport report, IReadOnlyList<string> files)
+        {
+            foreach (var item in report.Items)
+            {
+                _chapterVoiceLoudness[item.FileName] = item;
+            }
+
+            UpdateVoiceDbCells();
+            WriteVoiceLoudnessCache(files, report.Preset);
+        }
+
+        /// <summary>
+        /// 规整完成后刷新 DB 列：成功的用**规整后实测值**（不是目标值 —— 有些被天花板卡住的
+        /// 到不了目标，写目标值就等于骗自己），复量失败的条目直接删掉，让它下次重新测。
+        /// </summary>
+        private void ApplyVoiceNormalizeResult(VoiceNormalizeResult result)
+        {
+            foreach (var outcome in result.Outcomes)
+            {
+                if (!outcome.Succeeded)
+                {
+                    continue;
+                }
+
+                var name = Path.GetFileName(outcome.SourcePath);
+                if (outcome.After is { IsUsable: true } after)
+                {
+                    _chapterVoiceLoudness[name] = BuildVoiceComplianceItem(outcome.SourcePath, after, result.Preset);
+                }
+                else
+                {
+                    _chapterVoiceLoudness.Remove(name);
+                }
+            }
+
+            UpdateVoiceDbCells();
+            WriteVoiceLoudnessCache(GetCurrentChapterVoiceFiles(), result.Preset);
         }
 
         /// <summary>
@@ -172,92 +536,26 @@ namespace GalExcleTools
             var summary = $"共 {report.TotalCount} 条：达标 {report.PassCount} · 贴边 {report.NearCount} · "
                 + $"超差 {report.OffCount} · 峰值超标 {report.PeakOverCount}";
             CompleteGlobalProgress("检查完成", summary);
-            AppendLog(LogKind.Info, $"语音响度检查（{_selectedTextToolChapter.Code}）：{summary}");
+
+            // 结论直接写回 DB 列与缓存 —— **不再弹报告窗**（2026-11-02 用户定案：
+            // DB 列就是报告，弹窗只多一次点击）。这里只留一条浮条说明总量，
+            // 明细靠列表上的颜色与数字自己看，完整统计进 Log。
+            ApplyVoiceLoudnessReport(report, files);
+            AppendLog(
+                LogKind.Info,
+                $"语音响度检查（{_selectedTextToolChapter.Code}）：{summary}；{DescribeConsistency(report.Consistency)}");
             await HideGlobalProgressAfterDelayAsync();
 
-            await _dialogService.ShowContentAsync(new ContentDialogRequest(
-                "语音响度检查",
-                BuildVoiceComplianceReportView(report, _selectedTextToolChapter.Code),
-                string.Empty,
-                "关闭",
-                DefaultButton: ContentDialogButton.Close,
-                PrimarySound: DialogSoundIntent.None,
-                ConfigureDialog: dialog => dialog.MaxWidth = 760));
+            ShowFloatingTip(
+                report.NeedsFixItems.Count > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                report.NeedsFixItems.Count > 0 ? "检查完成：有需要规整的语音" : "检查完成：全部达标",
+                summary);
         }
 
         /// <summary>
-        /// 报告正文：三段分开写（口径 / 统计+一致性 / 逐条明细），
-        /// 末尾必须跟着测量口径声明 —— 报告里写清口径，比假装合规值钱。
+        /// 一句话描述同类离散度。原来只出现在报告弹窗里；弹窗去掉之后改挂到 Log，
+        /// 「这一批里最响和最轻差多少」是没做过标准化时最先要看的那个数。
         /// </summary>
-        private static UIElement BuildVoiceComplianceReportView(VoiceComplianceReport report, string chapterCode)
-        {
-            var root = new StackPanel
-            {
-                Spacing = 10,
-                MinWidth = 660
-            };
-
-            root.Children.Add(new TextBlock
-            {
-                Text = report.Preset.Summary,
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
-            });
-
-            root.Children.Add(new TextBlock
-            {
-                Text = $"章节 {chapterCode} · 共 {report.TotalCount} 条："
-                    + $"达标 {report.PassCount} · 贴边 {report.NearCount} · "
-                    + $"超差 {report.OffCount} · 峰值超标 {report.PeakOverCount}",
-                TextWrapping = TextWrapping.Wrap
-            });
-
-            root.Children.Add(new TextBlock
-            {
-                Text = DescribeConsistency(report.Consistency),
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
-            });
-
-            // 「普遍被天花板卡住」要单独解释一句，否则用户会以为程序坏了：
-            // 语音峰均比大，要达成 −12 LUFS 得把真峰值放到 +3 以上，天花板却是 −3，
-            // 物理上不可能同时满足，loudnorm 只能顶在天花板上。
-            if (report.IsBroadlyPeakLimited)
-            {
-                root.Children.Add(new TextBlock
-                {
-                    Text = $"有 {report.PeakLimitedCount} 条被峰值天花板卡住：这批素材的峰均比太大，"
-                        + "「−12 LUFS」和「峰值 ≤ −3 dBTP」在物理上不能同时满足。"
-                        + "要么先压缩/限幅把峰均比降下来，要么把目标调低一点。",
-                    TextWrapping = TextWrapping.Wrap,
-                    Foreground = Application.Current.Resources["SystemFillColorCautionBrush"] as Brush
-                });
-            }
-
-            root.Children.Add(CreateVoiceReportRow(null, isHeader: true));
-            var list = new StackPanel { Spacing = 0 };
-            foreach (var item in report.Items)
-            {
-                list.Children.Add(CreateVoiceReportRow(item, isHeader: false));
-            }
-
-            root.Children.Add(new ScrollViewer
-            {
-                Height = 300,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Content = list
-            });
-
-            root.Children.Add(new TextBlock
-            {
-                Text = report.MeasurementCaveat,
-                TextWrapping = TextWrapping.Wrap,
-                Style = Application.Current.Resources["CaptionTextBlockStyle"] as Style
-            });
-
-            return root;
-        }
-
         private static string DescribeConsistency(VoiceConsistencySummary consistency)
         {
             if (consistency.Verdict == VoiceConsistencyVerdict.NotApplicable)
@@ -273,89 +571,8 @@ namespace GalExcleTools
                 + $"最轻 {consistency.QuietestFile}（{consistency.QuietestLufs:0.0}）。";
         }
 
-        /// <summary>报告里的一行。<paramref name="item"/> 为 null 时画表头。</summary>
-        private static Grid CreateVoiceReportRow(VoiceComplianceItem? item, bool isHeader)
-        {
-            var grid = new Grid
-            {
-                Padding = new Thickness(0, 4, 0, 4),
-                BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(0, 0, 0, isHeader ? 1 : 0)
-            };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
-
-            var primaryBrush = Application.Current.Resources["TextFillColorPrimaryBrush"] as Brush;
-            var secondaryBrush = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush;
-
-            var fileName = item is null ? "文件" : item.FileName;
-            var loudness = item is null
-                ? "积分响度"
-                : item.Measurement.IsUsable
-                    ? FormatOneDecimal(item.Measurement.IntegratedLufs) + " LUFS"
-                    : "—";
-            var peak = item is null
-                ? "真峰值"
-                : item.Measurement.IsUsable
-                    ? FormatOneDecimal(item.Measurement.TruePeakDb) + " dBTP"
-                    : "—";
-            var verdict = item is null ? "判定" : item.VerdictText;
-
-            AddVoiceReportCell(grid, 0, fileName, isHeader, secondaryBrush, TextAlignment.Left);
-            AddVoiceReportCell(grid, 1, loudness, isHeader, secondaryBrush, TextAlignment.Right);
-            AddVoiceReportCell(grid, 2, peak, isHeader, secondaryBrush, TextAlignment.Right);
-            AddVoiceReportCell(grid, 3, verdict, isHeader, isHeader ? primaryBrush : BrushForVerdict(item!), TextAlignment.Right);
-            return grid;
-        }
-
-        private static void AddVoiceReportCell(
-            Grid grid,
-            int column,
-            string text,
-            bool isHeader,
-            Brush? foreground,
-            TextAlignment alignment)
-        {
-            var block = new TextBlock
-            {
-                Text = text,
-                FontWeight = isHeader
-                    ? Microsoft.UI.Text.FontWeights.SemiBold
-                    : Microsoft.UI.Text.FontWeights.Normal,
-                Foreground = foreground,
-                TextAlignment = alignment,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Margin = new Thickness(0, 0, column == 0 ? 12 : 8, 0)
-            };
-            Grid.SetColumn(block, column);
-            grid.Children.Add(block);
-        }
-
-        private static Brush? BrushForVerdict(VoiceComplianceItem item)
-        {
-            if (!item.Measurement.IsUsable)
-            {
-                return Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush;
-            }
-
-            if (item.PeakVerdict == VoicePeakVerdict.Over ||
-                item.LoudnessVerdict == VoiceLoudnessVerdict.Off)
-            {
-                return Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush;
-            }
-
-            return item.LoudnessVerdict == VoiceLoudnessVerdict.Near
-                ? Application.Current.Resources["SystemFillColorCautionBrush"] as Brush
-                : Application.Current.Resources["SystemFillColorSuccessBrush"] as Brush;
-        }
-
-        private static string FormatOneDecimal(double value) =>
-            value.ToString("0.0", CultureInfo.InvariantCulture);
-
         // ---------------------------------------------------------------------
-        // 一键规整语音
+        // 规整语音
         // ---------------------------------------------------------------------
 
         private async void NormalizeVoiceLoudnessButton_Click(object sender, RoutedEventArgs e)
@@ -406,7 +623,7 @@ namespace GalExcleTools
                 $"{DateTime.Now:yyyyMMdd-HHmmss}_{TextUtility.SanitizeCharacterFolderName(chapterCode)}");
 
             var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
-                "一键规整语音",
+                "规整语音",
                 $"将把「{chapterCode}」的 {files.Count} 条语音就地拉到 {preset.Summary}。\n\n"
                 + $"· 原文件会先整章备份到：{backupDirectory}\n"
                 + "· 每条语音会重写一遍（16bit WAV，原采样率），文件名与目录不变；\n"
@@ -427,7 +644,7 @@ namespace GalExcleTools
                     item.OverallFraction * 100d,
                     item.FileName));
 
-            ShowGlobalProgress("一键规整语音", $"正在处理 {files.Count} 条语音…");
+            ShowGlobalProgress("规整语音", $"正在处理 {files.Count} 条语音…");
             VoiceNormalizeResult result;
             try
             {
@@ -461,7 +678,11 @@ namespace GalExcleTools
             var summary = $"成功 {result.SuccessCount} / {result.Outcomes.Count} 条"
                 + (result.FailureCount > 0 ? $"，失败 {result.FailureCount} 条" : string.Empty);
             CompleteGlobalProgress("规整完成", summary);
-            AppendLog(LogKind.Info, $"一键规整语音（{chapterCode}）：{summary}");
+            AppendLog(LogKind.Info, $"规整语音（{chapterCode}）：{summary}");
+
+            // 就地更新 DB 列（规整后实测值），不重铺页面 —— 重铺会把滚动位置打回顶部，
+            // 而这正是素材页那份问题清单里反复挨骂的一条。
+            ApplyVoiceNormalizeResult(result);
             await HideGlobalProgressAfterDelayAsync();
 
             await _dialogService.ShowContentAsync(new ContentDialogRequest(
@@ -472,9 +693,6 @@ namespace GalExcleTools
                 DefaultButton: ContentDialogButton.Close,
                 PrimarySound: DialogSoundIntent.None,
                 ConfigureDialog: dialog => dialog.MaxWidth = 760));
-
-            // 文件被原地替换过：让当前页重新读一遍，避免之后试听拿到旧句柄。
-            RefreshProjectTextToolPage();
         }
 
         private static UIElement BuildVoiceNormalizeResultView(VoiceNormalizeResult result)
