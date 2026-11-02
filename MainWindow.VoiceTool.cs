@@ -656,13 +656,52 @@ namespace GalExcleTools
                 return;
             }
 
-            var files = GetCurrentChapterVoiceFiles();
-            if (files.Count == 0)
+            var allFiles = GetCurrentChapterVoiceFiles();
+            if (allFiles.Count == 0)
             {
                 ShowFloatingTip(
                     InfoBarSeverity.Warning,
                     "没有可规整的语音",
                     $"「{_selectedTextToolChapter.Code}」的语音文件夹里还没有 wav 文件。");
+                return;
+            }
+
+            // ★ 只挑**要修的那几条**（2026-11-02 用户指出：原来把整章都重写了一遍）。
+            //   · 已达标的重写没有收益，还会把它从「稳」推到「贴边」；
+            //   · 没测过的（DB 显示横线）不能瞎改 —— 不知道原来是多少，改完也没法证明变好了。
+            //   判定沿用与 DB 列同一把尺子（NeedsFix = 响度出容差 或 峰值超标）。
+            var targets = new List<string>();
+            var skippedCompliant = 0;
+            var skippedUnmeasured = 0;
+            foreach (var file in allFiles)
+            {
+                if (_chapterVoiceLoudness.TryGetValue(Path.GetFileName(file), out var item) &&
+                    item.Measurement.IsUsable)
+                {
+                    if (item.NeedsFix)
+                    {
+                        targets.Add(file);
+                    }
+                    else
+                    {
+                        skippedCompliant++;
+                    }
+                }
+                else
+                {
+                    // 没测过 / 测不出：一律不碰。
+                    skippedUnmeasured++;
+                }
+            }
+
+            if (targets.Count == 0)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "没有需要规整的语音",
+                    $"{allFiles.Count} 条里没有超差项（达标 {skippedCompliant} 条"
+                    + (skippedUnmeasured > 0 ? $"，未检查 {skippedUnmeasured} 条" : string.Empty)
+                    + "）。先点「检查DB规范」再回来。");
                 return;
             }
 
@@ -681,11 +720,12 @@ namespace GalExcleTools
             StopProjectVoicePreview();
 
             // 只留一份「最初版」：还没有原始版的，先把**当前状态**补存下来（已有的绝不覆盖）。
+            // 只给**这一轮真要动的文件**建备份 —— 不动的文件不必占第二份磁盘。
             // 这一步失败就不开工 —— 没有回退点的批量覆盖不该开始。
             int createdOriginals;
             try
             {
-                createdOriginals = _voiceOriginalArchive.EnsureOriginals(_currentProject, chapterCode, files);
+                createdOriginals = _voiceOriginalArchive.EnsureOriginals(_currentProject, chapterCode, targets);
             }
             catch (Exception ex)
             {
@@ -712,14 +752,14 @@ namespace GalExcleTools
                     item.OverallFraction * 100d,
                     item.FileName));
 
-            ShowGlobalProgress("规整语音", $"正在处理 {files.Count} 条语音…");
+            ShowGlobalProgress("规整语音", $"正在规整 {targets.Count} 条超差语音…");
             VoiceNormalizeResult result;
             try
             {
                 // 不做整章备份：回退由「原始版」制度负责（每个文件固定一份最初副本）。
                 result = await _voiceBatchProcessor.NormalizeAsync(
                     ffmpegPath,
-                    files,
+                    targets,
                     preset,
                     progress,
                     GetGlobalProgressCancellationToken());
@@ -743,8 +783,26 @@ namespace GalExcleTools
                 return;
             }
 
+            // 「跳过了哪些」也要报出来：用户上一版正是看到「全都跑了一遍」才发现问题的，
+            // 反过来若只跑 3 条却不说清，也会让人怀疑漏了。
+            var skipParts = new List<string>();
+            if (skippedCompliant > 0)
+            {
+                skipParts.Add($"{skippedCompliant} 条已达标");
+            }
+
+            if (skippedUnmeasured > 0)
+            {
+                skipParts.Add($"{skippedUnmeasured} 条未检查");
+            }
+
+            var skipNote = skipParts.Count == 0
+                ? string.Empty
+                : $"（未处理：{string.Join("、", skipParts)}）";
+
             var summary = $"成功 {result.SuccessCount} / {result.Outcomes.Count} 条"
-                + (result.FailureCount > 0 ? $"，失败 {result.FailureCount} 条" : string.Empty);
+                + (result.FailureCount > 0 ? $"，失败 {result.FailureCount} 条" : string.Empty)
+                + skipNote;
             CompleteGlobalProgress("规整完成", summary);
             AppendLog(LogKind.Info, $"规整语音（{chapterCode}）：{summary}");
 
@@ -767,7 +825,7 @@ namespace GalExcleTools
 
             await _dialogService.ShowContentAsync(new ContentDialogRequest(
                 "语音规整完成",
-                BuildVoiceNormalizeResultView(result, chapterCode),
+                BuildVoiceNormalizeResultView(result, chapterCode, skipNote),
                 string.Empty,
                 "关闭",
                 DefaultButton: ContentDialogButton.Close,
@@ -775,7 +833,7 @@ namespace GalExcleTools
                 ConfigureDialog: dialog => dialog.MaxWidth = 760));
         }
 
-        private UIElement BuildVoiceNormalizeResultView(VoiceNormalizeResult result, string chapterCode)
+        private UIElement BuildVoiceNormalizeResultView(VoiceNormalizeResult result, string chapterCode, string skipNote)
         {
             var root = new StackPanel
             {
@@ -788,7 +846,8 @@ namespace GalExcleTools
                 Text = $"成功 {result.SuccessCount} 条，失败 {result.FailureCount} 条。"
                     + (result.StillOffCount > 0
                         ? $"其中 {result.StillOffCount} 条规整后仍未进容差（多半是被峰值天花板卡住）。"
-                        : string.Empty),
+                        : string.Empty)
+                    + (string.IsNullOrEmpty(skipNote) ? string.Empty : skipNote),
                 TextWrapping = TextWrapping.Wrap
             });
 
