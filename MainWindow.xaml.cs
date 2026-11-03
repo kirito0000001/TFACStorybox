@@ -689,11 +689,17 @@ namespace GalExcleTools
             WorkspaceStatusBorder.Visibility = showWorkspacePath;
             AssetLibraryStatusBorder.Visibility = showWorkspacePath;
             AssetLibraryDetailStatusBorder.Visibility = showWorkspacePath;
-            LogPanelBorder.Visibility = Settings.LogEnabled ? Visibility.Visible : Visibility.Collapsed;
+            LogPanelBorder.Visibility = Settings.LogEnabled || _autoLogPanelVisible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
 
         private void LogSettingControl_Changed(object sender, RoutedEventArgs e)
         {
+            // 用户自己动了开关，就以他的选择为准 —— 别让"报错自动打开"那个标记
+            // 继续把面板顶着（他把勾去掉就是想收起来）。
+            _autoLogPanelVisible = false;
+
             Settings.ShowWorkspacePath = WorkspacePathVisibleCheckBox.IsChecked == true;
             Settings.LogEnabled = LogEnabledCheckBox.IsChecked == true;
             Settings.LogUserOperations = LogUserOperationsCheckBox.IsChecked == true;

@@ -75,6 +75,25 @@ namespace GalExcleTools
 
         private static void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
         {
+            // 这条路是"进程马上要没了"——面板已经救不回来，能留的只有文件。
+            // 所以**同一个 runtime.log 也写一份**：用户平时只认那一个文件，
+            // 让他为了这种崩溃再去 %APPDATA% 翻 crash.log 是不现实的。
+            try
+            {
+                var logPath = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "GalExcleTools",
+                    "Logs",
+                    RuntimeLogFile.FileName);
+                RuntimeLogFile.AppendLine(
+                    logPath,
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [Fatal] 未处理异常（进程即将退出）：{e.Exception}");
+            }
+            catch
+            {
+                // 写不进 runtime.log 不影响下面那份 crash.log。
+            }
+
             try
             {
                 var directoryPath = System.IO.Path.Combine(

@@ -17,6 +17,43 @@ namespace GalExcleTools
     {
         private readonly Queue<(LogKind Kind, string DisplayText, string CopyText)> _logLines = new();
 
+        /// <summary>
+        /// 「这次运行临时打开日志面板」的标记。
+        ///
+        /// 只活在内存里，**不写 settings**：用户平时把日志关掉是为了省地方，
+        /// 自动打开如果落了盘，下次启动还是开着的 —— 等于把人的选择悄悄改掉。
+        /// </summary>
+        private bool _autoLogPanelVisible;
+
+        /// <summary>
+        /// 报错时临时把日志面板打开（本次运行有效）。
+        ///
+        /// 队列里已经攒着这之前的所有条目（含被过滤掉的 Info/User），
+        /// 所以面板一打开，「复制全部」拿到的是**完整现场**，不是孤零零一条错误。
+        /// </summary>
+        private void EnableLogPanelForSession()
+        {
+            if (_autoLogPanelVisible)
+            {
+                return;
+            }
+
+            _autoLogPanelVisible = true;
+            if (LogPanelBorder is not null)
+            {
+                LogPanelBorder.Visibility = Visibility.Visible;
+            }
+
+            RenderLogItems();
+
+            // 注意：这里**不传 logMessage** —— 传了会再走一遍 AppendLog，
+            // 虽然不会死循环（只有 Error 才触发本方法），但会往日志里插一条噪音。
+            ShowFloatingTip(
+                InfoBarSeverity.Warning,
+                "已自动打开日志",
+                "检测到报错，这次运行的日志已经留在下面的面板里（含报错之前那几条）。点「复制全部」就能发出来；重启后恢复你的日志设置。");
+        }
+
         private void ClearLogButton_Click(object sender, RoutedEventArgs e)
         {
             _logLines.Clear();
@@ -222,17 +259,32 @@ namespace GalExcleTools
             PrepareLogFileOnce();
             RuntimeLogFile.AppendLine(LogFilePath, copyText);
 
-            if (!ShouldWriteLog(kind))
-            {
-                return;
-            }
-
+            // ⚠️ 队列**永远收**（环形 300 条），不再由开关决定要不要留。
+            //
+            // 【为什么】日志开关关着时，ShouldWriteLog 把 Info/User 一起拦掉，
+            // 内存里一条都不剩 —— 而报错时最要紧的恰恰是"报错之前那几条"。
+            // 文件那边一直全量写，可面板拿不到上下文，用户只能看到孤零零一条错误，
+            // 想说明"到底出了什么事"无从下手（2026-11-03 用户提的就是这个）。
+            //
+            // 所以：**收归收，显示归显示**。开关只决定渲染，不该决定要不要留证据。
             _logLines.Enqueue((kind, displayText, copyText));
 
             const int maxLogCount = 300;
             while (_logLines.Count > maxLogCount)
             {
                 _logLines.Dequeue();
+            }
+
+            // 报错而且面板没开 → 这次运行里把面板打开，让上下文直接可复制。
+            if (kind == LogKind.Error && !Settings.LogEnabled && !_autoLogPanelVisible)
+            {
+                EnableLogPanelForSession();
+                return;
+            }
+
+            if (!_autoLogPanelVisible && !ShouldWriteLog(kind))
+            {
+                return;
             }
 
             RenderLogItems();
@@ -248,6 +300,13 @@ namespace GalExcleTools
             LogItemsControl.Items.Clear();
             foreach (var (kind, displayText, copyText) in _logLines)
             {
+                // 过滤挪到渲染这一层：队列里留着全部，显示的仍按用户的开关走。
+                // 自动打开那一档例外 —— 用户要的是"完整现场"，不再按等级挑。
+                if (!_autoLogPanelVisible && !ShouldWriteLog(kind))
+                {
+                    continue;
+                }
+
                 LogItemsControl.Items.Add(CreateLogBlock(kind, displayText, copyText));
             }
 
