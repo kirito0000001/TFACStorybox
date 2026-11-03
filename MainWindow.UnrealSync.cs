@@ -327,6 +327,10 @@ namespace GalExcleTools
                 ? "正在准备全量重新同步，将忽略本地同步状态。"
                 : "正在计算工具箱源文件的 SHA-256，并与上次成功同步状态比较；只有内容真正变化时才会进入同步计划。";
             UnrealSyncChangePlan changePlan;
+            // 崩溃/取消时用来做「部分成功」补偿：拿到计划之后才赋值，
+            // 没走到检测就失败的（生成 CSV 失败）为 null，那种情况本来也没有可记的。
+            UnrealSyncChangePlan? planForRecovery = null;
+            var runStartedAtUtc = DateTime.UtcNow;
             try
             {
                 // 开一个新日志批次。之后每一行都带 run= 与 step=，
@@ -343,6 +347,7 @@ namespace GalExcleTools
                     false,
                     detectBand.At(5));
                 changePlan = await Task.Run(() => BuildUnrealSyncChangePlan(validation.Context, forceFullSync));
+                planForRecovery = changePlan;
             }
             catch (Exception ex)
             {
@@ -665,6 +670,7 @@ namespace GalExcleTools
                 CompleteGlobalProgress("虚幻同步已取消", "已停止当前同步步骤；如果 Unreal 命令进程已经启动，工具箱会尝试一并终止。");
                 SetUnrealSyncStatus(InfoBarSeverity.Warning, "同步已取消", "本次虚幻同步没有完成。已写入的临时清单或 Unreal 侧中途导入结果可能会保留。");
                 AppendLog(LogKind.Warning, "虚幻同步已取消。");
+                TryRecordPartialImports(validation.Context, planForRecovery, runStartedAtUtc);
                 EndLogStep("已取消");
             }
             catch (Exception ex)
@@ -673,6 +679,9 @@ namespace GalExcleTools
                 SetUnrealSyncStatus(InfoBarSeverity.Error, "同步失败", ex.Message);
                 // 这条 Error 会带完整异常（含内部异常）—— 用户就是靠它把报错贴出来定位的。
                 AppendLog(LogKind.Error, "虚幻同步失败。", ex);
+                // 崩溃时结果文件根本没有，正常那条 WriteState 走不到 ——
+                // 不在这儿补一刀，这一轮已经导好的东西下次会原样重导一遍。
+                TryRecordPartialImports(validation.Context, planForRecovery, runStartedAtUtc);
                 EndLogStep($"失败：{ex.Message}");
             }
             finally
@@ -680,6 +689,42 @@ namespace GalExcleTools
                 await HideGlobalProgressAfterDelayAsync();
                 SyncPanel.SyncButtonEnabled = true;
                 RefreshWorkbenchUnrealSyncTip();
+            }
+        }
+
+        /// <summary>
+        /// 崩溃/取消之后按**磁盘证据**补偿：把这一轮真正写进去的资产记进同步状态，
+        /// 免得下一次检测把它们当成「还没做」再导一遍。
+        ///
+        /// 判据在 <see cref="UnrealSyncService.RecordImportsWrittenSince"/> 里：
+        /// 目标 .uasset 的修改时间不早于这次运行开始。文件「存在」不算数 ——
+        /// 那只能说明历史上导过。
+        ///
+        /// 这一步失败只记一条警告：整次同步已经失败了，补偿记不上几条不该再抛。
+        /// </summary>
+        private void TryRecordPartialImports(
+            UnrealSyncContext? context,
+            UnrealSyncChangePlan? changePlan,
+            DateTime startedAtUtc)
+        {
+            if (context is null || changePlan is null)
+            {
+                return;
+            }
+
+            try
+            {
+                var recorded = _unrealSyncService.RecordImportsWrittenSince(context, changePlan, startedAtUtc);
+                if (recorded > 0)
+                {
+                    AppendLog(
+                        LogKind.Warning,
+                        $"同步没走完，但已按磁盘时间戳记下这一轮真正写入的 {recorded} 项 —— 下次检测不会重复导入它们。");
+                }
+            }
+            catch (Exception error)
+            {
+                AppendLog(LogKind.Warning, "补偿记录部分导入结果失败（不影响其它状态）。", error);
             }
         }
 

@@ -2602,6 +2602,68 @@ internal sealed class UnrealSyncService
         File.WriteAllText(statePath, JsonSerializer.Serialize(state, _jsonOptions), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
+    /// <summary>
+    /// 同步**没走完**（崩溃 / 取消）时，按磁盘证据把「这一轮确实写进去了的」记进状态。
+    ///
+    /// 为什么需要它：正常路径靠结果文件里的复扫报告判定成功项；可编辑器一崩，
+    /// 结果文件根本没有，WriteState 那段就执行不到 —— 这一轮已经导好的东西全部作废，
+    /// 下次检测又原样重来一遍（2026-11-03 实测：状态停在 10/16，之后每次失败都从零开始）。
+    ///
+    /// 判据只有一条：**目标 .uasset 的修改时间不早于这次运行开始**。
+    /// 不用「文件存在」—— 存在只能说明历史上导过，不能说明这一轮导成功。
+    /// 留 3 秒余量，避开时间戳精度与启动耗时。
+    ///
+    /// 返回记下的条数，供日志说明。
+    /// </summary>
+    public int RecordImportsWrittenSince(
+        UnrealSyncContext context,
+        UnrealSyncChangePlan changePlan,
+        DateTime startedAtUtc)
+    {
+        var threshold = startedAtUtc.AddSeconds(-3);
+        var planned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in changePlan.ImportGroups)
+        {
+            foreach (var file in group.Files)
+            {
+                planned.Add(BuildAssetObjectPath(group.Destination, file));
+            }
+        }
+
+        foreach (var table in changePlan.StoryTables)
+        {
+            if (!string.IsNullOrWhiteSpace(table.TableAsset))
+            {
+                planned.Add(table.TableAsset);
+            }
+        }
+
+        if (planned.Count == 0)
+        {
+            return 0;
+        }
+
+        var written = new List<string>();
+        var notWritten = new List<string>();
+        foreach (var objectPath in planned)
+        {
+            var filePath = AssetObjectPathToFilePath(context, objectPath);
+            var wasWrittenThisRun =
+                File.Exists(filePath) && File.GetLastWriteTimeUtc(filePath) >= threshold;
+            (wasWrittenThisRun ? written : notWritten).Add(objectPath);
+        }
+
+        if (written.Count == 0)
+        {
+            return 0;
+        }
+
+        // tablesComplete 传 true：表的成败已经逐张体现在 notWritten 里，
+        // 别再让 WriteState 用「整段作废」那条粗规则把它们一次性全丢掉。
+        WriteState(context, changePlan, notWritten, tablesComplete: true, wholeRunSucceeded: false);
+        return written.Count;
+    }
+
     private static void AddImportGroup(List<UnrealSyncImportGroup> groups, string destination, IReadOnlyCollection<string> files)
     {
         if (files.Count == 0)
