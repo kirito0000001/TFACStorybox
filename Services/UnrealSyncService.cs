@@ -546,41 +546,57 @@ internal sealed class UnrealSyncService
                 disk_file = asset_path_to_disk_file(asset_path)
                 return bool(disk_file) and os.path.exists(disk_file)
 
-            def delete_asset_if_exists(asset_path):
+            # 清掉「多余的」素材：**只删磁盘文件**，不调 EditorAssetLibrary.delete_asset。
+            #
+            # 【为什么不用 delete_asset】2026-11-03 排查结论，有引擎源码为证：
+            #   · UEditorAssetSubsystem::DeleteAsset 无条件调 ObjectTools::ForceDeleteObjects
+            #     （EditorAssetSubsystem.cpp:793-806），后者会 ForceReplaceReferences(nullptr, …)；
+            #     那个分支在"不限定搜索范围"时**遍历内存里的全部对象**并逐个 Serialize
+            #     （ObjectTools.cpp:1345-1370 → FindReferencersArchive.cpp:57）。
+            #   · 实测：扫到工程里一个带坏 delegate 的 UFunction 时
+            #     EXCEPTION_ACCESS_VIOLATION（UStruct::IsChildOf ← FDelegateProperty::Serialize），
+            #     **整个编辑器崩掉**，同步也因此被判成失败。
+            #   · 内容浏览器里手动删不会崩：它走 FAssetDeleteModel，先算引用，
+            #     没引用就直接删（ObjectTools.cpp:3422，bPerformReferenceCheck=False），
+            #     根本不做全库扫描。Python 侧没暴露这条轻路径。
+            #
+            # 【所以这里】查引用 → 删文件 → 由调用方以磁盘复核。
+            # find_package_referencers_for_asset 查的是注册表依赖信息，不触发全库序列化；
+            # 有引用就不删 —— 只删文件不会像 ForceDelete 那样把引用置空，硬删就是把别人弄坏。
+            #
+            # 返回值用字符串而不是 bool，因为调用方要区分三种情况：
+            #   "deleted" 真删掉了 / "skipped" 有引用、主动跳过 / "absent" 本来就不在 / "failed" 出错。
+            # 只有 "failed" 才算这次清理没做到；"skipped" 下次同步会再试，不该判整次同步失败。
+            def purge_extra_asset(asset_path):
                 if not asset_path:
-                    return False
+                    return "absent"
                 try:
-                    if not unreal.EditorAssetLibrary.does_asset_exist(asset_path):
-                        return False
-                    if not unreal.EditorAssetLibrary.delete_asset(asset_path):
-                        add_error("GalExcleTools failed to delete extra asset: {}".format(asset_path))
-                        return False
-
-                    # ⚠️ **动作成功不等于文件没了** —— 以磁盘为准再确认一次。
-                    #
-                    # 2026-10-13 实测：45 个删除动作全部返回成功，复扫却有 38 个仍在，
-                    # 而且**磁盘上的 .uasset 也真的还在**（M1-2 的时间戳还是几小时前的）。
-                    # 三个口径不一致：动作返回"处理了几个对象"、注册表说存在、磁盘也还在。
-                    #
-                    # 所以：动作走完之后，**文件还在就直接删文件**。
-                    # 为什么敢直接删 —— 这些路径是工具箱自己判定为多余的
-                    # （"素材文件夹里不能有别的"），而且都在工程 Content 底下，
-                    # 删掉它们是这次同步的**目的**，不是副作用。
                     disk_file = asset_path_to_disk_file(asset_path)
-                    if disk_file and os.path.exists(disk_file):
-                        try:
-                            os.remove(disk_file)
-                        except Exception as exc:
-                            add_error("GalExcleTools 删除文件失败 {}：{}".format(disk_file, exc))
+                    if not disk_file or not os.path.exists(disk_file):
+                        # 文件本来就不在（上一轮删过/被手工删了）：当已完成，不报错。
+                        return "absent"
 
-                    # 最终以磁盘为准：还在才算没删掉。
-                    if asset_file_exists(asset_path):
-                        still_present.append(asset_path)
-                    unreal.log("GalExcleTools deleted extra asset: {}".format(asset_path))
-                    return True
+                    try:
+                        # load_assets_to_confirm=False：只查注册表，不去加载资产。
+                        referencers = unreal.EditorAssetLibrary.find_package_referencers_for_asset(
+                            asset_path, False) or []
+                    except Exception as exc:
+                        add_warning("GalExcleTools 查不到 {} 的引用方（按无引用处理）：{}".format(asset_path, exc))
+                        referencers = []
+
+                    if referencers:
+                        add_warning(
+                            "GalExcleTools 跳过删除 {}：它还被 {} 个对象引用着（{}）。".format(
+                                asset_path, len(referencers),
+                                "；".join(str(item) for item in referencers[:3])))
+                        return "skipped"
+
+                    os.remove(disk_file)
+                    unreal.log("GalExcleTools purged extra asset file: {}".format(disk_file))
+                    return "deleted"
                 except Exception as exc:
-                    add_error("GalExcleTools failed to delete extra asset {}: {}".format(asset_path, exc))
-                return False
+                    add_error("GalExcleTools failed to purge extra asset {}: {}".format(asset_path, exc))
+                return "failed"
 
             write_progress("PrepareImports", "正在准备素材导入任务", 62)
             task_targets = []
@@ -1410,31 +1426,16 @@ internal sealed class UnrealSyncService
                         "（不然会自己删掉自己刚写的东西）。".format(skipped_just_written))
                 pending_deletes = kept
 
-            write_progress("DeleteAssets", "正在清理虚幻中的多余素材", 96, 0, len(pending_deletes))
-            still_present = []
-            for delete_index, asset_path in enumerate(pending_deletes):
-                if delete_asset_if_exists(asset_path):
-                    # 只有**复核确认盘上没了**才算真删掉 —— 别把"动作返回成功"当结果。
-                    # 2026-10-13：45 个动作全返回成功，实际只删掉 7 个。
-                    if asset_path not in still_present:
-                        deleted_count += 1
-                write_progress("DeleteAssets", "正在清理虚幻中的多余素材", 96 + (3.0 * (delete_index + 1) / max(len(pending_deletes), 1)), delete_index + 1, len(pending_deletes))
-
-            # ── 删除之后**必须再存一次** ─────────────────────────────────
-            # 批量保存跑在删除**之前**，所以删除只改到了内存：
-            # 对象没了、盘上的 .uasset 一个都没少，而 does_asset_exist 查的正是文件。
-            # 2026-10-13 实测就是这么来的：45 个删除动作全部"返回成功"，复扫 38 个还在。
-            if pending_deletes:
-                delete_save_root = manifest.get("TargetRoot") or "/Game"
-                try:
-                    unreal.EditorAssetLibrary.save_directory(delete_save_root, only_if_is_dirty=True, recursive=True)
-                except Exception as exc:
-                    add_warning("GalExcleTools 删除后统一保存出错：{} —— {}".format(delete_save_root, exc))
-                if still_present:
-                    # 当场复核就已经发现还在 —— 那说明删除动作本身没生效，
-                    # 不是"没落盘"。这条要单独报，否则会被当成同一类问题反复查。
-                    add_warning("GalExcleTools 有 {} 个资产删除动作返回成功、但当场复核仍在（共 {} 个待删）：{}".format(
-                        len(still_present), len(pending_deletes), "；".join(still_present[:5])))
+            # ── 删除**挪到脚本最后**（2026-11-03）──────────────────────────
+            #
+            # 顺序：导入 → 写变量/表 → 保存 → 记录资产类型 → **才删文件**。
+            # 只有"所有保存都做完之后再删"，才不会出现"刚删掉、某个脏包又被保存写回来"。
+            #
+            # 原来这里是"先删、再 save_directory"——那个顺序是反的，而且那一步 save
+            # 从来没解决过任何问题：save 不会删文件，只会把内存里的脏包写下去。
+            # 真正让 2026-10-13 那批"38 个删不掉"消失的，是后来加的 os.remove 兜底。
+            #
+            # 真正的删除在下面 [PURGE] 段。
 
             # ── 资产类型清单 ────────────────────────────────────────────
             # 把这次涉及到的资产**当时的类名**写下来，给"同步前检测"用。
@@ -1500,6 +1501,58 @@ internal sealed class UnrealSyncService
                     # 写不了清单不影响同步本身 —— 检测那边会退回"不判类型"。
                     add_warning("GalExcleTools 写资产类型清单失败：{}".format(exc))
 
+            # ── [PURGE] 清理多余素材：只删磁盘文件，放在所有保存之后 ──────────
+            #
+            # 位置是刻意的（2026-11-03）：导入 → 写设置 → 保存 → 记录类型 → **才删**。
+            # 这一段之后到写结果之间**不能再有任何保存动作** —— 否则刚删掉的文件
+            # 会被某个脏包保存时又写回来（那不是"复活机制"，就是"保存会写文件"）。
+            #
+            # 删除方式见 purge_extra_asset 的注释：不走 delete_asset（会全库扫描并崩编辑器）。
+            write_progress("DeleteAssets", "正在清理虚幻中的多余素材", 97, 0, len(pending_deletes))
+            still_present = []
+            skipped_purges = []
+            if pending_deletes:
+                purge_roots = set()
+                for delete_index, asset_path in enumerate(pending_deletes):
+                    status = purge_extra_asset(asset_path)
+
+                    package_dir = str(asset_path).split(".")[0].rsplit("/", 1)[0]
+                    if package_dir:
+                        purge_roots.add(package_dir)
+
+                    # 以**磁盘**为准复核：动作说成功不算数，文件没了才算。
+                    if status == "deleted" and not asset_file_exists(asset_path):
+                        deleted_count += 1
+                    elif status == "skipped":
+                        skipped_purges.append(asset_path)
+                    elif asset_file_exists(asset_path):
+                        still_present.append(asset_path)
+
+                    write_progress("DeleteAssets", "正在清理虚幻中的多余素材",
+                                   97 + (1.0 * (delete_index + 1) / max(len(pending_deletes), 1)),
+                                   delete_index + 1, len(pending_deletes))
+
+                # 让注册表跟上磁盘：不然 does_asset_exist 还是 true、内容浏览器里
+                # 会留一批"点开报错"的空条目，下次检测也会把它们当成还在。
+                if purge_roots:
+                    try:
+                        unreal.AssetRegistryHelpers.get_asset_registry().scan_paths_synchronous(
+                            sorted(purge_roots), True)
+                        unreal.log("GalExcleTools asset registry rescanned: {}".format(sorted(purge_roots)))
+                    except Exception as exc:
+                        add_warning(
+                            "GalExcleTools 清理后重扫资产注册表失败（重启编辑器即可恢复一致）：{}".format(exc))
+
+                if skipped_purges:
+                    add_warning("GalExcleTools 有 {} 个多余素材仍被引用着，本次没删（下次同步会再试）：{}".format(
+                        len(skipped_purges), "；".join(skipped_purges[:5])))
+
+                if still_present:
+                    add_warning("GalExcleTools 有 {} 个多余素材删不掉（可能被占用或没有写权限），"
+                                "共 {} 个待删：{}".format(
+                                    len(still_present), len(pending_deletes),
+                                    "；".join(still_present[:5])))
+
             # ── 执行后复扫验证 ──────────────────────────────────────────
             # 光靠计数判断不了"同步成功"：计数能对上、内容却是错的完全可能
             # （导入了 27 个文件，但不是那 27 个）。
@@ -1521,6 +1574,11 @@ internal sealed class UnrealSyncService
                     add_error("GalExcleTools 复扫验证未通过：{} 不在 {}".format(display_name, package_path))
 
             for asset_path in pending_deletes:
+                if asset_path in skipped_purges:
+                    # 被引用着、这次**主动没删**的：不是失败，别在这里判红。
+                    # 已经在清理段留过一条 warning，下次同步会再试。
+                    continue
+
                 # **以磁盘为准**：does_asset_exist 查的是资产注册表，而删除这件事上
                 # 注册表、动作返回值、磁盘三方口径并不一致（见 asset_path_to_disk_file
                 # 那段注释）。文件没了才算删掉 —— 而删文件这件事上面那一步已经做过了。
