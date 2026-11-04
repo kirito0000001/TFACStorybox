@@ -341,8 +341,8 @@
                             <SymbolIcon Symbol="Setting" />
                         </Button>
                         <!--
-                            筛选：图标按钮 + 菜单，替代原来那个「仅看已设置 / 显示全部」的开关。
-                            选项从"已设置/未设置"扩到"超差/未检查"，因为这三个问题的处理方式完全不同。
+                            筛选：图标按钮 + 菜单。菜单在代码里生成 —— 最后那组
+                            「xxx语音」按当前章节的说话人动态拼，XAML 里写不出来。
                         -->
                         <Button
                             x:Name="ProjectTextToolVoiceFilterButton"
@@ -352,16 +352,6 @@
                             Padding="0"
                             ToolTipService.ToolTip="筛选要显示的行">
                             <FontIcon Glyph="&#xE71C;" FontSize="16" />
-                            <Button.Flyout>
-                                <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                    <MenuFlyoutItem Text="全部行" Tag="All" Click="ProjectTextToolVoiceFilterItem_Click" />
-                                    <MenuFlyoutItem Text="只看已设置语音" Tag="Configured" Click="ProjectTextToolVoiceFilterItem_Click" />
-                                    <MenuFlyoutItem Text="只看未设置语音" Tag="Missing" Click="ProjectTextToolVoiceFilterItem_Click" />
-                                    <MenuFlyoutSeparator />
-                                    <MenuFlyoutItem Text="只看超差（可规整）" Tag="OffSpec" Click="ProjectTextToolVoiceFilterItem_Click" />
-                                    <MenuFlyoutItem Text="只看未检查" Tag="Unchecked" Click="ProjectTextToolVoiceFilterItem_Click" />
-                                </MenuFlyout>
-                            </Button.Flyout>
                         </Button>
                         <Button
                             x:Name="ProjectTextToolVoiceTrackButton"

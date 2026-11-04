@@ -122,17 +122,22 @@ namespace GalExcleTools
             RefreshProjectTextToolPage();
         }
 
-        /// <summary>语音页的筛选范围。"已设置/未设置"管的是有没有语音，"超差/未检查"管的是响度数据。</summary>
+        /// <summary>语音页的筛选范围。菜单文案不带"只看"——筛选本来就是"只看"。</summary>
         private enum VoiceRowFilter
         {
             All,
             Configured,
             Missing,
-            OffSpec,
-            Unchecked
+            Unchecked,
+            /// <summary>说话人那边勾了"应该有语音"，但这行还没配文件（漏配）。</summary>
+            MissingVoiced,
+            /// <summary>按某个说话人过滤，具体是谁存在 <see cref="_voiceRowFilterSpeaker"/>。</summary>
+            Speaker
         }
 
         private VoiceRowFilter _voiceRowFilter = VoiceRowFilter.All;
+
+        private string? _voiceRowFilterSpeaker;
 
         private readonly VoiceTrackSettingsStore _voiceTrackSettingsStore = new();
 
@@ -140,14 +145,27 @@ namespace GalExcleTools
 
         private void ProjectTextToolVoiceFilterItem_Click(object sender, RoutedEventArgs e)
         {
-            if (_projectTextToolMode != ProjectTextToolMode.Voice)
+            if (_projectTextToolMode != ProjectTextToolMode.Voice ||
+                sender is not MenuFlyoutItem { Tag: string tag })
             {
                 return;
             }
 
-            if (sender is not MenuFlyoutItem { Tag: string tag } ||
-                !Enum.TryParse<VoiceRowFilter>(tag, out var filter) ||
-                filter == _voiceRowFilter)
+            VoiceRowFilter filter;
+            string? speakerKey = null;
+
+            if (tag.StartsWith("Speaker:", StringComparison.Ordinal))
+            {
+                filter = VoiceRowFilter.Speaker;
+                speakerKey = tag["Speaker:".Length..];
+            }
+            else if (!Enum.TryParse(tag, out filter))
+            {
+                return;
+            }
+
+            if (filter == _voiceRowFilter &&
+                string.Equals(speakerKey, _voiceRowFilterSpeaker, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -155,7 +173,64 @@ namespace GalExcleTools
             PlaySelectionSound();
             StopProjectVoicePreview();
             _voiceRowFilter = filter;
+            _voiceRowFilterSpeaker = speakerKey;
             RefreshProjectTextToolPage();
+        }
+
+        /// <summary>
+        /// 重建筛选菜单。
+        ///
+        /// 为什么放在代码里生成：最后一组「xxx语音」是按**当前章节的说话人**动态拼的，
+        /// XAML 里写不出来；章节一切换，菜单就得跟着换。
+        /// </summary>
+        private void RebuildVoiceFilterFlyout()
+        {
+            if (ProjectTextToolVoiceFilterButton is null)
+            {
+                return;
+            }
+
+            var flyout = new MenuFlyout();
+
+            void AddItem(string text, string tag)
+            {
+                var item = new MenuFlyoutItem { Text = text, Tag = tag };
+                item.Click += ProjectTextToolVoiceFilterItem_Click;
+                flyout.Items.Add(item);
+            }
+
+            AddItem("全部行", "All");
+            AddItem("已设置语音", "Configured");
+            AddItem("未设置语音", "Missing");
+
+            flyout.Items.Add(new MenuFlyoutSeparator());
+            AddItem("未检查", "Unchecked");
+            AddItem("缺少设置", "MissingVoiced");
+
+            var speakers = GetChapterSpeakerKeys();
+            if (speakers.Count > 0)
+            {
+                flyout.Items.Add(new MenuFlyoutSeparator());
+                foreach (var key in speakers)
+                {
+                    AddItem($"{DisplaySpeaker(key)}语音", $"Speaker:{key}");
+                }
+            }
+
+            ProjectTextToolVoiceFilterButton.Flyout = flyout;
+        }
+
+        /// <summary>本章出现过的说话人（已归一化、去重、按名字排序）。</summary>
+        private List<string> GetChapterSpeakerKeys()
+        {
+            return _projectTextRows
+                .Where(row => _selectedTextToolChapter is not null &&
+                    string.Equals(row.ChapterCode, _selectedTextToolChapter.Code, StringComparison.OrdinalIgnoreCase))
+                .Select(row => ToSpeakerKey(row.Speaker))
+                .Where(key => key.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         /// <summary>「语音设置」：音轨数 + 同步播放。走统一弹窗组件（见 Controls/ToolboxDialog.cs）。</summary>
@@ -302,14 +377,7 @@ namespace GalExcleTools
         {
             checks = [];
 
-            var speakers = _projectTextRows
-                .Where(row => _selectedTextToolChapter is not null &&
-                    string.Equals(row.ChapterCode, _selectedTextToolChapter.Code, StringComparison.OrdinalIgnoreCase))
-                .Select(row => ToSpeakerKey(row.Speaker))
-                .Where(key => key.Length > 0)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var speakers = GetChapterSpeakerKeys();
 
             if (speakers.Count == 0)
             {
@@ -494,25 +562,38 @@ namespace GalExcleTools
 
             return rows.Where(row =>
             {
-                if (!_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) ||
-                    string.IsNullOrWhiteSpace(voicePath) ||
-                    !File.Exists(voicePath))
+                var hasVoice = _projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) &&
+                    !string.IsNullOrWhiteSpace(voicePath) &&
+                    File.Exists(voicePath);
+                var speakerKey = ToSpeakerKey(row.Speaker);
+
+                switch (_voiceRowFilter)
                 {
-                    return _voiceRowFilter == VoiceRowFilter.Missing;
+                    case VoiceRowFilter.Configured:
+                        return hasVoice;
+
+                    case VoiceRowFilter.Missing:
+                        return !hasVoice;
+
+                    // 「缺少设置」：说话人那边勾了"该角色有语音"，但这行还没配文件。
+                    // 这是唯一能"按预期找出漏配"的筛选 —— 光看"未设置"会把旁白也带上。
+                    case VoiceRowFilter.MissingVoiced:
+                        return !hasVoice && speakerKey.Length > 0 &&
+                            _voiceTrackSettings.SpeakersWithVoice.Contains(speakerKey, StringComparer.OrdinalIgnoreCase);
+
+                    case VoiceRowFilter.Speaker:
+                        return speakerKey.Length > 0 &&
+                            string.Equals(speakerKey, _voiceRowFilterSpeaker, StringComparison.OrdinalIgnoreCase);
                 }
 
-                if (_voiceRowFilter == VoiceRowFilter.Configured)
+                // 剩下只有「未检查」：有语音、但这次没量过（DB 列是横线）。
+                if (!hasVoice)
                 {
-                    return true;
+                    return false;
                 }
 
                 var name = Path.GetFileName(voicePath);
-                if (!_chapterVoiceLoudness.TryGetValue(name, out var item) || !item.Measurement.IsUsable)
-                {
-                    return _voiceRowFilter == VoiceRowFilter.Unchecked;
-                }
-
-                return _voiceRowFilter == VoiceRowFilter.OffSpec && item.NeedsFix;
+                return !_chapterVoiceLoudness.TryGetValue(name, out var item) || !item.Measurement.IsUsable;
             }).ToList();
         }
 
@@ -520,10 +601,11 @@ namespace GalExcleTools
         {
             var filterText = _voiceRowFilter switch
             {
-                VoiceRowFilter.Configured => "只看已设置语音",
-                VoiceRowFilter.Missing => "只看未设置语音",
-                VoiceRowFilter.OffSpec => "只看超差项",
-                VoiceRowFilter.Unchecked => "只看未检查",
+                VoiceRowFilter.Configured => "已设置语音",
+                VoiceRowFilter.Missing => "未设置语音",
+                VoiceRowFilter.Unchecked => "未检查",
+                VoiceRowFilter.MissingVoiced => "缺少设置",
+                VoiceRowFilter.Speaker => $"{DisplaySpeaker(_voiceRowFilterSpeaker ?? string.Empty)}的台词",
                 _ => "全部行"
             };
 
@@ -620,6 +702,8 @@ namespace GalExcleTools
             }
 
             UpdateVoiceTrackButtonState();
+            // 菜单最后那组「xxx语音」依赖本章说话人，章节一换就得重建。
+            RebuildVoiceFilterFlyout();
             if (_selectedTextToolChapter is null)
             {
                 ProjectTextToolTitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice ? "文本语音" : "文本本地化";
