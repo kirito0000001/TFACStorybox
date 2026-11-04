@@ -492,6 +492,25 @@ namespace GalExcleTools
             grid.Children.Add(durationCell);
             grid.Children.Add(loudnessCell);
             grid.Children.Add(CreateProjectVoicePreviewCell(previewButton));
+
+            // 「刚才播过」的标记：行底部一条 2px 主题色线。
+            //
+            // 两个细节都是刻意的：
+            // · 靠下对齐放在第 0 行里，**不新增行** —— 新增一行会让每行都长高 2px，
+            //   而它只是标记，不该改变排版；
+            // · 必须**最后**加，否则会被后面的单元格盖住（同级子元素按添加顺序叠）。
+            var playMarker = new Border
+            {
+                Height = 2,
+                Background = Application.Current.Resources["AccentFillColorDefaultBrush"] as Brush,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Visibility = Visibility.Collapsed,
+                IsHitTestVisible = false
+            };
+            Grid.SetColumnSpan(playMarker, grid.ColumnDefinitions.Count);
+            grid.Children.Add(playMarker);
+            _voicePlayMarkers[row.Id] = playMarker;
+
             return grid;
         }
 
@@ -665,6 +684,7 @@ namespace GalExcleTools
                 var file = await StorageFile.GetFileFromPathAsync(voicePath);
                 _projectVoicePreviewPlayer.Source = MediaSource.CreateFromStorageFile(file);
                 _projectVoicePreviewPlayer.Play();
+                MarkVoicePlayingRow(row.Id);
                 AppendLog(LogKind.Info, $"试听语音：{Path.GetFileName(voicePath)}");
             }
             catch (Exception ex)

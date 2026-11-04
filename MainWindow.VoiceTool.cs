@@ -55,6 +55,18 @@ namespace GalExcleTools
             new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
+        /// 每行的「刚才播放过」标记（行底部那条 2px 主题色线），key = 行 Id。
+        ///
+        /// 用户对照着听的时候，回头要能一眼看出刚才播的是哪一条 ——
+        /// 只标当前这一条，播下一条时把上一条撤掉（不然满屏都是线，等于没标）。
+        /// </summary>
+        private readonly Dictionary<string, Border> _voicePlayMarkers =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>当前被标记为"正在/刚播过"的行 Id。</summary>
+        private string? _voicePlayingRowId;
+
+        /// <summary>
         /// 「正在跑一批语音」的互斥标记。全局进度条不是模态的，
         /// 双击能把同一章的两批 ffmpeg 叠起来跑 —— 那会把同一批文件写两遍。
         /// </summary>
@@ -106,6 +118,8 @@ namespace GalExcleTools
         {
             _voiceDbCells.Clear();
             _voiceButtons.Clear();
+            _voicePlayMarkers.Clear();
+            _voicePlayingRowId = null;
             _chapterVoiceLoudness.Clear();
             if (VoiceLoudnessNormalizeButton is not null)
             {
@@ -1104,6 +1118,32 @@ namespace GalExcleTools
             });
 
             return root;
+        }
+
+        /// <summary>
+        /// 把「刚才播过」的标记移到这一行：撤掉上一条，点亮当前这条。
+        ///
+        /// 只保留一条 —— 每条播过的都留着线，满屏都是绿的，等于没标。
+        /// 页面重铺时标记全部重建（见 <see cref="ResetVoiceLoudnessColumnState"/>），自然清空。
+        /// </summary>
+        private void MarkVoicePlayingRow(string rowId)
+        {
+            if (string.Equals(_voicePlayingRowId, rowId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (_voicePlayingRowId is not null &&
+                _voicePlayMarkers.TryGetValue(_voicePlayingRowId, out var previous))
+            {
+                previous.Visibility = Visibility.Collapsed;
+            }
+
+            _voicePlayingRowId = rowId;
+            if (_voicePlayMarkers.TryGetValue(rowId, out var marker))
+            {
+                marker.Visibility = Visibility.Visible;
+            }
         }
 
         /// <summary>
