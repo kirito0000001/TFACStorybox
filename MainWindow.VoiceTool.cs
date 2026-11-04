@@ -45,6 +45,15 @@ namespace GalExcleTools
             new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
+        /// 当前页面上的语音按钮，key = 行 Id。
+        ///
+        /// 为什么要留一份：批量规范命名会改掉文件名，得把这些按钮的文字就地换掉。
+        /// 不重铺页面 —— 重铺会把滚动位置打回顶部（那是素材页反复挨骂的一条）。
+        /// </summary>
+        private readonly Dictionary<string, Button> _voiceButtons =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
         /// 「正在跑一批语音」的互斥标记。全局进度条不是模态的，
         /// 双击能把同一章的两批 ffmpeg 叠起来跑 —— 那会把同一批文件写两遍。
         /// </summary>
@@ -95,6 +104,7 @@ namespace GalExcleTools
         private void ResetVoiceLoudnessColumnState()
         {
             _voiceDbCells.Clear();
+            _voiceButtons.Clear();
             _chapterVoiceLoudness.Clear();
             if (VoiceLoudnessNormalizeButton is not null)
             {
@@ -432,7 +442,7 @@ namespace GalExcleTools
         /// 表现是这一行的「时长 / DB」全变横线，用户会以为数据丢了（2026-11-04 实测）。
         /// 内容没变、只是名字变了，所以判定结果整份搬过去即可，不用重测。
         /// </summary>
-        private void CarryVoiceLoudnessToRenamedFile(ProjectTextRow row, string oldPath, string newPath)
+        private void CarryVoiceLoudnessToRenamedFile(string oldPath, string newPath)
         {
             var oldName = Path.GetFileName(oldPath);
             var newName = Path.GetFileName(newPath);
@@ -451,11 +461,134 @@ namespace GalExcleTools
             }
 
             // 单元格里也记着旧文件名：不换掉的话，刷新时仍按旧名去查（照样横线）。
-            if (_voiceDbCells.TryGetValue(row.Id, out var cell))
+            var touched = false;
+            foreach (var key in _voiceDbCells.Keys.ToList())
             {
-                _voiceDbCells[row.Id] = cell with { FileName = newName };
+                var cell = _voiceDbCells[key];
+                if (string.Equals(cell.FileName, oldName, StringComparison.OrdinalIgnoreCase))
+                {
+                    _voiceDbCells[key] = cell with { FileName = newName };
+                    touched = true;
+                }
+            }
+
+            if (touched)
+            {
                 UpdateVoiceDbCells();
             }
+        }
+
+        /// <summary>
+        /// 把映射表里指向 <paramref name="oldPath"/> 的条目改到 <paramref name="newPath"/>。
+        /// 改名不同步映射，等于把那一行的语音"弄丢" —— 重启后就找不回来了。
+        /// </summary>
+        private void UpdateVoiceMapPath(string oldPath, string newPath)
+        {
+            var oldName = Path.GetFileName(oldPath);
+            foreach (var key in _projectVoiceMapState.Voices.Keys.ToList())
+            {
+                var current = _projectVoiceMapState.Voices[key];
+                if (string.IsNullOrWhiteSpace(current))
+                {
+                    continue;
+                }
+
+                // 内存里的映射在读入时已经解析成绝对路径（见 ProjectTextDataService.ResolveVoiceMapPaths），
+                // 所以先直接比全路径；再退一步比"同目录 + 同名"，兜住分隔符/大小写的差异。
+                var samePath = string.Equals(
+                    current, oldPath, StringComparison.OrdinalIgnoreCase);
+                var sameNameInSameFolder =
+                    string.Equals(Path.GetFileName(current), oldName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        Path.GetDirectoryName(Path.GetFullPath(current)),
+                        Path.GetDirectoryName(Path.GetFullPath(oldPath)),
+                        StringComparison.OrdinalIgnoreCase);
+
+                if (samePath || sameNameInSameFolder)
+                {
+                    _projectVoiceMapState.Voices[key] = newPath;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 把本章语音文件名里「Unreal 不接受的字符」换成 <c>_</c>，返回改了几个。
+        ///
+        /// 【为什么放在「规整语音」里】导入时资产名是按源文件名清洗出来的
+        /// （<see cref="UnrealSyncService.NormalizeImportedAssetName"/>）。源文件名里带着
+        /// <c>? . , ! ( )</c> 这些，清洗后资产名和文件名对不上，改名/复扫时就容易打架
+        /// （2026-11-03 那条 `Vo-112-…改1＊` 就是例子）。与其在同步那边猜，不如在源头统一。
+        ///
+        /// 规则**复用同步那一份**，绝不在页面里再列一遍：两份一旦走岔，
+        /// "文件名洗成什么样"和"判重时按什么比"就会互相矛盾。
+        ///
+        /// 冲突（目标已存在）和失败一律跳过并记一条警告 —— 宁可不改，也不覆盖别人。
+        /// </summary>
+        private int NormalizeVoiceFileNames()
+        {
+            if (_currentProject is null || _selectedTextToolChapter is null)
+            {
+                return 0;
+            }
+
+            var renamed = 0;
+            foreach (var file in GetCurrentChapterVoiceFiles())
+            {
+                var oldName = Path.GetFileName(file);
+                var stem = Path.GetFileNameWithoutExtension(oldName);
+                var safeStem = UnrealSyncService.NormalizeImportedAssetName(stem);
+                if (string.Equals(stem, safeStem, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var folder = Path.GetDirectoryName(file)!;
+                var targetPath = Path.Combine(folder, safeStem + Path.GetExtension(file));
+                if (string.Equals(targetPath, file, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (File.Exists(targetPath))
+                {
+                    AppendLog(LogKind.Warning, $"语音改名跳过（目标已存在）：{oldName} → {Path.GetFileName(targetPath)}");
+                    continue;
+                }
+
+                try
+                {
+                    File.Move(file, targetPath);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    AppendLog(LogKind.Warning, $"语音改名失败：{oldName}", error);
+                    continue;
+                }
+
+                // 三处都得跟着换：映射（重启后靠它）、缓存键、页面按钮。
+                UpdateVoiceMapPath(file, targetPath);
+                CarryVoiceLoudnessToRenamedFile(file, targetPath);
+                AppendLog(LogKind.Info, $"语音改名：{oldName} → {Path.GetFileName(targetPath)}");
+                renamed++;
+            }
+
+            if (renamed == 0)
+            {
+                return 0;
+            }
+
+            _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
+
+            // 按钮文字就地换（刷新整页会把滚动位置打回顶部）。
+            foreach (var (rowId, voicePath) in _projectVoiceMapState.Voices)
+            {
+                if (_voiceButtons.TryGetValue(rowId, out var button))
+                {
+                    UpdateProjectVoiceButton(button, voicePath);
+                }
+            }
+
+            return renamed;
         }
 
         /// <summary>把当前章节量到的数字写进缓存。只写「文件还在、值有效」的条目。</summary>
@@ -718,6 +851,16 @@ namespace GalExcleTools
                 return;
             }
 
+            // ① 先把文件名规范掉（Unreal 非法字符 → _），再谈响度。
+            //
+            // 顺序不能反：改名会换掉缓存键与映射路径，先改完名再规整，
+            // 缓存是**一次性重建**的，不会出现"规整写了一份、又被改名搬一次"的往返。
+            var renamedCount = NormalizeVoiceFileNames();
+            if (renamedCount > 0)
+            {
+                AppendLog(LogKind.Info, $"已规范 {renamedCount} 个语音文件名（Unreal 非法字符 → _）。");
+            }
+
             var allFiles = GetCurrentChapterVoiceFiles();
             if (allFiles.Count == 0)
             {
@@ -862,7 +1005,8 @@ namespace GalExcleTools
                 ? string.Empty
                 : $"（未处理：{string.Join("、", skipParts)}）";
 
-            var summary = $"成功 {result.SuccessCount} / {result.Outcomes.Count} 条"
+            var summary = (renamedCount > 0 ? $"已规范 {renamedCount} 个文件名；" : string.Empty)
+                + $"成功 {result.SuccessCount} / {result.Outcomes.Count} 条"
                 + (result.FailureCount > 0 ? $"，失败 {result.FailureCount} 条" : string.Empty)
                 + skipNote;
             CompleteGlobalProgress("规整完成", summary);

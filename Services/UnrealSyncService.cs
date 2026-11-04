@@ -3242,7 +3242,13 @@ internal sealed class UnrealSyncService
         return packagePath.Split('/').Last();
     }
 
-    private static string NormalizeImportedAssetName(string assetName)
+    /// <summary>
+    /// 把名字里 Unreal 不接受的字符（以及空白）换成 <c>_</c>。**全项目唯一的一份规则**。
+    ///
+    /// 导入时用它生成资产名；语音页的「规整语音」也用它把源文件名洗干净 ——
+    /// 两边必须同一套，否则会出现"文件名以为改好了、导入时又被改成别的"。
+    /// </summary>
+    public static string NormalizeImportedAssetName(string assetName)
     {
         var normalized = new string(assetName
             .Select(character => char.IsWhiteSpace(character) || InvalidUnrealObjectNameCharacters.Contains(character)

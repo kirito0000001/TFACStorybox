@@ -301,7 +301,7 @@ namespace GalExcleTools
 
             // 改名换掉了文件名，而响度缓存是**按文件名索引**的 —— 不把它一起搬，
             // 这一行的「时长 / DB」立刻变成横线（用户看到的就是"数据丢了"）。
-            CarryVoiceLoudnessToRenamedFile(row, voicePath, updatedPath);
+            CarryVoiceLoudnessToRenamedFile(voicePath, updatedPath);
 
             _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
             TouchProjectLastEditedAt(_currentProject);
@@ -430,6 +430,8 @@ namespace GalExcleTools
                 Tag = row.Id
             };
             UpdateProjectVoiceButton(button, hasVoice ? value : string.Empty);
+            // 批量规范命名时要就地改按钮文字，这里登记一份（见 NormalizeVoiceFileNames）。
+            _voiceButtons[row.Id] = button;
             var previewButton = CreateProjectVoicePreviewButton(row, hasVoice ? value : string.Empty);
             button.ContextFlyout = GridViewItemFactory.CreateMenu(
                 GridViewItemFactory.CreateMenuItem("更改备注", async (_, _) => await SetProjectVoiceRemarkAsync(row, rowCount, button, previewButton)),
