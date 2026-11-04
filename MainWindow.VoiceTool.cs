@@ -368,8 +368,11 @@ namespace GalExcleTools
                 return;
             }
 
+            // 「能修的」才点亮：测不出的、被峰值天花板卡住的都排除。
+            // 后者再跑一万遍也到不了目标（只能重做素材），让按钮为它们常亮，
+            // 结果就是每次点都重跑同一条、什么也没变（2026-11-04 实测）。
             var needsFix = _chapterVoiceLoudness.Values.Any(item =>
-                item.Measurement.IsUsable && item.NeedsFix);
+                item.Measurement.IsUsable && item.NeedsFix && !item.IsPeakLimited);
             VoiceLoudnessNormalizeButton.IsEnabled = needsFix;
         }
 
@@ -894,12 +897,23 @@ namespace GalExcleTools
             var targets = new List<string>();
             var skippedCompliant = 0;
             var skippedUnmeasured = 0;
+            var skippedPeakLimited = 0;
             foreach (var file in allFiles)
             {
                 if (_chapterVoiceLoudness.TryGetValue(Path.GetFileName(file), out var item) &&
                     item.Measurement.IsUsable)
                 {
-                    if (item.NeedsFix)
+                    if (item.NeedsFix && item.IsPeakLimited)
+                    {
+                        // 被峰值天花板卡住的，**再跑多少遍也到不了目标**：
+                        // 想拉到 −12 就得整体加 2.5 dB，峰值必然冲破 −3，只能被压回来。
+                        //
+                        // 这种人只能重做素材（压峰均比）。把它留在目标里会造成两个后果：
+                        // 按钮永远亮着、每次点都重跑同一条且毫无变化
+                        // ——2026-11-04 用户实测就是这个循环。
+                        skippedPeakLimited++;
+                    }
+                    else if (item.NeedsFix)
                     {
                         targets.Add(file);
                     }
@@ -918,10 +932,13 @@ namespace GalExcleTools
             if (targets.Count == 0)
             {
                 ShowFloatingTip(
-                    InfoBarSeverity.Success,
-                    "没有需要规整的语音",
-                    $"{allFiles.Count} 条里没有超差项（达标 {skippedCompliant} 条"
+                    skippedPeakLimited > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                    skippedPeakLimited > 0 ? "没有可规整的语音（剩下的被峰值卡住）" : "没有需要规整的语音",
+                    $"{allFiles.Count} 条里没有可规整的超差项（达标 {skippedCompliant} 条"
                     + (skippedUnmeasured > 0 ? $"，未检查 {skippedUnmeasured} 条" : string.Empty)
+                    + (skippedPeakLimited > 0
+                        ? $"，{skippedPeakLimited} 条受峰值限制 —— 拉到目标会让峰值超标，只能重做素材（压峰均比）"
+                        : string.Empty)
                     + "）。先点「检查DB规范」再回来。");
                 return;
             }
@@ -1015,6 +1032,13 @@ namespace GalExcleTools
             if (skippedUnmeasured > 0)
             {
                 skipParts.Add($"{skippedUnmeasured} 条未检查");
+            }
+
+            if (skippedPeakLimited > 0)
+            {
+                // 必须说清楚：这些行在 DB 列里还是红的，但不是"没处理到"，
+                // 而是"处理了也没用"—— 用户否则会以为工具漏了它们。
+                skipParts.Add($"{skippedPeakLimited} 条受峰值限制（规整解决不了）");
             }
 
             var skipNote = skipParts.Count == 0
