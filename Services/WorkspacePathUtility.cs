@@ -5,7 +5,8 @@ namespace GalExcleTools.Services;
 
 internal static class WorkspacePathUtility
 {
-    private const string ToolsFolderName = "Tools";
+    /// <summary>工具箱私有目录名。公开出去是为了让各处拼路径时不必再写一份字面量。</summary>
+    public const string ToolsFolderName = "Tools";
     private const string BackgroundFolderName = "背景图";
 
     /// <summary>

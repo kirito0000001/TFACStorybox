@@ -167,12 +167,6 @@ namespace GalExcleTools
             set => Workbench.ProjectTextToolMode = value;
         }
 
-        private bool _showOnlyConfiguredVoices
-        {
-            get => Workbench.ShowOnlyConfiguredVoices;
-            set => Workbench.ShowOnlyConfiguredVoices = value;
-        }
-
         private Dictionary<string, BitmapImage> _storyPreviewImageCache => _storyEditorViewModel.PreviewImageCache;
         private Dictionary<int, string> _storyCharacterPreviewKeys => _storyEditorViewModel.CharacterPreviewKeys;
         private int _currentStoryRowIndex

@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using GalExcleTools.Controls;
 using GalExcleTools.Services;
 using GalExcleTools.ViewModels;
 using GalExcleTools.Views;
@@ -121,17 +122,212 @@ namespace GalExcleTools
             RefreshProjectTextToolPage();
         }
 
-        private void ProjectTextToolVoiceFilterButton_Click(object sender, RoutedEventArgs e)
+        /// <summary>语音页的筛选范围。"已设置/未设置"管的是有没有语音，"超差/未检查"管的是响度数据。</summary>
+        private enum VoiceRowFilter
+        {
+            All,
+            Configured,
+            Missing,
+            OffSpec,
+            Unchecked
+        }
+
+        private VoiceRowFilter _voiceRowFilter = VoiceRowFilter.All;
+
+        private readonly VoiceTrackSettingsStore _voiceTrackSettingsStore = new();
+
+        private VoiceTrackSettings _voiceTrackSettings = new();
+
+        private void ProjectTextToolVoiceFilterItem_Click(object sender, RoutedEventArgs e)
         {
             if (_projectTextToolMode != ProjectTextToolMode.Voice)
             {
                 return;
             }
 
+            if (sender is not MenuFlyoutItem { Tag: string tag } ||
+                !Enum.TryParse<VoiceRowFilter>(tag, out var filter) ||
+                filter == _voiceRowFilter)
+            {
+                return;
+            }
+
             PlaySelectionSound();
             StopProjectVoicePreview();
-            _showOnlyConfiguredVoices = !_showOnlyConfiguredVoices;
+            _voiceRowFilter = filter;
             RefreshProjectTextToolPage();
+        }
+
+        /// <summary>「语音设置」：音轨数 + 同步播放。走统一弹窗组件（见 Controls/ToolboxDialog.cs）。</summary>
+        private async void ProjectTextToolVoiceSettingsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentProject is null || _projectTextToolMode != ProjectTextToolMode.Voice)
+            {
+                return;
+            }
+
+            var trackCountBox = new NumberBox
+            {
+                Minimum = VoiceTrackSettings.MinTrackCount,
+                Maximum = VoiceTrackSettings.MaxTrackCount,
+                Value = _voiceTrackSettings.TrackCount,
+                SmallChange = 1,
+                LargeChange = 1,
+                SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact
+            };
+
+            var syncPlaybackSwitch = new ToggleSwitch
+            {
+                IsOn = _voiceTrackSettings.SyncPlayback,
+                OnContent = "所有音轨同时播放",
+                OffContent = "只播当前音轨"
+            };
+
+            var form = ToolboxDialog.BuildForm(
+                ToolboxDialog.BuildField(
+                    "音轨数",
+                    trackCountBox,
+                    $"多国语音用：每条音轨放一套配音，{VoiceTrackSettings.MinTrackCount}–{VoiceTrackSettings.MaxTrackCount} 条。"),
+                ToolboxDialog.BuildField(
+                    "同步播放",
+                    syncPlaybackSwitch,
+                    "打开后点试听会把各音轨同时播出来（用于需要叠音的台词）。"));
+
+            var confirmed = await ToolboxDialog.ShowAsync(
+                RootGrid.XamlRoot,
+                "语音设置",
+                form,
+                "保存",
+                "取消");
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var count = double.IsNaN(trackCountBox.Value)
+                ? _voiceTrackSettings.TrackCount
+                : (int)Math.Round(trackCountBox.Value);
+
+            _voiceTrackSettings.TrackCount = count;
+            _voiceTrackSettings.SyncPlayback = syncPlaybackSwitch.IsOn;
+            _voiceTrackSettings.Normalize();
+            _voiceTrackSettingsStore.Write(_currentProject, _voiceTrackSettings);
+            RefreshProjectTextToolPage();
+
+            ShowFloatingTip(
+                InfoBarSeverity.Success,
+                "语音设置已保存",
+                $"音轨数 {_voiceTrackSettings.TrackCount}，同步播放{(_voiceTrackSettings.SyncPlayback ? "开启" : "关闭")}。");
+        }
+
+        /// <summary>
+        /// 「音轨 N」：点开选第几条。
+        ///
+        /// ⚠️ 现在只切换**当前编辑的音轨号**并记住选择：语音映射表还是"一行一个文件"，
+        /// 多音轨的文件落位（比如 `Vo-012-〈音轨2〉.wav`）要改 story.voice-map.json 的结构，
+        /// 那是另一步。这里不做半截数据模型，免得映射被写坏。
+        /// </summary>
+        private void ProjectTextToolVoiceTrackButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentProject is null || _voiceTrackSettings.TrackCount <= 1)
+            {
+                return;
+            }
+
+            var flyout = new MenuFlyout();
+            for (var track = 1; track <= _voiceTrackSettings.TrackCount; track++)
+            {
+                var index = track;
+                var item = new MenuFlyoutItem
+                {
+                    Text = $"音轨 {index}",
+                    IsEnabled = index != _voiceTrackSettings.ActiveTrack
+                };
+                item.Click += (_, _) =>
+                {
+                    _voiceTrackSettings.ActiveTrack = index;
+                    _voiceTrackSettingsStore.Write(_currentProject, _voiceTrackSettings);
+                    UpdateVoiceTrackButtonState();
+                    ShowFloatingTip(
+                        InfoBarSeverity.Informational,
+                        $"已切到音轨 {index}",
+                        "多音轨的文件映射还没接；这一步先把选择记住。");
+                };
+                flyout.Items.Add(item);
+            }
+
+            flyout.ShowAt(ProjectTextToolVoiceTrackButton);
+        }
+
+        private void UpdateVoiceTrackButtonState()
+        {
+            if (ProjectTextToolVoiceTrackButton is null)
+            {
+                return;
+            }
+
+            var count = _voiceTrackSettings.TrackCount;
+            ProjectTextToolVoiceTrackButton.Content = $"音轨 {_voiceTrackSettings.ActiveTrack}";
+            ProjectTextToolVoiceTrackButton.IsEnabled = count > 1;
+            ToolTipService.SetToolTip(
+                ProjectTextToolVoiceTrackButton,
+                count > 1
+                    ? $"当前音轨 {_voiceTrackSettings.ActiveTrack} / 共 {count} 条，点击切换"
+                    : "只有一条音轨；到「语音设置」里调整音轨数");
+        }
+
+        /// <summary>
+        /// 按当前筛选范围过滤语音行。
+        ///
+        /// 「超差 / 未检查」依赖响度数据，只对**已设置语音**的行有意义 ——
+        /// 没语音的行放进来只会是一片横线，徒增噪音。
+        /// </summary>
+        private List<ProjectTextRow> ApplyVoiceRowFilter(List<ProjectTextRow> rows)
+        {
+            if (_voiceRowFilter == VoiceRowFilter.All)
+            {
+                return rows;
+            }
+
+            return rows.Where(row =>
+            {
+                if (!_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) ||
+                    string.IsNullOrWhiteSpace(voicePath) ||
+                    !File.Exists(voicePath))
+                {
+                    return _voiceRowFilter == VoiceRowFilter.Missing;
+                }
+
+                if (_voiceRowFilter == VoiceRowFilter.Configured)
+                {
+                    return true;
+                }
+
+                var name = Path.GetFileName(voicePath);
+                if (!_chapterVoiceLoudness.TryGetValue(name, out var item) || !item.Measurement.IsUsable)
+                {
+                    return _voiceRowFilter == VoiceRowFilter.Unchecked;
+                }
+
+                return _voiceRowFilter == VoiceRowFilter.OffSpec && item.NeedsFix;
+            }).ToList();
+        }
+
+        private string BuildVoiceRowsSubtitle(int shownCount, int totalCount)
+        {
+            var filterText = _voiceRowFilter switch
+            {
+                VoiceRowFilter.Configured => "只看已设置语音",
+                VoiceRowFilter.Missing => "只看未设置语音",
+                VoiceRowFilter.OffSpec => "只看超差项",
+                VoiceRowFilter.Unchecked => "只看未检查",
+                _ => "全部行"
+            };
+
+            var baseText = $"当前章节：{_selectedTextToolChapter?.Code}，{filterText}，显示 {shownCount} / 共 {totalCount} 行。";
+            return _voiceRowFilter == VoiceRowFilter.All
+                ? baseText + "右侧点击选择语音文件，仅支持 wav。"
+                : baseText;
         }
 
         private async void SwitchProjectTextToolLanguageButton_Click(object sender, RoutedEventArgs e)
@@ -195,9 +391,19 @@ namespace GalExcleTools
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             ProjectTextToolVoiceFilterButton.Visibility = voiceToolVisibility;
+            ProjectTextToolVoiceSettingsButton.Visibility = voiceToolVisibility;
+            ProjectTextToolVoiceTrackButton.Visibility = voiceToolVisibility;
             VoiceLoudnessCheckButton.Visibility = voiceToolVisibility;
             VoiceLoudnessNormalizeButton.Visibility = voiceToolVisibility;
-            ProjectTextToolVoiceFilterButton.Content = _showOnlyConfiguredVoices ? "显示全部" : "仅看已设置";
+
+            // 音轨设置跟着项目走（{项目}/Tools/voice.settings.json）。每次重铺读一遍：
+            // 文件很小，换来的是"改了设置不用重启、也不会和磁盘对不上"。
+            if (_currentProject is not null)
+            {
+                _voiceTrackSettings = _voiceTrackSettingsStore.Read(_currentProject);
+            }
+
+            UpdateVoiceTrackButtonState();
             if (_selectedTextToolChapter is null)
             {
                 ProjectTextToolTitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice ? "文本语音" : "文本本地化";
@@ -209,19 +415,14 @@ namespace GalExcleTools
             var chapterRows = _projectTextRows
                 .Where(row => string.Equals(row.ChapterCode, _selectedTextToolChapter.Code, StringComparison.OrdinalIgnoreCase))
                 .ToList();
-            var rows = _projectTextToolMode == ProjectTextToolMode.Voice && _showOnlyConfiguredVoices
-                ? chapterRows
-                    .Where(row => _projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) &&
-                        !string.IsNullOrWhiteSpace(voicePath))
-                    .ToList()
+            var rows = _projectTextToolMode == ProjectTextToolMode.Voice
+                ? ApplyVoiceRowFilter(chapterRows)
                 : chapterRows;
             ProjectTextToolTitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice
                 ? $"文本语音 {_selectedTextToolChapter.Name}"
                 : $"文本本地化 {_selectedTextToolChapter.Name}";
             ProjectTextToolSubtitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice
-                ? _showOnlyConfiguredVoices
-                    ? $"当前章节：{_selectedTextToolChapter.Code}，已设置语音 {rows.Count} / 全部 {chapterRows.Count} 行。"
-                    : $"当前章节：{_selectedTextToolChapter.Code}，文本 {chapterRows.Count} 行。右侧点击选择语音文件，仅支持 wav。"
+                ? BuildVoiceRowsSubtitle(rows.Count, chapterRows.Count)
                 : $"当前语言：{_selectedLocalizationLanguage}，章节：{_selectedTextToolChapter.Code}，文本 {rows.Count} 行。";
             ProjectTextToolTablePanel.Children.Add(CreateProjectTextTableHeader(
                 _projectTextToolMode == ProjectTextToolMode.Voice ? "语音文件" : _selectedLocalizationLanguage,
