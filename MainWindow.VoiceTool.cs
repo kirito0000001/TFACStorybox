@@ -1686,17 +1686,53 @@ namespace GalExcleTools
         /// 以后接上真的编辑器时用户不用重新找。但点了必须给一句明确的话 ——
         /// 点了没反应的菜单项最容易被当成 bug 报上来。
         /// </summary>
+        /// <summary>
+        /// 外部音频编辑器。**路径写死**：换位置就改这一行（将来要成设置项也很容易）。
+        /// </summary>
+        private const string VoiceAudioEditorPath = @"E:\ARTcraft\SoundCraft\soundcraft.exe";
+
         private void EditProjectVoiceAudio(ProjectTextRow row)
         {
-            var fileName = _projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) &&
-                !string.IsNullOrWhiteSpace(voicePath)
-                ? Path.GetFileName(voicePath)
-                : "这条语音";
+            if (!_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) ||
+                string.IsNullOrWhiteSpace(voicePath) ||
+                !File.Exists(voicePath))
+            {
+                ShowFloatingTip(InfoBarSeverity.Warning, "没有可编辑的语音", "这一行还没有有效的语音文件。");
+                return;
+            }
 
-            ShowFloatingTip(
-                InfoBarSeverity.Informational,
-                "编辑音频（还没做）",
-                $"「{fileName}」的音频编辑入口先放在这里，功能以后再补。");
+            if (!File.Exists(VoiceAudioEditorPath))
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "找不到音频编辑器",
+                    $"路径：{VoiceAudioEditorPath}{Environment.NewLine}"
+                    + "程序挪了位置的话，改 MainWindow.VoiceTool.cs 里的 VoiceAudioEditorPath 常量。");
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = VoiceAudioEditorPath,
+                    // UseShellExecute=true 时不能用 ArgumentList，只能自己拼引号；
+                    // 路径里常有空格，这一层引号不能省。
+                    Arguments = $"\"{voicePath}\"",
+                    UseShellExecute = true
+                });
+
+                AppendLog(LogKind.Info, $"用外部编辑器打开语音：{Path.GetFileName(voicePath)}");
+            }
+            catch (Exception error)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "打开编辑器失败",
+                    VoiceAudioEditorPath,
+                    error,
+                    $"打开外部音频编辑器失败：{Path.GetFileName(voicePath)}");
+            }
         }
 
         /// <summary>
