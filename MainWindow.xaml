@@ -2363,15 +2363,11 @@
             </Border>
         </Grid>
 
-        <StackPanel
-            x:Name="FloatingTipsPanel"
-            Grid.Row="1"
-            MaxWidth="520"
-            Margin="0,18,28,0"
-            HorizontalAlignment="Right"
-            VerticalAlignment="Top"
-            Canvas.ZIndex="330"
-            Spacing="6" />
+        <!--
+            轻提示的宿主不在这里了：改由 Controls/TipToast.cs 在代码里建，
+            挂在 RootGrid 上（顶部居中、圆角、白/黄/红字）。
+            剧情编辑器那个持久条仍然走 StoryFloatingTipsPanel（InfoBar）。
+        -->
 
         <Border
             x:Name="GlobalProgressHost"

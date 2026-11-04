@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using GalExcleTools.Controls;
 using GalExcleTools.Services;
 using GalExcleTools.ViewModels;
 using GalExcleTools.Views;
@@ -435,6 +436,12 @@ namespace GalExcleTools
         public MainWindow()
         {
             InitializeComponent();
+
+            // 顶部居中轻提示的宿主：挂在根 Grid 上，跨所有行（见 Controls/TipToast.cs）。
+            // 必须在任何 ShowFloatingTip 之前 —— 后面的 CheckUpdateOnStartupAsync 之类的
+            // 异步流程随时可能弹第一条。
+            TipToast.Attach(RootGrid);
+
             StorySpeakerTextBox.RegisterPropertyChangedCallback(
                 AutoSuggestBox.IsSuggestionListOpenProperty,
                 StorySpeakerTextBox_SuggestionListOpenChanged);

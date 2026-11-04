@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using GalExcleTools.Controls;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -29,7 +30,12 @@ namespace GalExcleTools
                 return;
             }
 
-            ShowFloatingTip(FloatingTipsPanel, severity, title, message, exception, logMessage);
+            var normalizedSeverity = RecordFloatingTip(severity, title, message, exception, logMessage);
+
+            // 顶部居中的轻提示（见 Controls/TipToast.cs）。
+            // 原来是右上角堆 InfoBar —— 2026-11-04 按用户要求换成「居中、圆角、白/黄/红字」。
+            // 这里是**唯一**的出口：114 个调用点用的都是这个签名，换实现不用动它们。
+            TipToast.Show(ToTipToastSeverity(normalizedSeverity), title, message);
         }
 
         private void ShowFloatingTip(
@@ -40,17 +46,9 @@ namespace GalExcleTools
             Exception? exception = null,
             string? logMessage = null)
         {
-            var normalizedSeverity = NormalizeFloatingTipSeverity(severity);
-            var effectiveLogMessage = string.IsNullOrWhiteSpace(logMessage)
-                ? string.IsNullOrWhiteSpace(message) ? title : $"{title}：{message}"
-                : logMessage;
-            AppendLog(GetFloatingTipLogKind(normalizedSeverity), effectiveLogMessage, exception);
-
-            if (normalizedSeverity == InfoBarSeverity.Error)
-            {
-                CopyErrorLogToClipboard(effectiveLogMessage, exception);
-            }
-
+            // 剧情编辑器那条**持久提示**仍然走 InfoBar：它要一直挂着、要能被 Trim 认出来，
+            // 和"几秒就消失"的轻提示不是一类东西，所以没有跟着换。
+            var normalizedSeverity = RecordFloatingTip(severity, title, message, exception, logMessage);
             var tip = CreateFloatingTipBar(normalizedSeverity, title, message);
             TrimFloatingTipsBeforeAdd(panel);
             AddFloatingTipWithEntrance(panel, tip);
@@ -71,6 +69,41 @@ namespace GalExcleTools
                 InfoBarSeverity.Error => InfoBarSeverity.Error,
                 _ => InfoBarSeverity.Success
             };
+        }
+
+        /// <summary>InfoBar 的档位 → TipToast 的档位。一一对应；TipToast 不引用 WinUI 控件类型，方便单独搬走。</summary>
+        private static TipToastSeverity ToTipToastSeverity(InfoBarSeverity severity) => severity switch
+        {
+            InfoBarSeverity.Warning => TipToastSeverity.Warning,
+            InfoBarSeverity.Error => TipToastSeverity.Error,
+            InfoBarSeverity.Success => TipToastSeverity.Success,
+            _ => TipToastSeverity.Info
+        };
+
+        /// <summary>
+        /// 记日志 + 报错时复制到剪贴板。轻提示与持久提示两条路共用 ——
+        /// 免得换了样式之后"日志却没记"，那种缺口只有出事时才会发现。
+        /// </summary>
+        private InfoBarSeverity RecordFloatingTip(
+            InfoBarSeverity severity,
+            string title,
+            string message,
+            Exception? exception,
+            string? logMessage)
+        {
+            var normalizedSeverity = NormalizeFloatingTipSeverity(severity);
+            var effectiveLogMessage = string.IsNullOrWhiteSpace(logMessage)
+                ? string.IsNullOrWhiteSpace(message) ? title : $"{title}：{message}"
+                : logMessage;
+
+            AppendLog(GetFloatingTipLogKind(normalizedSeverity), effectiveLogMessage, exception);
+
+            if (normalizedSeverity == InfoBarSeverity.Error)
+            {
+                CopyErrorLogToClipboard(effectiveLogMessage, exception);
+            }
+
+            return normalizedSeverity;
         }
 
         private static TimeSpan GetFloatingTipDuration(InfoBarSeverity severity)
