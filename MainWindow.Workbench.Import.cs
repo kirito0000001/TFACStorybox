@@ -80,7 +80,13 @@ namespace GalExcleTools
                     return;
                 }
 
-                EnsureProjectRootDirectory(_projectRootPath);
+                // 目录不可用就别往下走：EnsureProjectRootDirectory 已经提示过原因，
+                // 继续跑只会在后面几层报一串更难懂的错。
+                if (!EnsureProjectRootDirectory(_projectRootPath))
+                {
+                    return;
+                }
+
                 var importedProjects = new List<ProjectInfo>();
                 ShowGlobalProgress("导入项目包", $"0 / {archivePaths.Count}");
                 for (var index = 0; index < archivePaths.Count; index++)
@@ -177,7 +183,12 @@ namespace GalExcleTools
                     return;
                 }
 
-                EnsureProjectRootDirectory(_projectRootPath);
+                // 同上：根目录没准备好之前不导入素材库，否则失败原因会绕得很。
+                if (!EnsureProjectRootDirectory(_projectRootPath))
+                {
+                    return;
+                }
+
                 var importedLibraries = new List<AssetLibraryInfo>();
                 ShowGlobalProgress("导入素材库包", $"0 / {archivePaths.Count}");
                 for (var index = 0; index < archivePaths.Count; index++)

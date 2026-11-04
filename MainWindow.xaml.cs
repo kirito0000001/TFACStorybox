@@ -600,9 +600,21 @@ namespace GalExcleTools
             UpdateAuxiliaryDisplayVisibility();
             ApplyUnrealSyncSettingsToUi();
             ApplyStoryTextFontSizeToUi();
-            EnsureProjectRootDirectory(Settings.ProjectRootPath);
-            AppendLog(LogKind.Info, "程序启动，已检查整体项目目录。");
+            var projectRootAvailable = EnsureProjectRootDirectory(Settings.ProjectRootPath);
+            if (projectRootAvailable)
+            {
+                AppendLog(LogKind.Info, "程序启动，已检查整体项目目录。");
+            }
+
             ShowWorkbenchPage();
+
+            // 目录不可用：直接把人送到能改路径的那一页。
+            // 停在空工作台上只会让人以为「项目都没了」，还得自己找设置入口。
+            if (!projectRootAvailable)
+            {
+                ShowSettingsPage();
+            }
+
             _ = CheckUpdateOnStartupAsync();
         }
 
@@ -758,12 +770,52 @@ namespace GalExcleTools
             }
         }
 
-        private void EnsureProjectRootDirectory(string projectRootPath)
+        /// <summary>
+        /// 确认整体项目目录可用，并载入项目卡片。
+        ///
+        /// ⚠️ **这个方法绝不能抛**：它跑在构造函数里，抛出去就是「程序启动即退出」。
+        /// 2026-11-04 实测：项目根目录在 G 盘，盘没挂载 → `Directory.CreateDirectory`
+        /// 抛 DirectoryNotFoundException → 用户连「去设置里改路径」的机会都没有，
+        /// 只能看着程序闪退（而那时候他还不知道是盘没插）。
+        ///
+        /// 目录不可用是**可预期的环境问题**（移动硬盘没插、盘符变了、目录被删、没写权限），
+        /// 处理办法是提示 + 停在能改设置的地方，不是把程序打死。
+        /// </summary>
+        /// <returns>目录可用且载入成功返回 true；否则 false（调用方据此决定要不要跳设置页）。</returns>
+        private bool EnsureProjectRootDirectory(string projectRootPath)
         {
-            Settings.EnsureCurrentProjectRoot();
+            try
+            {
+                Settings.EnsureCurrentProjectRoot();
+                LoadAllCards();
+                AppendLog(LogKind.Info, $"已确认整体项目目录：{Settings.ProjectRootPath}");
+                return true;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException
+                or NotSupportedException or ArgumentException)
+            {
+                var path = string.IsNullOrWhiteSpace(projectRootPath) ? Settings.ProjectRootPath : projectRootPath;
 
-            LoadAllCards();
-            AppendLog(LogKind.Info, $"已确认整体项目目录：{Settings.ProjectRootPath}");
+                AppendLog(
+                    LogKind.Error,
+                    $"整体项目目录不可用：{path}\n"
+                    + "程序会以「未载入项目」的状态继续运行，请到「整体设置」里重新指定根目录。\n"
+                    + "常见原因：移动硬盘没插、盘符变了、目录被删、没有写权限。",
+                    error);
+
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "整体项目目录不可用",
+                    $"{path} 不存在或无法创建。已跳过项目载入，请到「整体设置」里重新指定。");
+
+                // 设置页那条状态也一起置红：用户被送过去之后，得一眼看见是哪里不对。
+                Settings.SetProjectRootStatus(
+                    InfoBarSeverity.Error,
+                    "目录不可用",
+                    $"{path} 不存在或无法创建（磁盘没连？路径变了？）。请在下面重新指定整体项目目录。");
+
+                return false;
+            }
         }
 
         private void RequestDelayedRefresh(bool includeBackgroundImages = false)
