@@ -318,8 +318,10 @@ namespace GalExcleTools
             Brush? peakBrush = null,
             Brush? rangeBrush = null)
         {
-            // 「没问题」统一用淡色（跟原来两个数字一样），不再给绿色：
-            // 整列绿油油反而看不出重点，有问题的才染色（2026-11-04 用户要求）。
+            // 三列各有各的职责：
+            // · 积分响度 —— 唯一的"绿灯"，绿=量过且合格（一列绿能看出规整到哪了）；
+            // · 真峰值 / LRA —— 平时保持淡色，只在贴近上限(黄)或超标(红)时才染色。
+            //   它们不给绿，否则三列全绿会稀释红色的分量。
             var idleBrush = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush;
 
             cell.DurationText.Text = duration;
@@ -343,8 +345,10 @@ namespace GalExcleTools
 
             if (item.LoudnessVerdict != VoiceLoudnessVerdict.Off)
             {
-                // 达标不染色（以前给的是绿色，见 SetVoiceDbText 的注释）。
-                return null;
+                // **只有这一列给绿**：一列绿 = "这些是量过且合格的"。
+                // 另外两个数字不给绿，否则三列全绿，红色就淹没在绿色里了
+                // （2026-11-04 用户明确：三个数值只有一个染绿）。
+                return Application.Current.Resources["SystemFillColorSuccessBrush"] as Brush;
             }
 
             // 超出容差之后才分方向：比目标响 = 红（容易在混音里盖住别人），
@@ -354,24 +358,39 @@ namespace GalExcleTools
                 : Application.Current.Resources["SystemFillColorCautionBrush"] as Brush;
         }
 
-        /// <summary>真峰值超标才红；没超标保持淡色。峰值超标最容易在混音里削波，所以用红不用黄。</summary>
-        private static Brush? BrushForDbPeak(VoiceComplianceItem item) =>
-            item.PeakVerdict == VoicePeakVerdict.Over
-                ? Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush
-                : null;
-
         /// <summary>
-        /// 响度范围（LRA）的上限。超过就标红。
-        ///
-        /// 10 LU 是对话素材的常见上限：再大意味着这一句里忽大忽小，
-        /// 进游戏后玩家得反复调音量。要改就改这一个常量。
+        /// 真峰值：超标=红；贴着上限（还在容差带里）＝黄；其余不染色。
+        /// 峰值最容易在混音里削波，所以超标用红不用黄。
         /// </summary>
+        private static Brush? BrushForDbPeak(VoiceComplianceItem item)
+        {
+            if (item.PeakVerdict == VoicePeakVerdict.Over)
+            {
+                return Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush;
+            }
+
+            // 还没超，但余量只剩量化带那么点 —— 提醒一下，别等下次重导出才炸。
+            return item.PeakHeadroomDb <= VoicePeakTolerance.QuantizationDb
+                ? Application.Current.Resources["SystemFillColorCautionBrush"] as Brush
+                : null;
+        }
+
+        /// <summary>响度范围（LRA）：超过上限=红，接近上限=黄，其余不染色。</summary>
         private const double MaxLoudnessRangeLu = 10d;
 
-        private static Brush? BrushForDbRange(VoiceComplianceItem item) =>
-            item.Measurement.LoudnessRangeLu > MaxLoudnessRangeLu
-                ? Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush
+        private const double WarnLoudnessRangeLu = 8d;
+
+        private static Brush? BrushForDbRange(VoiceComplianceItem item)
+        {
+            if (item.Measurement.LoudnessRangeLu > MaxLoudnessRangeLu)
+            {
+                return Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush;
+            }
+
+            return item.Measurement.LoudnessRangeLu > WarnLoudnessRangeLu
+                ? Application.Current.Resources["SystemFillColorCautionBrush"] as Brush
                 : null;
+        }
 
         private void UpdateVoiceDbCells()
         {
