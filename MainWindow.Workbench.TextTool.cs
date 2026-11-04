@@ -266,15 +266,15 @@ namespace GalExcleTools
 
         private Dictionary<string, CharacterInfo> _speakerDirectory = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>纯标点的说话人（`?`、`？？？`、`? ? ?`）在数据里都是"不知道谁说的"，合并成一条。</summary>
-        private const string UnknownSpeakerKey = "?";
-
         /// <summary>
         /// 说话人的**归一化键**：NFKC 归一（全角 → 半角）+ 去首尾空白 + 折叠内部空白。
         ///
-        /// 必须归一的原因：同一章里同时存在 `？`(U+FF1F)、`?`(U+003F)、`? ? ?` 三种写法，
-        /// 不归一的话列表里会出现两三个长得一模一样的"？"，谁也分不清哪个是哪个
-        /// （2026-11-04 用户截图指出）。
+        /// 归一的目的只有一个：**同一种写法的不同形式要合并**。
+        /// 同一章里同时存在 `？`(U+FF1F) 和 `?`(U+003F)，不归一列表里会出现两个
+        /// 长得一模一样的「？」，谁也分不清（2026-11-04 用户截图指出）。
+        ///
+        /// ⚠️ 但 `?` 和 `???` 是**两个不同的角色**（用户明确说过），
+        /// 所以只归一化，**不做"纯标点合并"** —— 那会把人家两个角色并成一个。
         /// </summary>
         private static string ToSpeakerKey(string? raw)
         {
@@ -285,22 +285,12 @@ namespace GalExcleTools
             }
 
             text = text.Normalize(NormalizationForm.FormKC);
-            text = Regex.Replace(text, @"\s+", " ").Trim();
-            return IsPlaceholderSpeaker(text) ? UnknownSpeakerKey : text;
+            return Regex.Replace(text, @"\s+", " ").Trim();
         }
 
-        /// <summary>没有字母/数字/汉字 → 当占位符（问号、省略号、感叹号…），不是真角色。</summary>
-        private static bool IsPlaceholderSpeaker(string key) =>
-            key.Length > 0 && key.All(character => !char.IsLetterOrDigit(character));
-
-        /// <summary>列表里显示的名字：占位符统一叫「未知说话人」，角色显示中文名，其余原样。</summary>
+        /// <summary>列表里显示的名字：能对上角色就显示中文名，其余原样（`?`、`???`、`梦凪`…）。</summary>
         private string DisplaySpeaker(string key)
         {
-            if (string.Equals(key, UnknownSpeakerKey, StringComparison.Ordinal))
-            {
-                return "未知说话人（?）";
-            }
-
             return _speakerDirectory.TryGetValue(key, out var character) ? character.Name : key;
         }
 
