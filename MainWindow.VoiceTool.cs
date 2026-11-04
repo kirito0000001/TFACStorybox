@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using GalExcleTools.Services;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -77,6 +78,16 @@ namespace GalExcleTools
 
         /// <summary>当前是否处于"暂停但可继续"的状态（区别于换了一条重播）。</summary>
         private bool _voicePreviewPaused;
+
+        /// <summary>
+        /// 进度条的刷新节拍（约 30fps）。
+        ///
+        /// 【为什么不用 PositionChanged】那个事件触发得很稀（实测几百毫秒一次），
+        /// 拿它直接改 ScaleX，绿条就是一段一段跳的 —— 用户 2026-11-04 反馈"卡卡的"。
+        /// 自己起一个 33ms 的定时器读 PlaybackSession.Position，位移才是连续的。
+        /// 只在播放期间跑，暂停/结束立刻停表，不占空转。
+        /// </summary>
+        private DispatcherQueueTimer? _voiceProgressTimer;
 
         /// <summary>
         /// 「正在跑一批语音」的互斥标记。全局进度条不是模态的，
@@ -1360,6 +1371,27 @@ namespace GalExcleTools
         /// 用缩放而不是改 Width：不必等布局算出行宽，也不会每 100ms 触发一次布局 ——
         /// 一屏几百行时，后者会把滚动搞卡。
         /// </summary>
+        private void StartVoiceProgressTimer()
+        {
+            _voiceProgressTimer ??= CreateVoiceProgressTimer();
+            _voiceProgressTimer.Stop();
+            _voiceProgressTimer.Start();
+        }
+
+        private void StopVoiceProgressTimer()
+        {
+            _voiceProgressTimer?.Stop();
+        }
+
+        private DispatcherQueueTimer CreateVoiceProgressTimer()
+        {
+            var timer = DispatcherQueue.CreateTimer();
+            timer.Interval = TimeSpan.FromMilliseconds(33);
+            timer.IsRepeating = true;
+            timer.Tick += (_, _) => UpdateVoicePlaybackProgress();
+            return timer;
+        }
+
         private void UpdateVoicePlaybackProgress()
         {
             if (_voicePlayingRowId is null ||
@@ -1390,6 +1422,7 @@ namespace GalExcleTools
 
             _voicePlayingRowId = null;
             _voicePreviewPaused = false;
+            StopVoiceProgressTimer();
         }
 
         /// <summary>
@@ -1411,6 +1444,7 @@ namespace GalExcleTools
 
             SetVoicePreviewButtonGlyph(_voicePlayingRowId, isPlaying: false);
             _voicePreviewPaused = false;
+            StopVoiceProgressTimer();
         }
 
         private void ShowVoiceProgressBar(string rowId)

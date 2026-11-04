@@ -1247,6 +1247,7 @@ namespace GalExcleTools
             if (isSameRow && state == MediaPlaybackState.Playing)
             {
                 _projectVoicePreviewPlayer.Pause();
+                StopVoiceProgressTimer();
                 _voicePreviewPaused = true;
                 SetVoicePreviewButtonGlyph(row.Id, isPlaying: false);
                 return;
@@ -1255,6 +1256,7 @@ namespace GalExcleTools
             if (isSameRow && _voicePreviewPaused && state == MediaPlaybackState.Paused)
             {
                 _projectVoicePreviewPlayer.Play();
+                StartVoiceProgressTimer();
                 _voicePreviewPaused = false;
                 SetVoicePreviewButtonGlyph(row.Id, isPlaying: true);
                 return;
@@ -1268,6 +1270,7 @@ namespace GalExcleTools
                 var file = await StorageFile.GetFileFromPathAsync(voicePath);
                 _projectVoicePreviewPlayer.Source = MediaSource.CreateFromStorageFile(file);
                 _projectVoicePreviewPlayer.Play();
+                StartVoiceProgressTimer();
 
                 _voicePlayingRowId = row.Id;
                 _voicePreviewPaused = false;
