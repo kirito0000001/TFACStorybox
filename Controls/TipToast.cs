@@ -46,7 +46,11 @@ internal static class TipToast
     /// <summary>屏幕上同时最多几条。超出时挤掉最旧的那条（报错优先保留，见 <see cref="Trim"/>）。</summary>
     private const int MaxVisible = 2;
 
-    private const double TopMargin = 18;
+    /// <summary>
+    /// 距窗口顶端的距离。参考 AX 工具箱那个提示：上沿大约落在顶端往下 30px，
+    /// 也就是**贴着标题栏下沿**，而不是躲进内容区里。
+    /// </summary>
+    private const double TopMargin = 28;
     private const double CornerRadiusValue = 8;
 
     private static readonly List<ToastEntry> Live = new();
@@ -75,12 +79,16 @@ internal static class TipToast
             IsHitTestVisible = false
         };
 
-        // 根 Grid 往往分了行（0 = 标题栏，1 = 内容）。**必须挂到内容那一行**：
-        // 挂第 0 行的话提示会压在标题栏上，看着像"贴在天花板上"（2026-11-04 实测）。
+        // ⚠️ 从**第 0 行**开始跨行，配上面那个 28px 边距 —— 让提示贴住标题栏下沿。
+        //
+        // 2026-11-04 试过挂第 1 行（内容区），结果整体低了 48px（标题栏高度），
+        // 用户一眼看出"太下方"：AX 那个 TeachingTip 是没有 Target 的，
+        // 它相对**窗口**定位，不认同内容区的排版。
+        // 这里同理：`IsHitTestVisible=false`，压在标题栏上也不会挡住拖动和按钮。
         if (layer is Grid grid && grid.RowDefinitions.Count > 1)
         {
-            Grid.SetRow(host, 1);
-            Grid.SetRowSpan(host, grid.RowDefinitions.Count - 1);
+            Grid.SetRow(host, 0);
+            Grid.SetRowSpan(host, grid.RowDefinitions.Count);
         }
 
         // UWP/WinUI 里 Canvas.ZIndex 对任意 Panel 的子元素都生效，不限于 Canvas。
