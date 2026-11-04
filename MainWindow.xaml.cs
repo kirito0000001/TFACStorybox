@@ -595,7 +595,9 @@ namespace GalExcleTools
             _projectVoicePreviewPlayer.MediaEnded += (_, _) =>
                 DispatcherQueue.TryEnqueue(CompleteVoicePreview);
             // 进度不挂 PositionChanged：它触发稀疏，绿条会一段一段跳。
-            // 改由 _voiceProgressTimer（33ms）驱动，见 MainWindow.VoiceTool.cs。
+            // 改由 _voiceProgressTimer 驱动；「真正出声了没有」靠状态变化判断。
+            _projectVoicePreviewPlayer.PlaybackSession.PlaybackStateChanged += (_, _) =>
+                DispatcherQueue.TryEnqueue(HandleVoicePlaybackStateChanged);
             RegisterAssetLibraryExpanderLazyLoading();
             RegisterCharacterDetailExpanderLazyLoading();
             // 参考层（F1/F2）：加速器挂在 RootGrid 上，所以任何页面都按得动。

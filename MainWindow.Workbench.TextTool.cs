@@ -1259,6 +1259,8 @@ namespace GalExcleTools
 
             if (isSameRow && _voicePreviewPaused && state == MediaPlaybackState.Paused)
             {
+                // 续播不用再等缓冲，直接接着走。
+                _voiceAwaitingPlayback = false;
                 _projectVoicePreviewPlayer.Play();
                 StartVoiceProgressTimer();
                 _voicePreviewPaused = false;
@@ -1274,7 +1276,10 @@ namespace GalExcleTools
                 var file = await StorageFile.GetFileFromPathAsync(voicePath);
                 _projectVoicePreviewPlayer.Source = MediaSource.CreateFromStorageFile(file);
                 _projectVoicePreviewPlayer.Play();
-                StartVoiceProgressTimer();
+
+                // 别急着推进度：声音要解码缓冲，这段时间绿条不该动
+                // （白条那 220ms 入场动画正好当加载指示）。
+                AwaitVoicePlaybackStart();
 
                 _voicePlayingRowId = row.Id;
                 _voicePreviewPaused = false;

@@ -13,6 +13,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 // PickerLocationId 在这个命名空间里。本项目其它 partial 都是逐个文件自己 using，
 // 没有 global using —— 漏了就是 CS0103（2026-11-02 编译时就是这么撞的）。
+using Windows.Media.Playback;
 using Windows.Storage.Pickers;
 
 namespace GalExcleTools
@@ -88,6 +89,18 @@ namespace GalExcleTools
         /// 只在播放期间跑，暂停/结束立刻停表，不占空转。
         /// </summary>
         private DispatcherQueueTimer? _voiceProgressTimer;
+
+        /// <summary>
+        /// 已经点了播放、但声音还没真正出来（在解码/缓冲）。
+        ///
+        /// 这段空档如果让绿条照常走，用户听到声音时进度已经跑到前面去了
+        /// （2026-11-04 反馈）。所以绿条要等 PlaybackState 真的到 Playing、
+        /// 缓冲满 100% 才开始动 —— 白条自己的 220ms 入场动画正好当作加载指示。
+        /// </summary>
+        private bool _voiceAwaitingPlayback;
+
+        /// <summary>等待起播的兜底：万一状态回调没来，最多等这么久也开始推进。</summary>
+        private DispatcherQueueTimer? _voiceStartWatchdog;
 
         /// <summary>
         /// 「正在跑一批语音」的互斥标记。全局进度条不是模态的，
@@ -1359,18 +1372,62 @@ namespace GalExcleTools
             return root;
         }
 
-        /// <summary>
-        /// 把「刚才播过」的标记移到这一行：撤掉上一条，点亮当前这条。
-        ///
-        /// 只保留一条 —— 每条播过的都留着线，满屏都是绿的，等于没标。
-        /// 页面重铺时标记全部重建（见 <see cref="ResetVoiceLoudnessColumnState"/>），自然清空。
-        /// </summary>
-        /// <summary>
-        /// 按播放进度更新当前行的绿条（ScaleX = 已播 / 总长）。
-        ///
-        /// 用缩放而不是改 Width：不必等布局算出行宽，也不会每 100ms 触发一次布局 ——
-        /// 一屏几百行时，后者会把滚动搞卡。
-        /// </summary>
+        /// <summary>播放状态变了：确认真的出声了，才让绿条开始走。</summary>
+        private void HandleVoicePlaybackStateChanged()
+        {
+            if (!_voiceAwaitingPlayback)
+            {
+                return;
+            }
+
+            var session = _projectVoicePreviewPlayer.PlaybackSession;
+            if (session.PlaybackState != MediaPlaybackState.Playing || session.BufferingProgress < 1d)
+            {
+                return;
+            }
+
+            BeginVoiceProgress();
+        }
+
+        /// <summary>结束"等起播"，把绿条对齐到真实位置后开始推进。</summary>
+        private void BeginVoiceProgress()
+        {
+            _voiceAwaitingPlayback = false;
+            _voiceStartWatchdog?.Stop();
+
+            // 先对齐一次：缓冲期间 Position 可能已经挪了一点，直接让绿条跳到位，
+            // 而不是从 0 慢慢追（那样又会"看着比声音快"）。
+            UpdateVoicePlaybackProgress();
+            StartVoiceProgressTimer();
+        }
+
+        /// <summary>点下播放后开始等：状态回调没来也不能让绿条永远不走。</summary>
+        private void AwaitVoicePlaybackStart()
+        {
+            _voiceAwaitingPlayback = true;
+            StopVoiceProgressTimer();
+
+            _voiceStartWatchdog ??= CreateVoiceStartWatchdog();
+            _voiceStartWatchdog.Stop();
+            _voiceStartWatchdog.Start();
+        }
+
+        private DispatcherQueueTimer CreateVoiceStartWatchdog()
+        {
+            var timer = DispatcherQueue.CreateTimer();
+            timer.Interval = TimeSpan.FromSeconds(2);
+            timer.IsRepeating = false;
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                if (_voiceAwaitingPlayback)
+                {
+                    BeginVoiceProgress();
+                }
+            };
+            return timer;
+        }
+
         private void StartVoiceProgressTimer()
         {
             _voiceProgressTimer ??= CreateVoiceProgressTimer();
@@ -1392,6 +1449,12 @@ namespace GalExcleTools
             return timer;
         }
 
+        /// <summary>
+        /// 按播放进度更新当前行的绿条（ScaleX = 已播 / 总长）。
+        ///
+        /// 用缩放而不是改 Width：不必等布局算出行宽，也不会每帧触发一次布局 ——
+        /// 一屏几百行时，后者会把滚动搞卡。
+        /// </summary>
         private void UpdateVoicePlaybackProgress()
         {
             if (_voicePlayingRowId is null ||
@@ -1422,6 +1485,8 @@ namespace GalExcleTools
 
             _voicePlayingRowId = null;
             _voicePreviewPaused = false;
+            _voiceAwaitingPlayback = false;
+            _voiceStartWatchdog?.Stop();
             StopVoiceProgressTimer();
         }
 
@@ -1444,6 +1509,8 @@ namespace GalExcleTools
 
             SetVoicePreviewButtonGlyph(_voicePlayingRowId, isPlaying: false);
             _voicePreviewPaused = false;
+            _voiceAwaitingPlayback = false;
+            _voiceStartWatchdog?.Stop();
             StopVoiceProgressTimer();
         }
 
