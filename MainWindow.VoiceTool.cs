@@ -74,6 +74,13 @@ namespace GalExcleTools
         private bool _isVoiceLoudnessBusy;
 
         /// <summary>
+        /// 本次运行里"压过一轮仍没达标"的文件名。规整按钮与目标筛选都会跳过它们，
+        /// 避免点了又点、每次都做同一件无效的事。重启进程即清空（重新给一次机会）。
+        /// </summary>
+        private readonly HashSet<string> _voiceNormalizeBlocked =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
         /// 一行语音的「时长 + DB」两格控件。存控件而不是字符串，是为了测量回来能就地回填。
         /// 没设语音的行不登记（只造两个占位横线），所以登记进来的这三个 TextBlock 一定非空。
         /// </summary>
@@ -415,11 +422,11 @@ namespace GalExcleTools
                 return;
             }
 
-            // 「能修的」才点亮：测不出的、被峰值天花板卡住的都排除。
-            // 后者再跑一万遍也到不了目标（只能重做素材），让按钮为它们常亮，
-            // 结果就是每次点都重跑同一条、什么也没变（2026-11-04 实测）。
-            var needsFix = _chapterVoiceLoudness.Values.Any(item =>
-                item.Measurement.IsUsable && item.NeedsFix && !item.IsPeakLimited);
+            // 「真能试的」才点亮：测不出的、这一轮已压过仍不达标（blocked）的都排除。
+            var needsFix = _chapterVoiceLoudness.Any(pair =>
+                pair.Value.Measurement.IsUsable &&
+                pair.Value.NeedsFix &&
+                !_voiceNormalizeBlocked.Contains(pair.Key));
             VoiceLoudnessNormalizeButton.IsEnabled = needsFix;
         }
 
@@ -1055,31 +1062,37 @@ namespace GalExcleTools
             //   · 没测过的（DB 显示横线）不能瞎改 —— 不知道原来是多少，改完也没法证明变好了。
             //   判定沿用与 DB 列同一把尺子（NeedsFix = 响度出容差 或 峰值超标）。
             var targets = new List<string>();
+            var compressTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var skippedCompliant = 0;
             var skippedUnmeasured = 0;
-            var skippedPeakLimited = 0;
+            var skippedBlocked = 0;
             foreach (var file in allFiles)
             {
-                if (_chapterVoiceLoudness.TryGetValue(Path.GetFileName(file), out var item) &&
+                var fileName = Path.GetFileName(file);
+                if (_chapterVoiceLoudness.TryGetValue(fileName, out var item) &&
                     item.Measurement.IsUsable)
                 {
-                    if (item.NeedsFix && item.IsPeakLimited)
-                    {
-                        // 被峰值天花板卡住的，**再跑多少遍也到不了目标**：
-                        // 想拉到 −12 就得整体加 2.5 dB，峰值必然冲破 −3，只能被压回来。
-                        //
-                        // 这种人只能重做素材（压峰均比）。把它留在目标里会造成两个后果：
-                        // 按钮永远亮着、每次点都重跑同一条且毫无变化
-                        // ——2026-11-04 用户实测就是这个循环。
-                        skippedPeakLimited++;
-                    }
-                    else if (item.NeedsFix)
-                    {
-                        targets.Add(file);
-                    }
-                    else
+                    if (!item.NeedsFix)
                     {
                         skippedCompliant++;
+                        continue;
+                    }
+
+                    // 上一轮已经"压缩 + 归一"过仍是超差的：本次运行不再重试。
+                    // 没有这条，按钮会一直亮、每点一次都重跑同一件无效的事
+                    // （2026-11-04 实测的那个循环，只是换了触发条件）。
+                    if (_voiceNormalizeBlocked.Contains(fileName))
+                    {
+                        skippedBlocked++;
+                        continue;
+                    }
+
+                    targets.Add(file);
+
+                    // 被峰值卡住的：只套增益必然撞回上限，先压动态才有机会到目标。
+                    if (item.IsPeakLimited)
+                    {
+                        compressTargets.Add(file);
                     }
                 }
                 else
@@ -1092,12 +1105,12 @@ namespace GalExcleTools
             if (targets.Count == 0)
             {
                 ShowFloatingTip(
-                    skippedPeakLimited > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
-                    skippedPeakLimited > 0 ? "没有可规整的语音（剩下的被峰值卡住）" : "没有需要规整的语音",
+                    skippedBlocked > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                    skippedBlocked > 0 ? "没有可再规整的语音" : "没有需要规整的语音",
                     $"{allFiles.Count} 条里没有可规整的超差项（达标 {skippedCompliant} 条"
                     + (skippedUnmeasured > 0 ? $"，未检查 {skippedUnmeasured} 条" : string.Empty)
-                    + (skippedPeakLimited > 0
-                        ? $"，{skippedPeakLimited} 条受峰值限制 —— 拉到目标会让峰值超标，只能重做素材（压峰均比）"
+                    + (skippedBlocked > 0
+                        ? $"，{skippedBlocked} 条已压过一轮仍到不了目标 —— 需要回 DAW 重做素材"
                         : string.Empty)
                     + "）。先点「检查DB规范」再回来。");
                 return;
@@ -1160,7 +1173,8 @@ namespace GalExcleTools
                     targets,
                     preset,
                     progress,
-                    GetGlobalProgressCancellationToken());
+                    GetGlobalProgressCancellationToken(),
+                    compressTargets);
             }
             catch (OperationCanceledException)
             {
@@ -1194,11 +1208,11 @@ namespace GalExcleTools
                 skipParts.Add($"{skippedUnmeasured} 条未检查");
             }
 
-            if (skippedPeakLimited > 0)
+            if (skippedBlocked > 0)
             {
                 // 必须说清楚：这些行在 DB 列里还是红的，但不是"没处理到"，
-                // 而是"处理了也没用"—— 用户否则会以为工具漏了它们。
-                skipParts.Add($"{skippedPeakLimited} 条受峰值限制（规整解决不了）");
+                // 而是"这一轮已经压过、仍到不了目标"—— 只能回 DAW 重做素材。
+                skipParts.Add($"{skippedBlocked} 条压过一轮仍未达标（需重做素材）");
             }
 
             var skipNote = skipParts.Count == 0
@@ -1207,6 +1221,7 @@ namespace GalExcleTools
 
             var summary = (orphanCount > 0 ? $"清理 {orphanCount} 个多余文件；" : string.Empty)
                 + (renamedCount > 0 ? $"已规范 {renamedCount} 个文件名；" : string.Empty)
+                + (compressTargets.Count > 0 ? $"{compressTargets.Count} 条先压缩再拉响度；" : string.Empty)
                 + $"成功 {result.SuccessCount} / {result.Outcomes.Count} 条"
                 + (result.FailureCount > 0 ? $"，失败 {result.FailureCount} 条" : string.Empty)
                 + skipNote;
@@ -1216,6 +1231,21 @@ namespace GalExcleTools
             // 就地更新 DB 列（规整后实测值），不重铺页面 —— 重铺会把滚动位置打回顶部，
             // 而这正是素材页那份问题清单里反复挨骂的一条。
             ApplyVoiceNormalizeResult(result);
+
+            // 这一轮压完仍超差的，记下来：本次运行不要再把它们选进目标。
+            // 否则就是"点一次做一遍、屏幕上看不出任何变化、按钮还亮着"的死循环 ——
+            // 2026-11-04 用户正是这么撞上的（当时是因为被峰值卡住）。
+            foreach (var outcome in result.Outcomes.Where(item => item.Succeeded))
+            {
+                var name = Path.GetFileName(outcome.SourcePath);
+                if (_chapterVoiceLoudness.TryGetValue(name, out var entry) &&
+                    entry.Measurement.IsUsable &&
+                    entry.NeedsFix)
+                {
+                    _voiceNormalizeBlocked.Add(name);
+                }
+            }
+
             await HideGlobalProgressAfterDelayAsync();
 
             if (result.FailureCount == 0)

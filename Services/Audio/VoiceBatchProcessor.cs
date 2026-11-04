@@ -98,7 +98,8 @@ internal sealed class VoiceBatchProcessor
         IReadOnlyList<string> files,
         VoiceLoudnessPreset preset,
         IProgress<VoiceBatchProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<string>? compressFirstFiles = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ffmpegPath);
         ArgumentNullException.ThrowIfNull(files);
@@ -237,9 +238,13 @@ internal sealed class VoiceBatchProcessor
             }
 
             // ② 落盘到临时件
+            //    compressFirst：被峰值卡住的素材先压动态，否则套多少增益都会撞回上限。
+            var compressFirst = compressFirstFiles is not null &&
+                compressFirstFiles.Contains(filePath, StringComparer.OrdinalIgnoreCase);
+
             var write = await RunFfmpegAsync(
                 ffmpegPath,
-                AudioFfmpegArguments.BuildWritePass(filePath, temporaryPath, preset, before, sampleRate),
+                AudioFfmpegArguments.BuildWritePass(filePath, temporaryPath, preset, before, sampleRate, compressFirst),
                 cancellationToken).ConfigureAwait(false);
 
             if (write.ExitCode != 0)

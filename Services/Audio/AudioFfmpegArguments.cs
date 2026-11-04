@@ -74,7 +74,8 @@ internal static class AudioFfmpegArguments
         string outputPath,
         VoiceLoudnessPreset preset,
         VoiceLoudnessMeasurement? measurement,
-        int sampleRate)
+        int sampleRate,
+        bool compressFirst = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(inputPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
@@ -84,7 +85,9 @@ internal static class AudioFfmpegArguments
         {
             "-y",
             "-i", inputPath,
-            "-af", BuildLoudnormFilter(preset, printJson: false, measurement)
+            "-af", compressFirst
+                ? BuildCompressThenLoudnormFilter(preset)
+                : BuildLoudnormFilter(preset, printJson: false, measurement)
         };
 
         if (sampleRate > 0)
@@ -98,6 +101,38 @@ internal static class AudioFfmpegArguments
         arguments.Add(outputPath);
         return arguments;
     }
+
+    /// <summary>
+    /// 「先压缩再归一」的串联滤镜。
+    ///
+    /// 【什么时候用】被峰值天花板卡住的素材：平均电平很轻、峰值却贴着上限
+    /// （峰均比 &gt; 9 dB 左右）。只套增益必然撞顶，唯一出路是把动态压下来。
+    ///
+    /// 【为什么这时不走两遍法】<c>measured_*</c> 是在**压缩之前**量的，
+    /// 压完电平全变了，再拿旧值套线性增益就是错的。
+    /// 所以这里用单遍动态模式，让 loudnorm 自己边测边调 —— 精度差一档，但结果自洽。
+    /// </summary>
+    private static string BuildCompressThenLoudnormFilter(VoiceLoudnessPreset preset)
+    {
+        return string.Concat(
+            "acompressor=threshold=", FormatNumber(CompressThresholdLinear),
+            ":ratio=", FormatNumber(CompressRatio),
+            ":attack=", FormatNumber(CompressAttackMs),
+            ":release=", FormatNumber(CompressReleaseMs),
+            ",loudnorm=I=", FormatNumber(preset.TargetLufs),
+            ":TP=", FormatNumber(preset.PeakCeilingDbtp),
+            ":LRA=", FormatNumber(TargetLra));
+    }
+
+    // 压缩参数：对话素材的保守档。threshold 低到只压"过响的那几下"，
+    // ratio 2.5 不会听出抽吸感，attack 8ms 保住字头，release 100ms 让句子之间的呼吸不被拽。
+    //
+    // ⚠️ ffmpeg 的 acompressor.threshold 是**线性幅度**（0.000976563–1），
+    // 不是 dB。0.125 ≈ −18 dBFS —— 写成 "-18dB" 会直接报参数错误。
+    private const double CompressThresholdLinear = 0.125d;
+    private const double CompressRatio = 2.5d;
+    private const double CompressAttackMs = 8d;
+    private const double CompressReleaseMs = 100d;
 
     private static string BuildLoudnormFilter(
         VoiceLoudnessPreset preset,
