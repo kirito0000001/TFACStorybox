@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Windows.Foundation;
 using Windows.UI;
 
 namespace GalExcleTools.Controls;
@@ -74,11 +75,12 @@ internal static class TipToast
             IsHitTestVisible = false
         };
 
-        // 根 Grid 往往分了行（标题栏 + 内容），不跨行的话提示会被塞进标题栏那一行。
+        // 根 Grid 往往分了行（0 = 标题栏，1 = 内容）。**必须挂到内容那一行**：
+        // 挂第 0 行的话提示会压在标题栏上，看着像"贴在天花板上"（2026-11-04 实测）。
         if (layer is Grid grid && grid.RowDefinitions.Count > 1)
         {
-            Grid.SetRow(host, 0);
-            Grid.SetRowSpan(host, grid.RowDefinitions.Count);
+            Grid.SetRow(host, 1);
+            Grid.SetRowSpan(host, grid.RowDefinitions.Count - 1);
         }
 
         // UWP/WinUI 里 Canvas.ZIndex 对任意 Panel 的子元素都生效，不限于 Canvas。
@@ -182,7 +184,7 @@ internal static class TipToast
         TipToastSeverity severity,
         string title,
         string? message,
-        out TranslateTransform transform)
+        out ScaleTransform transform)
     {
         var titleColor = severity switch
         {
@@ -214,7 +216,10 @@ internal static class TipToast
             });
         }
 
-        transform = new TranslateTransform { Y = -10 };
+        // 入场**只有淡入 + 极轻微放大**，没有位移 —— 照 WinUI TeachingTip 的默认观感
+        // （AX 工具箱那个提示就是 TeachingTip）。原先自己加的"从上滑下来"是多余的，
+        // 2026-11-04 用户点名去掉了。
+        transform = new ScaleTransform { ScaleX = 0.94, ScaleY = 0.94 };
         var border = new Border
         {
             Child = content,
@@ -224,6 +229,8 @@ internal static class TipToast
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1),
             Opacity = 0,
+            // 从正上方那一点放大，看起来像"从顶上浮现"，而不是从中心胀开。
+            RenderTransformOrigin = new Point(0.5, 0),
             RenderTransform = transform,
             Tag = severity == TipToastSeverity.Error ? "error" : null
         };
@@ -231,27 +238,32 @@ internal static class TipToast
         return border;
     }
 
-    private static void Play(TranslateTransform transform, Border root)
+    private static void Play(ScaleTransform transform, Border root)
     {
         // 先把不透明度落到 1 再起动画：动画里 From=0 会盖住它。
         // 万一 Storyboard 因故没跑起来（目标不在树里等），提示至少"看得见"，
         // 而不是留一个 Opacity=0 的隐形块在那 —— 那种 bug 排查起来最费劲。
         root.Opacity = 1;
 
-        var duration = new Duration(TimeSpan.FromMilliseconds(170));
+        var duration = new Duration(TimeSpan.FromMilliseconds(200));
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
 
         var fade = new DoubleAnimation { From = 0, To = 1, Duration = duration, EasingFunction = ease };
         Storyboard.SetTarget(fade, root);
         Storyboard.SetTargetProperty(fade, "Opacity");
 
-        var slide = new DoubleAnimation { From = -10, To = 0, Duration = duration, EasingFunction = ease };
-        Storyboard.SetTarget(slide, transform);
-        Storyboard.SetTargetProperty(slide, "Y");
+        var growX = new DoubleAnimation { From = 0.94, To = 1, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(growX, transform);
+        Storyboard.SetTargetProperty(growX, "ScaleX");
+
+        var growY = new DoubleAnimation { From = 0.94, To = 1, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(growY, transform);
+        Storyboard.SetTargetProperty(growY, "ScaleY");
 
         var storyboard = new Storyboard();
         storyboard.Children.Add(fade);
-        storyboard.Children.Add(slide);
+        storyboard.Children.Add(growX);
+        storyboard.Children.Add(growY);
 
         try
         {
@@ -259,8 +271,9 @@ internal static class TipToast
         }
         catch (Exception)
         {
-            // 动画失败不影响功能：已经 Opacity=1，静态显示。
-            transform.Y = 0;
+            // 动画失败不影响功能：已经 Opacity=1，缩放落回 1，静态显示。
+            transform.ScaleX = 1;
+            transform.ScaleY = 1;
         }
     }
 
