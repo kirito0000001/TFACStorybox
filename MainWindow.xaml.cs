@@ -593,7 +593,7 @@ namespace GalExcleTools
             // PositionChanged 是从**后台线程**发出来的，直接动 UI 会 0x8001010E，
             // 所以一律排队回 UI 线程再处理。
             _projectVoicePreviewPlayer.MediaEnded += (_, _) =>
-                DispatcherQueue.TryEnqueue(ResetVoicePreviewProgress);
+                DispatcherQueue.TryEnqueue(CompleteVoicePreview);
             _projectVoicePreviewPlayer.PlaybackSession.PositionChanged += (_, _) =>
                 DispatcherQueue.TryEnqueue(UpdateVoicePlaybackProgress);
             RegisterAssetLibraryExpanderLazyLoading();

@@ -1040,8 +1040,9 @@ namespace GalExcleTools
             {
                 Height = 2,
                 VerticalAlignment = VerticalAlignment.Bottom,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF)),
-                IsHitTestVisible = false
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)),
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed
             };
             Grid.SetColumnSpan(progressTrack, grid.ColumnDefinitions.Count);
             grid.Children.Add(progressTrack);
@@ -1054,11 +1055,12 @@ namespace GalExcleTools
                 IsHitTestVisible = false,
                 // 从头往右长：原点是左边中点，ScaleX 直接从 0 到 1。
                 RenderTransformOrigin = new Windows.Foundation.Point(0, 0.5),
-                RenderTransform = new ScaleTransform { ScaleX = 0 }
+                RenderTransform = new ScaleTransform { ScaleX = 0 },
+                Visibility = Visibility.Collapsed
             };
             Grid.SetColumnSpan(progressFill, grid.ColumnDefinitions.Count);
             grid.Children.Add(progressFill);
-            _voiceProgressFills[row.Id] = progressFill;
+            _voiceProgressBars[row.Id] = new VoiceProgressBar(progressTrack, progressFill);
 
             return grid;
         }
@@ -1269,6 +1271,7 @@ namespace GalExcleTools
 
                 _voicePlayingRowId = row.Id;
                 _voicePreviewPaused = false;
+                ShowVoiceProgressBar(row.Id);
                 SetVoicePreviewButtonGlyph(row.Id, isPlaying: true);
                 AppendLog(LogKind.Info, $"试听语音：{Path.GetFileName(voicePath)}");
             }

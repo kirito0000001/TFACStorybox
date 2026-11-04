@@ -55,13 +55,17 @@ namespace GalExcleTools
         private readonly Dictionary<string, Button> _voiceButtons =
             new(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>一条进度条的两层：白色轨道 + 绿色填充。</summary>
+        private sealed record VoiceProgressBar(Border Track, Border Fill);
+
         /// <summary>
-        /// 每行的播放进度条填充（行底部那条绿线），key = 行 Id。
+        /// 每行的播放进度条，key = 行 Id。
         ///
-        /// 以前这里只是"播过就点亮"的标记；现在改成真实进度：ScaleX = 播放位置占比，
-        /// 暂停时停住、换一条时归零。
+        /// ⚠️ 平时是 **Collapsed**：只有当前播放的那一行才亮出来。
+        /// 之前把轨道铺在每一行上，整屏都是白线，既难看又让"刚才播的是哪条"失去意义
+        /// （2026-11-04 用户指出）。
         /// </summary>
-        private readonly Dictionary<string, Border> _voiceProgressFills =
+        private readonly Dictionary<string, VoiceProgressBar> _voiceProgressBars =
             new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>每行的试听按钮，key = 行 Id。播放/暂停要换图标，得留个引用。</summary>
@@ -133,7 +137,7 @@ namespace GalExcleTools
         {
             _voiceDbCells.Clear();
             _voiceButtons.Clear();
-            _voiceProgressFills.Clear();
+            _voiceProgressBars.Clear();
             _voicePreviewButtons.Clear();
             _voicePlayingRowId = null;
             _chapterVoiceLoudness.Clear();
@@ -1359,14 +1363,14 @@ namespace GalExcleTools
         private void UpdateVoicePlaybackProgress()
         {
             if (_voicePlayingRowId is null ||
-                !_voiceProgressFills.TryGetValue(_voicePlayingRowId, out var fill))
+                !_voiceProgressBars.TryGetValue(_voicePlayingRowId, out var bar))
             {
                 return;
             }
 
             var session = _projectVoicePreviewPlayer.PlaybackSession;
             var total = session.NaturalDuration;
-            if (total <= TimeSpan.Zero || fill.RenderTransform is not ScaleTransform scale)
+            if (total <= TimeSpan.Zero || bar.Fill.RenderTransform is not ScaleTransform scale)
             {
                 return;
             }
@@ -1380,17 +1384,65 @@ namespace GalExcleTools
         {
             if (_voicePlayingRowId is not null)
             {
-                if (_voiceProgressFills.TryGetValue(_voicePlayingRowId, out var fill) &&
-                    fill.RenderTransform is ScaleTransform scale)
-                {
-                    scale.ScaleX = 0;
-                }
-
+                HideVoiceProgressBar(_voicePlayingRowId);
                 SetVoicePreviewButtonGlyph(_voicePlayingRowId, isPlaying: false);
             }
 
             _voicePlayingRowId = null;
             _voicePreviewPaused = false;
+        }
+
+        /// <summary>
+        /// 播完了：绿色填满整条、**保持可见**（等价于以前"这一行播过了"的标记），
+        /// 图标切回播放，但不清 _voicePlayingRowId —— 再点一次会从头重播。
+        /// </summary>
+        private void CompleteVoicePreview()
+        {
+            if (_voicePlayingRowId is null ||
+                !_voiceProgressBars.TryGetValue(_voicePlayingRowId, out var bar))
+            {
+                return;
+            }
+
+            if (bar.Fill.RenderTransform is ScaleTransform scale)
+            {
+                scale.ScaleX = 1;
+            }
+
+            SetVoicePreviewButtonGlyph(_voicePlayingRowId, isPlaying: false);
+            _voicePreviewPaused = false;
+        }
+
+        private void ShowVoiceProgressBar(string rowId)
+        {
+            if (!_voiceProgressBars.TryGetValue(rowId, out var bar))
+            {
+                return;
+            }
+
+            if (bar.Fill.RenderTransform is ScaleTransform scale)
+            {
+                scale.ScaleX = 0;
+            }
+
+            bar.Track.Visibility = Visibility.Visible;
+            bar.Fill.Visibility = Visibility.Visible;
+        }
+
+        private void HideVoiceProgressBar(string rowId)
+        {
+            if (!_voiceProgressBars.TryGetValue(rowId, out var bar))
+            {
+                return;
+            }
+
+            if (bar.Fill.RenderTransform is ScaleTransform scale)
+            {
+                scale.ScaleX = 0;
+            }
+
+            bar.Track.Visibility = Visibility.Collapsed;
+            bar.Fill.Visibility = Visibility.Collapsed;
         }
 
         private void SetVoicePreviewButtonGlyph(string rowId, bool isPlaying)
