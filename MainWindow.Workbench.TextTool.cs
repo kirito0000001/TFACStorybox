@@ -129,6 +129,8 @@ namespace GalExcleTools
             Configured,
             Missing,
             Unchecked,
+            /// <summary>量过且超标（响度出容差 或 峰值超）—— 包含被峰值卡住的那种。</summary>
+            OffSpec,
             /// <summary>说话人那边勾了"应该有语音"，但这行还没配文件（漏配）。</summary>
             MissingVoiced,
             /// <summary>按某个说话人过滤，具体是谁存在 <see cref="_voiceRowFilterSpeaker"/>。</summary>
@@ -205,6 +207,7 @@ namespace GalExcleTools
 
             flyout.Items.Add(new MenuFlyoutSeparator());
             AddItem("未检查", "Unchecked");
+            AddItem("不合规语音", "OffSpec");
             AddItem("缺少设置", "MissingVoiced");
 
             // 只给"有语音"的角色生成 —— 依据就是说话人标识里的勾选。
@@ -590,14 +593,24 @@ namespace GalExcleTools
                             string.Equals(speakerKey, _voiceRowFilterSpeaker, StringComparison.OrdinalIgnoreCase);
                 }
 
-                // 剩下只有「未检查」：有语音、但这次没量过（DB 列是横线）。
+                // 后面两项都要看响度数据，没语音的行不参与。
                 if (!hasVoice)
                 {
                     return false;
                 }
 
                 var name = Path.GetFileName(voicePath);
-                return !_chapterVoiceLoudness.TryGetValue(name, out var item) || !item.Measurement.IsUsable;
+                var measured = _chapterVoiceLoudness.TryGetValue(name, out var item) && item.Measurement.IsUsable;
+
+                if (_voiceRowFilter == VoiceRowFilter.OffSpec)
+                {
+                    // 包含"被峰值卡住"的：它们确实没合规，只是规整修不了 ——
+                    // 筛选要把它们露出来，别让人以为只剩达标的。
+                    return measured && item!.NeedsFix;
+                }
+
+                // 剩下只有「未检查」：有语音、但这次没量过（DB 列是横线）。
+                return !measured;
             }).ToList();
         }
 
@@ -608,6 +621,7 @@ namespace GalExcleTools
                 VoiceRowFilter.Configured => "已设置语音",
                 VoiceRowFilter.Missing => "未设置语音",
                 VoiceRowFilter.Unchecked => "未检查",
+                VoiceRowFilter.OffSpec => "不合规语音",
                 VoiceRowFilter.MissingVoiced => "缺少设置",
                 VoiceRowFilter.Speaker => $"{DisplaySpeaker(_voiceRowFilterSpeaker ?? string.Empty)}的台词",
                 _ => "全部行"
