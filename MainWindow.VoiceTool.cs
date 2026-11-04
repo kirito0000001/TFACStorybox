@@ -287,7 +287,9 @@ namespace GalExcleTools
                 item.Measurement.IntegratedLufs.ToString("0.0", CultureInfo.InvariantCulture),
                 item.Measurement.TruePeakDb.ToString("0.0", CultureInfo.InvariantCulture),
                 item.Measurement.LoudnessRangeLu.ToString("0.0", CultureInfo.InvariantCulture),
-                BrushForDbLoudness(item));
+                BrushForDbLoudness(item),
+                BrushForDbPeak(item),
+                BrushForDbRange(item));
         }
 
         /// <summary>
@@ -312,16 +314,22 @@ namespace GalExcleTools
             string loudness,
             string peak,
             string range,
-            Brush? loudnessBrush)
+            Brush? loudnessBrush,
+            Brush? peakBrush = null,
+            Brush? rangeBrush = null)
         {
+            // 「没问题」统一用淡色（跟原来两个数字一样），不再给绿色：
+            // 整列绿油油反而看不出重点，有问题的才染色（2026-11-04 用户要求）。
+            var idleBrush = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush;
+
             cell.DurationText.Text = duration;
             cell.DurationText.Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush;
             cell.LoudnessText.Text = loudness;
-            cell.LoudnessText.Foreground = loudnessBrush;
+            cell.LoudnessText.Foreground = loudnessBrush ?? idleBrush;
             cell.PeakText.Text = peak;
+            cell.PeakText.Foreground = peakBrush ?? idleBrush;
             cell.RangeText.Text = range;
-            cell.PeakText.Foreground = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush;
-            cell.RangeText.Foreground = cell.PeakText.Foreground;
+            cell.RangeText.Foreground = rangeBrush ?? idleBrush;
             ToolTipService.SetToolTip(
                 cell.LoudnessText,
                 string.IsNullOrEmpty(peak)
@@ -335,7 +343,8 @@ namespace GalExcleTools
 
             if (item.LoudnessVerdict != VoiceLoudnessVerdict.Off)
             {
-                return Application.Current.Resources["SystemFillColorSuccessBrush"] as Brush;
+                // 达标不染色（以前给的是绿色，见 SetVoiceDbText 的注释）。
+                return null;
             }
 
             // 超出容差之后才分方向：比目标响 = 红（容易在混音里盖住别人），
@@ -344,6 +353,25 @@ namespace GalExcleTools
                 ? Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush
                 : Application.Current.Resources["SystemFillColorCautionBrush"] as Brush;
         }
+
+        /// <summary>真峰值超标才红；没超标保持淡色。峰值超标最容易在混音里削波，所以用红不用黄。</summary>
+        private static Brush? BrushForDbPeak(VoiceComplianceItem item) =>
+            item.PeakVerdict == VoicePeakVerdict.Over
+                ? Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush
+                : null;
+
+        /// <summary>
+        /// 响度范围（LRA）的上限。超过就标红。
+        ///
+        /// 10 LU 是对话素材的常见上限：再大意味着这一句里忽大忽小，
+        /// 进游戏后玩家得反复调音量。要改就改这一个常量。
+        /// </summary>
+        private const double MaxLoudnessRangeLu = 10d;
+
+        private static Brush? BrushForDbRange(VoiceComplianceItem item) =>
+            item.Measurement.LoudnessRangeLu > MaxLoudnessRangeLu
+                ? Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush
+                : null;
 
         private void UpdateVoiceDbCells()
         {
