@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -1103,6 +1104,57 @@ namespace GalExcleTools
             });
 
             return root;
+        }
+
+        /// <summary>
+        /// 「定位文件」：在资源管理器里**选中**这条语音（不是只打开文件夹）。
+        /// 找不到文件就说清楚，不弹一个空窗口让人自己找。
+        /// </summary>
+        private void RevealProjectVoiceFile(ProjectTextRow row)
+        {
+            if (!_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) ||
+                string.IsNullOrWhiteSpace(voicePath) ||
+                !File.Exists(voicePath))
+            {
+                ShowFloatingTip(InfoBarSeverity.Warning, "没有可定位的文件", "这一行还没有有效的语音文件。");
+                return;
+            }
+
+            try
+            {
+                // `/select,` 让资源管理器直接选中它 —— 不带这个参数只会打开文件夹，
+                // 用户还得在几十个 wav 里自己翻。
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"/select,\"{voicePath}\"",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception error)
+            {
+                ShowFloatingTip(InfoBarSeverity.Error, "打开资源管理器失败", voicePath, error, "定位语音文件失败");
+            }
+        }
+
+        /// <summary>
+        /// 「编辑音频」：**占位**，功能还没做。
+        ///
+        /// 为什么先放一个空入口：菜单结构定型后很少动，先把位置占住，
+        /// 以后接上真的编辑器时用户不用重新找。但点了必须给一句明确的话 ——
+        /// 点了没反应的菜单项最容易被当成 bug 报上来。
+        /// </summary>
+        private void EditProjectVoiceAudio(ProjectTextRow row)
+        {
+            var fileName = _projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) &&
+                !string.IsNullOrWhiteSpace(voicePath)
+                ? Path.GetFileName(voicePath)
+                : "这条语音";
+
+            ShowFloatingTip(
+                InfoBarSeverity.Informational,
+                "编辑音频（还没做）",
+                $"「{fileName}」的音频编辑入口先放在这里，功能以后再补。");
         }
 
         /// <summary>
