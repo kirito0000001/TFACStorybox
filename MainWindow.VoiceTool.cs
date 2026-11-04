@@ -1386,7 +1386,7 @@ namespace GalExcleTools
         private DispatcherQueueTimer CreateVoiceProgressTimer()
         {
             var timer = DispatcherQueue.CreateTimer();
-            timer.Interval = TimeSpan.FromMilliseconds(33);
+            timer.Interval = TimeSpan.FromMilliseconds(16);
             timer.IsRepeating = true;
             timer.Tick += (_, _) => UpdateVoicePlaybackProgress();
             return timer;
@@ -1461,6 +1461,50 @@ namespace GalExcleTools
 
             bar.Track.Visibility = Visibility.Visible;
             bar.Fill.Visibility = Visibility.Visible;
+            PlayTrackEntrance(bar.Track);
+        }
+
+        /// <summary>
+        /// 白条入场：**从中间向两边铺开 + 渐入**，220ms。
+        ///
+        /// 这是原来那条绿线标记的动效，换成进度条之后被我一并删掉了 ——
+        /// 少了它，白条是"啪"地整条出现的，很生硬（2026-11-04 用户要求加回来）。
+        /// </summary>
+        private static void PlayTrackEntrance(Border track)
+        {
+            if (track.RenderTransform is not ScaleTransform scale)
+            {
+                return;
+            }
+
+            // 兜底：先把不透明度落成 1，动画没跑起来至少是可见的，不留隐形块。
+            track.Opacity = 1;
+            scale.ScaleX = 0;
+
+            var duration = new Duration(TimeSpan.FromMilliseconds(220));
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+            var grow = new DoubleAnimation { From = 0, To = 1, Duration = duration, EasingFunction = ease };
+            Storyboard.SetTarget(grow, scale);
+            Storyboard.SetTargetProperty(grow, "ScaleX");
+
+            var fade = new DoubleAnimation { From = 0, To = 1, Duration = duration, EasingFunction = ease };
+            Storyboard.SetTarget(fade, track);
+            Storyboard.SetTargetProperty(fade, "Opacity");
+
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(grow);
+            storyboard.Children.Add(fade);
+
+            try
+            {
+                storyboard.Begin();
+            }
+            catch (Exception)
+            {
+                scale.ScaleX = 1;
+                track.Opacity = 1;
+            }
         }
 
         private void HideVoiceProgressBar(string rowId)
@@ -1477,6 +1521,12 @@ namespace GalExcleTools
 
             bar.Track.Visibility = Visibility.Collapsed;
             bar.Fill.Visibility = Visibility.Collapsed;
+            // 复位进场状态，下次亮出来才会再播一次动画。
+            bar.Track.Opacity = 0;
+            if (bar.Track.RenderTransform is ScaleTransform trackScale)
+            {
+                trackScale.ScaleX = 0;
+            }
         }
 
         private void SetVoicePreviewButtonGlyph(string rowId, bool isPlaying)

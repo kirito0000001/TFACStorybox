@@ -1042,7 +1042,11 @@ namespace GalExcleTools
                 VerticalAlignment = VerticalAlignment.Bottom,
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)),
                 IsHitTestVisible = false,
-                Visibility = Visibility.Collapsed
+                Visibility = Visibility.Collapsed,
+                // 白条是"从中间向两边铺开"的：原点放在正中，ScaleX 0→1 就是从中心长出来。
+                Opacity = 0,
+                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+                RenderTransform = new ScaleTransform { ScaleX = 0, ScaleY = 1 }
             };
             Grid.SetColumnSpan(progressTrack, grid.ColumnDefinitions.Count);
             grid.Children.Add(progressTrack);
