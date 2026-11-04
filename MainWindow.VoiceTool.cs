@@ -370,17 +370,44 @@ namespace GalExcleTools
                 return;
             }
 
+            var healedCount = 0;
             foreach (var file in GetCurrentChapterVoiceFiles())
             {
                 var name = Path.GetFileName(file);
                 var info = new FileInfo(file);
-                var hit = cached.Entries.FirstOrDefault(entry =>
+                var length = info.Length;
+                var ticks = info.LastWriteTimeUtc.Ticks;
+
+                var matchedByName = cached.Entries.FirstOrDefault(entry =>
                     string.Equals(entry.FileName, name, StringComparison.OrdinalIgnoreCase) &&
-                    entry.Matches(info.Length, info.LastWriteTimeUtc.Ticks));
-                if (hit is not null)
+                    entry.Matches(length, ticks));
+
+                // ⚠️ 名字对不上时，按「大小 + 修改时间」再认一次。
+                //
+                // 改备注会**重命名** wav，而缓存是按文件名索引的 —— 只认名字的话，
+                // 改完名字重启，整列「时长 / DB」会突然变横线，用户以为数据丢了
+                // （2026-11-04 实测：32 条缓存全在，只是键是旧名）。
+                // 重命名不动内容，Length 与 LastWriteTimeUtcTicks 一个都不会变，
+                // 这两个值合起来足以当"同一条语音"的身份证。
+                var hit = matchedByName ?? cached.Entries.FirstOrDefault(entry => entry.Matches(length, ticks));
+                if (hit is null)
                 {
-                    _chapterVoiceLoudness[name] = BuildVoiceComplianceItem(file, hit.ToMeasurement(), preset);
+                    continue;
                 }
+
+                if (matchedByName is null)
+                {
+                    healedCount++;
+                }
+
+                _chapterVoiceLoudness[name] = BuildVoiceComplianceItem(file, hit.ToMeasurement(), preset);
+            }
+
+            // 认回来的那些顺手把缓存里的旧名字改成新名字，下次就不用再兜一遍；
+            // 顺带把匹配不上的陈旧条目清掉（WriteVoiceLoudnessCache 只写当前还在的文件）。
+            if (healedCount > 0)
+            {
+                WriteVoiceLoudnessCache(GetCurrentChapterVoiceFiles(), preset);
             }
         }
 
@@ -394,6 +421,41 @@ namespace GalExcleTools
             VoiceLoudnessPreset preset)
         {
             return VoiceLoudnessCompliance.Evaluate(preset, [(filePath, measurement)]).Items[0];
+        }
+
+        /// <summary>
+        /// 语音改名之后，把响度缓存跟着挪到新文件名上。
+        ///
+        /// 【为什么必须搬】内存字典 <c>_chapterVoiceLoudness</c> 和磁盘缓存
+        /// （<c>Tools/VoiceLoudness/{章节}.json</c>）都是**按文件名索引**的：
+        /// 改备注会重命名 wav，名字一变旧条目就再也查不到 ——
+        /// 表现是这一行的「时长 / DB」全变横线，用户会以为数据丢了（2026-11-04 实测）。
+        /// 内容没变、只是名字变了，所以判定结果整份搬过去即可，不用重测。
+        /// </summary>
+        private void CarryVoiceLoudnessToRenamedFile(ProjectTextRow row, string oldPath, string newPath)
+        {
+            var oldName = Path.GetFileName(oldPath);
+            var newName = Path.GetFileName(newPath);
+            if (string.IsNullOrEmpty(oldName) || string.IsNullOrEmpty(newName) ||
+                string.Equals(oldName, newName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (_chapterVoiceLoudness.Remove(oldName, out var measured))
+            {
+                // SourcePath 是 record 的位置参数（init-only），用 with 造一份新的：
+                // FileName 是从它推出来的，改它等于改键。
+                _chapterVoiceLoudness[newName] = measured with { SourcePath = newPath };
+                WriteVoiceLoudnessCache(GetCurrentChapterVoiceFiles(), VoiceLoudnessPreset.GameDialogue);
+            }
+
+            // 单元格里也记着旧文件名：不换掉的话，刷新时仍按旧名去查（照样横线）。
+            if (_voiceDbCells.TryGetValue(row.Id, out var cell))
+            {
+                _voiceDbCells[row.Id] = cell with { FileName = newName };
+                UpdateVoiceDbCells();
+            }
         }
 
         /// <summary>把当前章节量到的数字写进缓存。只写「文件还在、值有效」的条目。</summary>

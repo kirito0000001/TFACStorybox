@@ -298,6 +298,11 @@ namespace GalExcleTools
                 rowCount,
                 remarkInput,
                 _projectVoiceMapState);
+
+            // 改名换掉了文件名，而响度缓存是**按文件名索引**的 —— 不把它一起搬，
+            // 这一行的「时长 / DB」立刻变成横线（用户看到的就是"数据丢了"）。
+            CarryVoiceLoudnessToRenamedFile(row, voicePath, updatedPath);
+
             _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
             TouchProjectLastEditedAt(_currentProject);
             if (button is not null)
