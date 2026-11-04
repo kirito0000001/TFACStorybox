@@ -31,22 +31,68 @@ internal sealed class VoiceTrackSettings
     public bool SyncPlayback { get; set; }
 
     /// <summary>
-    /// 有语音的说话人（角色名，来自 CSV 的 TalkChar）。
+    /// 每章"有语音"的说话人（角色名，来自 CSV 的 TalkChar）。
     ///
-    /// 勾上的角色，其台词行左侧会出现一条角色专属颜色的竖线 —— 用来一眼区分
-    /// "这句是谁说的、有没有配音"，比逐行看语音列快得多。
+    /// ⚠️ **必须按章节分开**：同一个名字在不同章可能指的不是同一个人，
+    /// 全局共用一份会把第二章的"？"当成第一章的"？"（2026-11-04 用户实测）。
+    ///
+    /// 勾上的角色，其台词行左侧会出现一条角色专属颜色的竖线。
     /// </summary>
-    public List<string> SpeakersWithVoice { get; set; } = [];
+    public Dictionary<string, List<string>> ChapterSpeakers { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>取某一章勾选过的说话人键。</summary>
+    public IReadOnlyList<string> GetSpeakers(string chapterCode) =>
+        ChapterSpeakers is not null && ChapterSpeakers.TryGetValue(chapterCode, out var list)
+            ? list
+            : [];
+
+    /// <summary>覆盖某一章的勾选结果（空集合=清空这一章）。</summary>
+    public void SetSpeakers(string chapterCode, IEnumerable<string> speakers)
+    {
+        // JSON 里可能是 null（手改坏了 / 旧版本），这里兜一下再写。
+        ChapterSpeakers ??= new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        var normalized = speakers
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalized.Count == 0)
+        {
+            ChapterSpeakers.Remove(chapterCode);
+            return;
+        }
+
+        ChapterSpeakers[chapterCode] = normalized;
+    }
 
     public VoiceTrackSettings Normalize()
     {
         TrackCount = Math.Clamp(TrackCount, MinTrackCount, MaxTrackCount);
         ActiveTrack = Math.Clamp(ActiveTrack, MinTrackCount, TrackCount);
-        SpeakersWithVoice = (SpeakersWithVoice ?? [])
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(name => name.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var cleaned = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in ChapterSpeakers ?? new Dictionary<string, List<string>>())
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key))
+            {
+                continue;
+            }
+
+            var speakers = (pair.Value ?? new List<string>())
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (speakers.Count > 0)
+            {
+                cleaned[pair.Key.Trim()] = speakers;
+            }
+        }
+
+        ChapterSpeakers = cleaned;
         return this;
     }
 }

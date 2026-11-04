@@ -100,6 +100,12 @@ namespace GalExcleTools
             StopProjectVoicePreview();
             _selectedTextToolChapter = selected;
             _selectedVoiceChapter = selected;
+
+            // 筛选是**本章**的视角，不是全局偏好：换章还留着上一章的"夏疏影语音"，
+            // 在新章里筛出来是空的，看着像数据没了（2026-11-04 用户反馈）。
+            _voiceRowFilter = VoiceRowFilter.All;
+            _voiceRowFilterSpeaker = null;
+
             RefreshProjectTextToolPage();
         }
 
@@ -213,7 +219,7 @@ namespace GalExcleTools
             // 只给"有语音"的角色生成 —— 依据就是说话人标识里的勾选。
             // 没勾的角色不出现：这个菜单是拿来找配音的，不是角色字典。
             var speakers = GetChapterSpeakerKeys()
-                .Where(key => _voiceTrackSettings.SpeakersWithVoice.Contains(key, StringComparer.OrdinalIgnoreCase))
+                .Where(key => IsSpeakerVoiced(key))
                 .ToList();
             if (speakers.Count > 0)
             {
@@ -293,10 +299,12 @@ namespace GalExcleTools
 
             _voiceTrackSettings.TrackCount = count;
             _voiceTrackSettings.SyncPlayback = syncPlaybackSwitch.IsOn;
-            _voiceTrackSettings.SpeakersWithVoice = speakerChecks
-                .Where(pair => pair.Box.IsChecked == true)
-                .Select(pair => pair.Speaker)
-                .ToList();
+            // 只写**当前章**：别的章的勾选原样留着。
+            _voiceTrackSettings.SetSpeakers(
+                _selectedTextToolChapter?.Code ?? string.Empty,
+                speakerChecks
+                    .Where(pair => pair.Box.IsChecked == true)
+                    .Select(pair => pair.Speaker));
             _voiceTrackSettings.Normalize();
             _voiceTrackSettingsStore.Write(_currentProject, _voiceTrackSettings);
             RefreshProjectTextToolPage();
@@ -370,6 +378,24 @@ namespace GalExcleTools
             return Regex.Replace(text, @"\s+", " ").Trim();
         }
 
+        /// <summary>
+        /// 这一行的说话人是否在**本章**被勾成"有语音"。
+        ///
+        /// 必须带章节：同名角色在不同章可能不是同一个人，
+        /// 全局共用一份勾选会把第二章的"？"当成第一章的"？"（2026-11-04 用户实测）。
+        /// </summary>
+        private bool IsSpeakerVoiced(string speakerKey)
+        {
+            if (_selectedTextToolChapter is not { } chapter || string.IsNullOrEmpty(speakerKey))
+            {
+                return false;
+            }
+
+            return _voiceTrackSettings
+                .GetSpeakers(chapter.Code)
+                .Contains(speakerKey, StringComparer.OrdinalIgnoreCase);
+        }
+
         /// <summary>列表里显示的名字：能对上角色就显示中文名，其余原样（`?`、`???`、`梦凪`…）。</summary>
         private string DisplaySpeaker(string key)
         {
@@ -406,7 +432,7 @@ namespace GalExcleTools
                     // 显示中文名（角色代号如 Xia 在立绘设置里有 Name），存的仍是归一化键。
                     Content = DisplaySpeaker(key),
                     Tag = key,
-                    IsChecked = _voiceTrackSettings.SpeakersWithVoice.Contains(key, StringComparer.OrdinalIgnoreCase)
+                    IsChecked = IsSpeakerVoiced(key)
                 };
                 checks.Add((key, box));
                 panel.Children.Add(box);
@@ -586,7 +612,7 @@ namespace GalExcleTools
                     // 这是唯一能"按预期找出漏配"的筛选 —— 光看"未设置"会把旁白也带上。
                     case VoiceRowFilter.MissingVoiced:
                         return !hasVoice && speakerKey.Length > 0 &&
-                            _voiceTrackSettings.SpeakersWithVoice.Contains(speakerKey, StringComparer.OrdinalIgnoreCase);
+                            IsSpeakerVoiced(speakerKey);
 
                     case VoiceRowFilter.Speaker:
                         return speakerKey.Length > 0 &&
@@ -706,13 +732,17 @@ namespace GalExcleTools
             {
                 _voiceTrackSettings = _voiceTrackSettingsStore.Read(_currentProject);
 
-                // 旧值可能存的是原始写法（`？`、`Xia`）——读进来先归一化一遍，
+                // 旧值可能存的是原始写法（`？`、`Xia`）——读进来先按**本章**归一化一遍，
                 // 否则勾选框会因为按键比对不上而全部变成未勾选。
-                _voiceTrackSettings.SpeakersWithVoice = _voiceTrackSettings.SpeakersWithVoice
-                    .Select(ToSpeakerKey)
-                    .Where(key => key.Length > 0)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                if (_selectedTextToolChapter is { } chapter)
+                {
+                    var normalized = _voiceTrackSettings
+                        .GetSpeakers(chapter.Code)
+                        .Select(ToSpeakerKey)
+                        .Where(key => key.Length > 0)
+                        .ToList();
+                    _voiceTrackSettings.SetSpeakers(chapter.Code, normalized);
+                }
 
                 // 角色目录一次读齐，逐行判断时只查字典（否则每行都会去读角色文件）。
                 _speakerDirectory = _projectTextToolMode == ProjectTextToolMode.Voice
@@ -1018,7 +1048,7 @@ namespace GalExcleTools
             // 它是常驻标识，不是一次性反馈，动起来反而吵。
             var speakerKey = ToSpeakerKey(row.Speaker);
             if (speakerKey.Length > 0 &&
-                _voiceTrackSettings.SpeakersWithVoice.Contains(speakerKey, StringComparer.OrdinalIgnoreCase))
+                IsSpeakerVoiced(speakerKey))
             {
                 grid.Children.Add(new Border
                 {
