@@ -599,7 +599,8 @@ namespace GalExcleTools
                     return false;
                 }
 
-                var name = Path.GetFileName(voicePath);
+                // voicePath 在上面已经判过非空（hasVoice），这里给个 ! 让编译器也认可。
+                var name = Path.GetFileName(voicePath!);
                 var measured = _chapterVoiceLoudness.TryGetValue(name, out var item) && item.Measurement.IsUsable;
 
                 if (_voiceRowFilter == VoiceRowFilter.OffSpec)

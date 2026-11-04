@@ -114,7 +114,13 @@ internal sealed class VoiceBatchProcessor
         await RunWorkersAsync(
             files,
             "规整",
-            file => NormalizeOneAsync(ffmpegPath, file, preset, cancellationToken),
+            file =>
+            {
+                // 在这里算而不是传集合进去：每个 worker 只需要自己那一个布尔值。
+                var compressFirst = compressFirstFiles is not null &&
+                    compressFirstFiles.Contains(file, StringComparer.OrdinalIgnoreCase);
+                return NormalizeOneAsync(ffmpegPath, file, preset, compressFirst, cancellationToken);
+            },
             (index, value) => outcomes[index] = value!,
             progress,
             cancellationToken).ConfigureAwait(false);
@@ -210,6 +216,7 @@ internal sealed class VoiceBatchProcessor
         string ffmpegPath,
         string filePath,
         VoiceLoudnessPreset preset,
+        bool compressFirst,
         CancellationToken cancellationToken)
     {
         var temporaryPath = filePath + TemporarySuffix;
@@ -239,9 +246,6 @@ internal sealed class VoiceBatchProcessor
 
             // ② 落盘到临时件
             //    compressFirst：被峰值卡住的素材先压动态，否则套多少增益都会撞回上限。
-            var compressFirst = compressFirstFiles is not null &&
-                compressFirstFiles.Contains(filePath, StringComparer.OrdinalIgnoreCase);
-
             var write = await RunFfmpegAsync(
                 ffmpegPath,
                 AudioFfmpegArguments.BuildWritePass(filePath, temporaryPath, preset, before, sampleRate, compressFirst),
