@@ -106,10 +106,29 @@ internal static class ToolboxDialog
             {
                 Content = content,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                MaxHeight = 460
+                MaxHeight = 460,
+                // 内容淡入 + 轻微上移：ContentDialog 自带的是"整块弹出"，
+                // 内容再补一层会让它看起来像"展开"而不是"砸下来"。
+                Transitions = new TransitionCollection { new EntranceThemeTransition() }
             },
             CloseButtonText = closeText,
             DefaultButton = primaryText is null ? ContentDialogButton.Close : ContentDialogButton.Primary
+        };
+
+        // 快捷键与鼠标习惯（对齐 WinUiDialogService.AttachCancelShortcuts）：
+        // Esc 关、右键关。ContentDialog 本身不处理右键，不补的话用户会以为"这弹窗关不掉"。
+        dialog.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.Escape)
+            {
+                dialog.Hide();
+                args.Handled = true;
+            }
+        };
+        dialog.RightTapped += (_, args) =>
+        {
+            dialog.Hide();
+            args.Handled = true;
         };
 
         if (!string.IsNullOrWhiteSpace(primaryText))
