@@ -264,7 +264,45 @@ namespace GalExcleTools
             flyout.ShowAt(ProjectTextToolVoiceTrackButton);
         }
 
-        private Dictionary<string, string> _speakerColorHex = new(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, CharacterInfo> _speakerDirectory = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>纯标点的说话人（`?`、`？？？`、`? ? ?`）在数据里都是"不知道谁说的"，合并成一条。</summary>
+        private const string UnknownSpeakerKey = "?";
+
+        /// <summary>
+        /// 说话人的**归一化键**：NFKC 归一（全角 → 半角）+ 去首尾空白 + 折叠内部空白。
+        ///
+        /// 必须归一的原因：同一章里同时存在 `？`(U+FF1F)、`?`(U+003F)、`? ? ?` 三种写法，
+        /// 不归一的话列表里会出现两三个长得一模一样的"？"，谁也分不清哪个是哪个
+        /// （2026-11-04 用户截图指出）。
+        /// </summary>
+        private static string ToSpeakerKey(string? raw)
+        {
+            var text = (raw ?? string.Empty).Trim();
+            if (text.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            text = text.Normalize(NormalizationForm.FormKC);
+            text = Regex.Replace(text, @"\s+", " ").Trim();
+            return IsPlaceholderSpeaker(text) ? UnknownSpeakerKey : text;
+        }
+
+        /// <summary>没有字母/数字/汉字 → 当占位符（问号、省略号、感叹号…），不是真角色。</summary>
+        private static bool IsPlaceholderSpeaker(string key) =>
+            key.Length > 0 && key.All(character => !char.IsLetterOrDigit(character));
+
+        /// <summary>列表里显示的名字：占位符统一叫「未知说话人」，角色显示中文名，其余原样。</summary>
+        private string DisplaySpeaker(string key)
+        {
+            if (string.Equals(key, UnknownSpeakerKey, StringComparison.Ordinal))
+            {
+                return "未知说话人（?）";
+            }
+
+            return _speakerDirectory.TryGetValue(key, out var character) ? character.Name : key;
+        }
 
         /// <summary>
         /// 说话人标识：把本章出现过、且被勾了「有语音」的角色，在台词行左侧画一条角色色竖线。
@@ -277,11 +315,10 @@ namespace GalExcleTools
             var speakers = _projectTextRows
                 .Where(row => _selectedTextToolChapter is not null &&
                     string.Equals(row.ChapterCode, _selectedTextToolChapter.Code, StringComparison.OrdinalIgnoreCase))
-                .Select(row => row.Speaker)
-                .Where(speaker => !string.IsNullOrWhiteSpace(speaker))
-                .Select(speaker => speaker.Trim())
+                .Select(row => ToSpeakerKey(row.Speaker))
+                .Where(key => key.Length > 0)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(speaker => speaker, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             if (speakers.Count == 0)
@@ -297,14 +334,16 @@ namespace GalExcleTools
             }
 
             var panel = new StackPanel { Spacing = 2 };
-            foreach (var speaker in speakers)
+            foreach (var key in speakers)
             {
                 var box = new CheckBox
                 {
-                    Content = speaker,
-                    IsChecked = _voiceTrackSettings.SpeakersWithVoice.Contains(speaker, StringComparer.OrdinalIgnoreCase)
+                    // 显示中文名（角色代号如 Xia 在立绘设置里有 Name），存的仍是归一化键。
+                    Content = DisplaySpeaker(key),
+                    Tag = key,
+                    IsChecked = _voiceTrackSettings.SpeakersWithVoice.Contains(key, StringComparer.OrdinalIgnoreCase)
                 };
-                checks.Add((speaker, box));
+                checks.Add((key, box));
                 panel.Children.Add(box);
             }
 
@@ -319,13 +358,19 @@ namespace GalExcleTools
                 "勾上的角色，其台词行左侧会出现一条角色专属颜色的竖线。");
         }
 
-        /// <summary>角色名 → 颜色（取自立绘设置）。每次重铺读一次，不对每一行读文件。</summary>
-        private Dictionary<string, string> BuildSpeakerColorMap()
+        /// <summary>
+        /// 角色目录：把素材库里的角色按**代号**和**中文名**各登记一次（同一角色指向同一份数据）。
+        ///
+        /// 剧情表里 TalkChar 有的是代号（`Xia`）、有的是中文名（`梦凪`），
+        /// 两边都要能查到，否则代号那批会显示成英文、颜色也取不到。
+        /// 每次重铺读一次，不逐行读文件。
+        /// </summary>
+        private Dictionary<string, CharacterInfo> BuildSpeakerDirectory()
         {
-            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var directory = new Dictionary<string, CharacterInfo>(StringComparer.OrdinalIgnoreCase);
             if (_currentProject is null)
             {
-                return map;
+                return directory;
             }
 
             try
@@ -333,29 +378,37 @@ namespace GalExcleTools
                 var library = _projectWorkspaceService.ResolveProjectAssetLibrary(Settings.ProjectRootPath, _currentProject);
                 if (library is null)
                 {
-                    return map;
+                    return directory;
                 }
 
                 foreach (var character in _characterWorkspaceService.GetCharactersByName(library))
                 {
-                    if (!string.IsNullOrWhiteSpace(character.ColorHex))
+                    var codeKey = ToSpeakerKey(character.Code);
+                    if (codeKey.Length > 0)
                     {
-                        map[character.Name] = character.ColorHex;
+                        directory[codeKey] = character;
+                    }
+
+                    var nameKey = ToSpeakerKey(character.Name);
+                    if (nameKey.Length > 0)
+                    {
+                        directory[nameKey] = character;
                     }
                 }
             }
             catch (Exception error)
             {
-                // 颜色读不到不该让页面开不了 —— 退回按名字算的稳定色。
-                AppendLog(LogKind.Warning, "读取角色颜色失败，说话人竖线将使用按名字生成的颜色。", error);
+                // 读不到不该让页面开不了 —— 退回按名字算的稳定色、原样显示。
+                AppendLog(LogKind.Warning, "读取角色目录失败，说话人将显示原始代号并使用生成色。", error);
             }
 
-            return map;
+            return directory;
         }
 
-        private Brush ResolveSpeakerBrush(string speaker)
+        private Brush ResolveSpeakerBrush(string speakerKey)
         {
-            if (_speakerColorHex.TryGetValue(speaker, out var hex) && TryParseHexColor(hex, out var configured))
+            if (_speakerDirectory.TryGetValue(speakerKey, out var character) &&
+                TryParseHexColor(character.ColorHex, out var configured))
             {
                 return new SolidColorBrush(configured);
             }
@@ -363,7 +416,7 @@ namespace GalExcleTools
             // 没设颜色的角色：用名字算一个**稳定**的颜色。
             // 不能用 string.GetHashCode()——.NET 里它每个进程都不一样，重启就换色。
             var hash = 0;
-            foreach (var ch in speaker)
+            foreach (var ch in speakerKey)
             {
                 hash = unchecked(hash * 31 + ch) & 0x7FFFFFFF;
             }
@@ -561,10 +614,19 @@ namespace GalExcleTools
             if (_currentProject is not null)
             {
                 _voiceTrackSettings = _voiceTrackSettingsStore.Read(_currentProject);
-                // 角色颜色一次读齐，逐行判断时只查字典（否则每行都会去读角色文件）。
-                _speakerColorHex = _projectTextToolMode == ProjectTextToolMode.Voice
-                    ? BuildSpeakerColorMap()
-                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                // 旧值可能存的是原始写法（`？`、`Xia`）——读进来先归一化一遍，
+                // 否则勾选框会因为按键比对不上而全部变成未勾选。
+                _voiceTrackSettings.SpeakersWithVoice = _voiceTrackSettings.SpeakersWithVoice
+                    .Select(ToSpeakerKey)
+                    .Where(key => key.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                // 角色目录一次读齐，逐行判断时只查字典（否则每行都会去读角色文件）。
+                _speakerDirectory = _projectTextToolMode == ProjectTextToolMode.Voice
+                    ? BuildSpeakerDirectory()
+                    : new Dictionary<string, CharacterInfo>(StringComparer.OrdinalIgnoreCase);
             }
 
             UpdateVoiceTrackButtonState();
@@ -861,15 +923,16 @@ namespace GalExcleTools
             // 说话人竖线：勾了「有语音」的角色，台词行左侧一条角色色竖线。
             // 宽度和底部那条播放标记线一致，只是方向不同；**没有动画** ——
             // 它是常驻标识，不是一次性反馈，动起来反而吵。
-            if (!string.IsNullOrWhiteSpace(row.Speaker) &&
-                _voiceTrackSettings.SpeakersWithVoice.Contains(row.Speaker, StringComparer.OrdinalIgnoreCase))
+            var speakerKey = ToSpeakerKey(row.Speaker);
+            if (speakerKey.Length > 0 &&
+                _voiceTrackSettings.SpeakersWithVoice.Contains(speakerKey, StringComparer.OrdinalIgnoreCase))
             {
                 grid.Children.Add(new Border
                 {
                     Width = 2,
                     Margin = new Thickness(0, 4, 0, 4),
                     HorizontalAlignment = HorizontalAlignment.Left,
-                    Background = ResolveSpeakerBrush(row.Speaker),
+                    Background = ResolveSpeakerBrush(speakerKey),
                     IsHitTestVisible = false
                 });
             }
