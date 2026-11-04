@@ -1030,26 +1030,35 @@ namespace GalExcleTools
                 });
             }
 
-            // 「刚才播过」的标记：行底部一条 2px 主题色线。
+            // 播放进度条：一条 2px 的轨道（白）+ 一条从左侧生长的绿线。
             //
-            // 两个细节都是刻意的：
+            // 两个细节是刻意的：
             // · 靠下对齐放在第 0 行里，**不新增行** —— 新增一行会让每行都长高 2px，
-            //   而它只是标记，不该改变排版；
+            //   而它只是指示，不该改变排版；
             // · 必须**最后**加，否则会被后面的单元格盖住（同级子元素按添加顺序叠）。
-            var playMarker = new Border
+            var progressTrack = new Border
             {
                 Height = 2,
-                Background = Application.Current.Resources["AccentFillColorDefaultBrush"] as Brush,
                 VerticalAlignment = VerticalAlignment.Bottom,
-                Visibility = Visibility.Collapsed,
-                IsHitTestVisible = false,
-                // 缩放原点放在正中间，线条才会"从中间向两侧铺开"，而不是从左边拉出来。
-                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
-                RenderTransform = new ScaleTransform { ScaleX = 1, ScaleY = 1 }
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF)),
+                IsHitTestVisible = false
             };
-            Grid.SetColumnSpan(playMarker, grid.ColumnDefinitions.Count);
-            grid.Children.Add(playMarker);
-            _voicePlayMarkers[row.Id] = playMarker;
+            Grid.SetColumnSpan(progressTrack, grid.ColumnDefinitions.Count);
+            grid.Children.Add(progressTrack);
+
+            var progressFill = new Border
+            {
+                Height = 2,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Background = Application.Current.Resources["AccentFillColorDefaultBrush"] as Brush,
+                IsHitTestVisible = false,
+                // 从头往右长：原点是左边中点，ScaleX 直接从 0 到 1。
+                RenderTransformOrigin = new Windows.Foundation.Point(0, 0.5),
+                RenderTransform = new ScaleTransform { ScaleX = 0 }
+            };
+            Grid.SetColumnSpan(progressFill, grid.ColumnDefinitions.Count);
+            grid.Children.Add(progressFill);
+            _voiceProgressFills[row.Id] = progressFill;
 
             return grid;
         }
@@ -1200,7 +1209,9 @@ namespace GalExcleTools
                 Tag = row.Id
             };
             UpdateProjectVoicePreviewButton(button, voicePath);
-            button.Click += async (_, _) => await PlayProjectVoicePreviewAsync(row);
+            // 播放/暂停要换图标，按钮得留个引用（见 SetVoicePreviewButtonGlyph）。
+            _voicePreviewButtons[row.Id] = button;
+            button.Click += async (_, _) => await ToggleProjectVoicePreviewAsync(row);
             return button;
         }
 
@@ -1211,7 +1222,16 @@ namespace GalExcleTools
             ToolTipService.SetToolTip(button, canPreview ? "播放语音测试" : "当前行没有可播放的语音");
         }
 
-        private async Task PlayProjectVoicePreviewAsync(ProjectTextRow row)
+        /// <summary>
+        /// 试听按钮：**播放 / 暂停切换**。
+        ///
+        /// 以前不管什么状态都重设 Source 再 Play，所以点第二次等于"从头再播"，
+        /// 想暂停根本没门（2026-11-04 用户实测）。现在分三种情况：
+        /// · 正在播这一行 → 暂停（进度停在原地，绿条也停住）
+        /// · 暂停的就是这一行 → 从原位置继续
+        /// · 其它情况（换了一行 / 上一条已播完）→ 换源，从头播
+        /// </summary>
+        private async Task ToggleProjectVoicePreviewAsync(ProjectTextRow row)
         {
             if (!_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) || !File.Exists(voicePath))
             {
@@ -1219,12 +1239,37 @@ namespace GalExcleTools
                 return;
             }
 
+            var isSameRow = string.Equals(_voicePlayingRowId, row.Id, StringComparison.Ordinal);
+            var state = _projectVoicePreviewPlayer.PlaybackSession.PlaybackState;
+
+            if (isSameRow && state == MediaPlaybackState.Playing)
+            {
+                _projectVoicePreviewPlayer.Pause();
+                _voicePreviewPaused = true;
+                SetVoicePreviewButtonGlyph(row.Id, isPlaying: false);
+                return;
+            }
+
+            if (isSameRow && _voicePreviewPaused && state == MediaPlaybackState.Paused)
+            {
+                _projectVoicePreviewPlayer.Play();
+                _voicePreviewPaused = false;
+                SetVoicePreviewButtonGlyph(row.Id, isPlaying: true);
+                return;
+            }
+
+            // 换一条：先清掉上一条的进度与图标，再装新的。
+            ResetVoicePreviewProgress();
+
             try
             {
                 var file = await StorageFile.GetFileFromPathAsync(voicePath);
                 _projectVoicePreviewPlayer.Source = MediaSource.CreateFromStorageFile(file);
                 _projectVoicePreviewPlayer.Play();
-                MarkVoicePlayingRow(row.Id);
+
+                _voicePlayingRowId = row.Id;
+                _voicePreviewPaused = false;
+                SetVoicePreviewButtonGlyph(row.Id, isPlaying: true);
                 AppendLog(LogKind.Info, $"试听语音：{Path.GetFileName(voicePath)}");
             }
             catch (Exception ex)
@@ -1242,6 +1287,8 @@ namespace GalExcleTools
         {
             _projectVoicePreviewPlayer.Pause();
             _projectVoicePreviewPlayer.Source = null;
+            // 停播也要把进度条和图标复位，否则那一行会永远停在"正在播"的样子。
+            ResetVoicePreviewProgress();
         }
 
         private static Border CreateProjectVoicePreviewCell(Button button)

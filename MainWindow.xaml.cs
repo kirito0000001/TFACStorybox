@@ -588,6 +588,14 @@ namespace GalExcleTools
             _globalProgressElapsedTimer = DispatcherQueue.CreateTimer();
             _globalProgressElapsedTimer.Interval = TimeSpan.FromSeconds(1);
             _globalProgressElapsedTimer.Tick += GlobalProgressElapsedTimer_Tick;
+
+            // 语音试听的进度与收尾。
+            // PositionChanged 是从**后台线程**发出来的，直接动 UI 会 0x8001010E，
+            // 所以一律排队回 UI 线程再处理。
+            _projectVoicePreviewPlayer.MediaEnded += (_, _) =>
+                DispatcherQueue.TryEnqueue(ResetVoicePreviewProgress);
+            _projectVoicePreviewPlayer.PlaybackSession.PositionChanged += (_, _) =>
+                DispatcherQueue.TryEnqueue(UpdateVoicePlaybackProgress);
             RegisterAssetLibraryExpanderLazyLoading();
             RegisterCharacterDetailExpanderLazyLoading();
             // 参考层（F1/F2）：加速器挂在 RootGrid 上，所以任何页面都按得动。

@@ -56,16 +56,23 @@ namespace GalExcleTools
             new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
-        /// 每行的「刚才播放过」标记（行底部那条 2px 主题色线），key = 行 Id。
+        /// 每行的播放进度条填充（行底部那条绿线），key = 行 Id。
         ///
-        /// 用户对照着听的时候，回头要能一眼看出刚才播的是哪一条 ——
-        /// 只标当前这一条，播下一条时把上一条撤掉（不然满屏都是线，等于没标）。
+        /// 以前这里只是"播过就点亮"的标记；现在改成真实进度：ScaleX = 播放位置占比，
+        /// 暂停时停住、换一条时归零。
         /// </summary>
-        private readonly Dictionary<string, Border> _voicePlayMarkers =
+        private readonly Dictionary<string, Border> _voiceProgressFills =
             new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>当前被标记为"正在/刚播过"的行 Id。</summary>
+        /// <summary>每行的试听按钮，key = 行 Id。播放/暂停要换图标，得留个引用。</summary>
+        private readonly Dictionary<string, Button> _voicePreviewButtons =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>当前正在/刚暂停的行 Id。</summary>
         private string? _voicePlayingRowId;
+
+        /// <summary>当前是否处于"暂停但可继续"的状态（区别于换了一条重播）。</summary>
+        private bool _voicePreviewPaused;
 
         /// <summary>
         /// 「正在跑一批语音」的互斥标记。全局进度条不是模态的，
@@ -126,7 +133,8 @@ namespace GalExcleTools
         {
             _voiceDbCells.Clear();
             _voiceButtons.Clear();
-            _voicePlayMarkers.Clear();
+            _voiceProgressFills.Clear();
+            _voicePreviewButtons.Clear();
             _voicePlayingRowId = null;
             _chapterVoiceLoudness.Clear();
             if (VoiceLoudnessNormalizeButton is not null)
@@ -1342,69 +1350,55 @@ namespace GalExcleTools
         /// 只保留一条 —— 每条播过的都留着线，满屏都是绿的，等于没标。
         /// 页面重铺时标记全部重建（见 <see cref="ResetVoiceLoudnessColumnState"/>），自然清空。
         /// </summary>
-        private void MarkVoicePlayingRow(string rowId)
+        /// <summary>
+        /// 按播放进度更新当前行的绿条（ScaleX = 已播 / 总长）。
+        ///
+        /// 用缩放而不是改 Width：不必等布局算出行宽，也不会每 100ms 触发一次布局 ——
+        /// 一屏几百行时，后者会把滚动搞卡。
+        /// </summary>
+        private void UpdateVoicePlaybackProgress()
         {
-            if (string.Equals(_voicePlayingRowId, rowId, StringComparison.Ordinal))
+            if (_voicePlayingRowId is null ||
+                !_voiceProgressFills.TryGetValue(_voicePlayingRowId, out var fill))
             {
                 return;
             }
 
-            if (_voicePlayingRowId is not null &&
-                _voicePlayMarkers.TryGetValue(_voicePlayingRowId, out var previous))
+            var session = _projectVoicePreviewPlayer.PlaybackSession;
+            var total = session.NaturalDuration;
+            if (total <= TimeSpan.Zero || fill.RenderTransform is not ScaleTransform scale)
             {
-                previous.Visibility = Visibility.Collapsed;
+                return;
             }
 
-            _voicePlayingRowId = rowId;
-            if (_voicePlayMarkers.TryGetValue(rowId, out var marker))
-            {
-                marker.Visibility = Visibility.Visible;
-                PlayVoiceMarkerEntrance(marker);
-            }
+            var ratio = Math.Clamp(session.Position.TotalMilliseconds / total.TotalMilliseconds, 0d, 1d);
+            scale.ScaleX = ratio;
         }
 
-        /// <summary>
-        /// 标记线的入场：**从中间向两侧铺开 + 渐入**，200ms。
-        ///
-        /// 为什么用 200ms 而不是更长：这条线只是"刚才播过"的提示，
-        /// 用户视线在音频和文本之间来回跳，动画抢戏反而碍事。
-        /// </summary>
-        private static void PlayVoiceMarkerEntrance(Border marker)
+        /// <summary>把当前行的进度归零、按钮恢复成"播放"，并忘掉当前行。</summary>
+        private void ResetVoicePreviewProgress()
         {
-            if (marker.RenderTransform is not ScaleTransform scale)
+            if (_voicePlayingRowId is not null)
             {
-                return;
+                if (_voiceProgressFills.TryGetValue(_voicePlayingRowId, out var fill) &&
+                    fill.RenderTransform is ScaleTransform scale)
+                {
+                    scale.ScaleX = 0;
+                }
+
+                SetVoicePreviewButtonGlyph(_voicePlayingRowId, isPlaying: false);
             }
 
-            // 兜底：先把 Opacity 落成 1、缩放归位到可见状态。
-            // 万一 Storyboard 没跑起来（目标不在树里等），线至少是"看着正常"的，
-            // 不会留一个看不见的标记 —— 那种问题排查起来最费劲。
-            marker.Opacity = 1;
-            scale.ScaleX = 0;
+            _voicePlayingRowId = null;
+            _voicePreviewPaused = false;
+        }
 
-            var duration = new Duration(TimeSpan.FromMilliseconds(200));
-            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-
-            var grow = new DoubleAnimation { From = 0, To = 1, Duration = duration, EasingFunction = ease };
-            Storyboard.SetTarget(grow, scale);
-            Storyboard.SetTargetProperty(grow, "ScaleX");
-
-            var fade = new DoubleAnimation { From = 0, To = 1, Duration = duration, EasingFunction = ease };
-            Storyboard.SetTarget(fade, marker);
-            Storyboard.SetTargetProperty(fade, "Opacity");
-
-            var storyboard = new Storyboard();
-            storyboard.Children.Add(grow);
-            storyboard.Children.Add(fade);
-
-            try
+        private void SetVoicePreviewButtonGlyph(string rowId, bool isPlaying)
+        {
+            if (_voicePreviewButtons.TryGetValue(rowId, out var button))
             {
-                storyboard.Begin();
-            }
-            catch (Exception)
-            {
-                // 动画失败不影响功能：缩放落回 1，线静态显示。
-                scale.ScaleX = 1;
+                button.Content = new SymbolIcon(isPlaying ? Symbol.Pause : Symbol.Play);
+                ToolTipService.SetToolTip(button, isPlaying ? "暂停" : "播放语音测试");
             }
         }
 
