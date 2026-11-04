@@ -9,6 +9,7 @@ using GalExcleTools.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 // PickerLocationId 在这个命名空间里。本项目其它 partial 都是逐个文件自己 using，
 // 没有 global using —— 漏了就是 CS0103（2026-11-02 编译时就是这么撞的）。
 using Windows.Storage.Pickers;
@@ -1143,6 +1144,52 @@ namespace GalExcleTools
             if (_voicePlayMarkers.TryGetValue(rowId, out var marker))
             {
                 marker.Visibility = Visibility.Visible;
+                PlayVoiceMarkerEntrance(marker);
+            }
+        }
+
+        /// <summary>
+        /// 标记线的入场：**从中间向两侧铺开 + 渐入**，200ms。
+        ///
+        /// 为什么用 200ms 而不是更长：这条线只是"刚才播过"的提示，
+        /// 用户视线在音频和文本之间来回跳，动画抢戏反而碍事。
+        /// </summary>
+        private static void PlayVoiceMarkerEntrance(Border marker)
+        {
+            if (marker.RenderTransform is not ScaleTransform scale)
+            {
+                return;
+            }
+
+            // 兜底：先把 Opacity 落成 1、缩放归位到可见状态。
+            // 万一 Storyboard 没跑起来（目标不在树里等），线至少是"看着正常"的，
+            // 不会留一个看不见的标记 —— 那种问题排查起来最费劲。
+            marker.Opacity = 1;
+            scale.ScaleX = 0;
+
+            var duration = new Duration(TimeSpan.FromMilliseconds(200));
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+            var grow = new DoubleAnimation { From = 0, To = 1, Duration = duration, EasingFunction = ease };
+            Storyboard.SetTarget(grow, scale);
+            Storyboard.SetTargetProperty(grow, "ScaleX");
+
+            var fade = new DoubleAnimation { From = 0, To = 1, Duration = duration, EasingFunction = ease };
+            Storyboard.SetTarget(fade, marker);
+            Storyboard.SetTargetProperty(fade, "Opacity");
+
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(grow);
+            storyboard.Children.Add(fade);
+
+            try
+            {
+                storyboard.Begin();
+            }
+            catch (Exception)
+            {
+                // 动画失败不影响功能：缩放落回 1，线静态显示。
+                scale.ScaleX = 1;
             }
         }
 

@@ -505,7 +505,10 @@ namespace GalExcleTools
                 Background = Application.Current.Resources["AccentFillColorDefaultBrush"] as Brush,
                 VerticalAlignment = VerticalAlignment.Bottom,
                 Visibility = Visibility.Collapsed,
-                IsHitTestVisible = false
+                IsHitTestVisible = false,
+                // 缩放原点放在正中间，线条才会"从中间向两侧铺开"，而不是从左边拉出来。
+                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+                RenderTransform = new ScaleTransform { ScaleX = 1, ScaleY = 1 }
             };
             Grid.SetColumnSpan(playMarker, grid.ColumnDefinitions.Count);
             grid.Children.Add(playMarker);
