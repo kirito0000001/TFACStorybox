@@ -191,7 +191,8 @@ namespace GalExcleTools
                 ToolboxDialog.BuildField(
                     "同步播放",
                     syncPlaybackSwitch,
-                    "打开后点试听会把各音轨同时播出来（用于需要叠音的台词）。"));
+                    "打开后点试听会把各音轨同时播出来（用于需要叠音的台词）。"),
+                BuildSpeakerIndicatorField(out var speakerChecks));
 
             var confirmed = await ToolboxDialog.ShowAsync(
                 RootGrid.XamlRoot,
@@ -210,6 +211,10 @@ namespace GalExcleTools
 
             _voiceTrackSettings.TrackCount = count;
             _voiceTrackSettings.SyncPlayback = syncPlaybackSwitch.IsOn;
+            _voiceTrackSettings.SpeakersWithVoice = speakerChecks
+                .Where(pair => pair.Box.IsChecked == true)
+                .Select(pair => pair.Speaker)
+                .ToList();
             _voiceTrackSettings.Normalize();
             _voiceTrackSettingsStore.Write(_currentProject, _voiceTrackSettings);
             RefreshProjectTextToolPage();
@@ -257,6 +262,161 @@ namespace GalExcleTools
             }
 
             flyout.ShowAt(ProjectTextToolVoiceTrackButton);
+        }
+
+        private Dictionary<string, string> _speakerColorHex = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// 说话人标识：把本章出现过、且被勾了「有语音」的角色，在台词行左侧画一条角色色竖线。
+        /// 列表放在弹窗内滚动 —— 一章几十个角色，平铺会把弹窗撑成一条长龙。
+        /// </summary>
+        private UIElement BuildSpeakerIndicatorField(out List<(string Speaker, CheckBox Box)> checks)
+        {
+            checks = [];
+
+            var speakers = _projectTextRows
+                .Where(row => _selectedTextToolChapter is not null &&
+                    string.Equals(row.ChapterCode, _selectedTextToolChapter.Code, StringComparison.OrdinalIgnoreCase))
+                .Select(row => row.Speaker)
+                .Where(speaker => !string.IsNullOrWhiteSpace(speaker))
+                .Select(speaker => speaker.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(speaker => speaker, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (speakers.Count == 0)
+            {
+                return ToolboxDialog.BuildField(
+                    "说话人标识",
+                    new TextBlock
+                    {
+                        Text = "本章的剧情表里还没有填说话人（TalkChar）。",
+                        TextWrapping = TextWrapping.Wrap,
+                        Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
+                    });
+            }
+
+            var panel = new StackPanel { Spacing = 2 };
+            foreach (var speaker in speakers)
+            {
+                var box = new CheckBox
+                {
+                    Content = speaker,
+                    IsChecked = _voiceTrackSettings.SpeakersWithVoice.Contains(speaker, StringComparer.OrdinalIgnoreCase)
+                };
+                checks.Add((speaker, box));
+                panel.Children.Add(box);
+            }
+
+            return ToolboxDialog.BuildField(
+                "说话人标识（勾选 = 该角色有语音）",
+                new ScrollViewer
+                {
+                    Content = panel,
+                    MaxHeight = 220,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+                },
+                "勾上的角色，其台词行左侧会出现一条角色专属颜色的竖线。");
+        }
+
+        /// <summary>角色名 → 颜色（取自立绘设置）。每次重铺读一次，不对每一行读文件。</summary>
+        private Dictionary<string, string> BuildSpeakerColorMap()
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (_currentProject is null)
+            {
+                return map;
+            }
+
+            try
+            {
+                var library = _projectWorkspaceService.ResolveProjectAssetLibrary(Settings.ProjectRootPath, _currentProject);
+                if (library is null)
+                {
+                    return map;
+                }
+
+                foreach (var character in _characterWorkspaceService.GetCharactersByName(library))
+                {
+                    if (!string.IsNullOrWhiteSpace(character.ColorHex))
+                    {
+                        map[character.Name] = character.ColorHex;
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                // 颜色读不到不该让页面开不了 —— 退回按名字算的稳定色。
+                AppendLog(LogKind.Warning, "读取角色颜色失败，说话人竖线将使用按名字生成的颜色。", error);
+            }
+
+            return map;
+        }
+
+        private Brush ResolveSpeakerBrush(string speaker)
+        {
+            if (_speakerColorHex.TryGetValue(speaker, out var hex) && TryParseHexColor(hex, out var configured))
+            {
+                return new SolidColorBrush(configured);
+            }
+
+            // 没设颜色的角色：用名字算一个**稳定**的颜色。
+            // 不能用 string.GetHashCode()——.NET 里它每个进程都不一样，重启就换色。
+            var hash = 0;
+            foreach (var ch in speaker)
+            {
+                hash = unchecked(hash * 31 + ch) & 0x7FFFFFFF;
+            }
+
+            return new SolidColorBrush(FromHsl(hash % 360, 0.55, 0.58));
+        }
+
+        private static bool TryParseHexColor(string hex, out Windows.UI.Color color)
+        {
+            color = default;
+            if (string.IsNullOrWhiteSpace(hex))
+            {
+                return false;
+            }
+
+            var text = hex.Trim().TrimStart('#');
+            if (text.Length == 8)
+            {
+                text = text[2..]; // 带 alpha 的写法只取 RGB
+            }
+
+            if (text.Length != 6 ||
+                !byte.TryParse(text[..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var r) ||
+                !byte.TryParse(text[2..4], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var g) ||
+                !byte.TryParse(text[4..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b))
+            {
+                return false;
+            }
+
+            color = Windows.UI.Color.FromArgb(0xFF, r, g, b);
+            return true;
+        }
+
+        private static Windows.UI.Color FromHsl(double hueDegrees, double saturation, double lightness)
+        {
+            var chroma = (1 - Math.Abs(2 * lightness - 1)) * saturation;
+            var hue = hueDegrees / 60d;
+            var x = chroma * (1 - Math.Abs(hue % 2 - 1));
+            var (r1, g1, b1) = hue switch
+            {
+                < 1 => (chroma, x, 0d),
+                < 2 => (x, chroma, 0d),
+                < 3 => (0d, chroma, x),
+                < 4 => (0d, x, chroma),
+                < 5 => (x, 0d, chroma),
+                _ => (chroma, 0d, x)
+            };
+            var m = lightness - chroma / 2;
+            return Windows.UI.Color.FromArgb(
+                0xFF,
+                (byte)Math.Round((r1 + m) * 255),
+                (byte)Math.Round((g1 + m) * 255),
+                (byte)Math.Round((b1 + m) * 255));
         }
 
         private void UpdateVoiceTrackButtonState()
@@ -401,6 +561,10 @@ namespace GalExcleTools
             if (_currentProject is not null)
             {
                 _voiceTrackSettings = _voiceTrackSettingsStore.Read(_currentProject);
+                // 角色颜色一次读齐，逐行判断时只查字典（否则每行都会去读角色文件）。
+                _speakerColorHex = _projectTextToolMode == ProjectTextToolMode.Voice
+                    ? BuildSpeakerColorMap()
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             }
 
             UpdateVoiceTrackButtonState();
@@ -693,6 +857,22 @@ namespace GalExcleTools
             grid.Children.Add(durationCell);
             grid.Children.Add(loudnessCell);
             grid.Children.Add(CreateProjectVoicePreviewCell(previewButton));
+
+            // 说话人竖线：勾了「有语音」的角色，台词行左侧一条角色色竖线。
+            // 宽度和底部那条播放标记线一致，只是方向不同；**没有动画** ——
+            // 它是常驻标识，不是一次性反馈，动起来反而吵。
+            if (!string.IsNullOrWhiteSpace(row.Speaker) &&
+                _voiceTrackSettings.SpeakersWithVoice.Contains(row.Speaker, StringComparer.OrdinalIgnoreCase))
+            {
+                grid.Children.Add(new Border
+                {
+                    Width = 2,
+                    Margin = new Thickness(0, 4, 0, 4),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Background = ResolveSpeakerBrush(row.Speaker),
+                    IsHitTestVisible = false
+                });
+            }
 
             // 「刚才播过」的标记：行底部一条 2px 主题色线。
             //

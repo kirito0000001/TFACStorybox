@@ -140,7 +140,9 @@ internal sealed record ProjectTextRow(
     string ChapterName,
     int Section,
     string RowName,
-    string Text);
+    string Text,
+    /// <summary>说话人（CSV 的 TalkChar 列）。空串表示旁白或没填。</summary>
+    string Speaker);
 
 internal sealed class ProjectVoiceMapState
 {

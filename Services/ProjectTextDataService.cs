@@ -51,7 +51,8 @@ internal sealed class ProjectTextDataService
                     chapter.Name,
                     section,
                     rowName,
-                    text));
+                    text,
+                    row.Get("TalkChar")));
             }
         }
 

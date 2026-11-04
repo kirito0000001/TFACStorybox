@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 
 namespace GalExcleTools.Services;
@@ -28,10 +30,23 @@ internal sealed class VoiceTrackSettings
     /// </summary>
     public bool SyncPlayback { get; set; }
 
+    /// <summary>
+    /// 有语音的说话人（角色名，来自 CSV 的 TalkChar）。
+    ///
+    /// 勾上的角色，其台词行左侧会出现一条角色专属颜色的竖线 —— 用来一眼区分
+    /// "这句是谁说的、有没有配音"，比逐行看语音列快得多。
+    /// </summary>
+    public List<string> SpeakersWithVoice { get; set; } = [];
+
     public VoiceTrackSettings Normalize()
     {
         TrackCount = Math.Clamp(TrackCount, MinTrackCount, MaxTrackCount);
         ActiveTrack = Math.Clamp(ActiveTrack, MinTrackCount, TrackCount);
+        SpeakersWithVoice = (SpeakersWithVoice ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         return this;
     }
 }
