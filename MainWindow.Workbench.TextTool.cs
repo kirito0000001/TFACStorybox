@@ -984,6 +984,7 @@ namespace GalExcleTools
             _voiceButtons[row.Id] = button;
             var previewButton = CreateProjectVoicePreviewButton(row, hasVoice ? value : string.Empty);
             button.ContextFlyout = GridViewItemFactory.CreateMenu(
+                GridViewItemFactory.CreateMenuItem("在编辑器中打开", async (_, _) => await OpenProjectTextRowInStoryEditorAsync(row)),
                 GridViewItemFactory.CreateMenuItem("更改备注", async (_, _) => await SetProjectVoiceRemarkAsync(row, rowCount, button, previewButton)),
                 GridViewItemFactory.CreateMenuItem("定位文件", (_, _) => RevealProjectVoiceFile(row)),
                 GridViewItemFactory.CreateMenuItem("编辑音频", (_, _) => EditProjectVoiceAudio(row)),

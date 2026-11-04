@@ -1606,6 +1606,49 @@ namespace GalExcleTools
         }
 
         /// <summary>
+        /// 「在编辑器中打开」：跳到剧情编辑器，并**定位到这一句**。
+        ///
+        /// 用途是"听着不对 → 立刻回去改台词"，省掉「切页 → 找章节 → 翻行」三步。
+        /// 定位优先用 StableId（行内容可以改、Id 不变），找不到再提示，不做模糊匹配 ——
+        /// 猜错行比不跳更糟：用户会以为改错了地方。
+        /// </summary>
+        private async Task OpenProjectTextRowInStoryEditorAsync(ProjectTextRow row)
+        {
+            if (_currentProject is null || _selectedTextToolChapter is null)
+            {
+                return;
+            }
+
+            var chapter = _selectedTextToolChapter;
+            try
+            {
+                await ShowStoryEditorPageAsync(chapter);
+
+                var index = _storyRows.FindIndex(item =>
+                    string.Equals(item.StableId, row.StableRowId, StringComparison.OrdinalIgnoreCase));
+                if (index < 0)
+                {
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "没定位到那一句",
+                        $"「{chapter.Code}」里找不到对应行（表格可能被改过）。已打开编辑器，请手动翻一下。");
+                    return;
+                }
+
+                NavigateToStoryRow(index, rebuildPersistentState: true);
+            }
+            catch (Exception ex)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    "打开编辑器失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    ex,
+                    "从语音页打开剧情编辑器失败");
+            }
+        }
+
+        /// <summary>
         /// 「定位文件」：在资源管理器里**选中**这条语音（不是只打开文件夹）。
         /// 找不到文件就说清楚，不弹一个空窗口让人自己找。
         /// </summary>
