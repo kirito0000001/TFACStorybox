@@ -207,7 +207,11 @@ namespace GalExcleTools
             AddItem("未检查", "Unchecked");
             AddItem("缺少设置", "MissingVoiced");
 
-            var speakers = GetChapterSpeakerKeys();
+            // 只给"有语音"的角色生成 —— 依据就是说话人标识里的勾选。
+            // 没勾的角色不出现：这个菜单是拿来找配音的，不是角色字典。
+            var speakers = GetChapterSpeakerKeys()
+                .Where(key => _voiceTrackSettings.SpeakersWithVoice.Contains(key, StringComparer.OrdinalIgnoreCase))
+                .ToList();
             if (speakers.Count > 0)
             {
                 flyout.Items.Add(new MenuFlyoutSeparator());
