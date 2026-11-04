@@ -638,6 +638,108 @@ namespace GalExcleTools
             return renamed;
         }
 
+        /// <summary>
+        /// 清理语音文件夹里的「孤儿文件」：没有任何台词行引用、却还躺在 <c>Voice/{章节}</c> 里的 wav。
+        ///
+        /// 【为什么会有】多试了一版、改备注后旧名字的残留、手工拷进来的备选……
+        /// 它们既会被同步当成多余素材，也会被规整挑中去处理 —— 2026-11-04 用户就撞到一条
+        /// `Vo-012-不要S3.wav`：规整反复跑它，表格里却一条都看不到（因为它没挂到任何行）。
+        ///
+        /// 【为什么不直接删】音频是不可再生的人工产物。一律**移到项目备份目录**并报出路径，
+        /// 真要腾空间让人自己去删那个目录 —— 工具不该替人做不可撤销的决定。
+        ///
+        /// 【怎么判断"没被引用"】拿映射表里的路径做参照，**全路径或同名任一命中就算被引用**。
+        /// 宁可漏判（留着），不可错删：映射里可能存相对路径，所以还要按文件名兜一层。
+        /// </summary>
+        private int CleanupOrphanVoiceFiles(out string backupFolder)
+        {
+            backupFolder = string.Empty;
+            if (_currentProject is null || _selectedTextToolChapter is null)
+            {
+                return 0;
+            }
+
+            var chapterFolder = WorkspacePathUtility.GetProjectChapterVoiceFolderPath(
+                _currentProject, _selectedTextToolChapter.Code);
+            if (!Directory.Exists(chapterFolder))
+            {
+                return 0;
+            }
+
+            var referencedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var referencedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mappedPath in _projectVoiceMapState.Voices.Values)
+            {
+                if (string.IsNullOrWhiteSpace(mappedPath))
+                {
+                    continue;
+                }
+
+                referencedNames.Add(Path.GetFileName(mappedPath));
+                try
+                {
+                    referencedPaths.Add(Path.GetFullPath(mappedPath));
+                }
+                catch (Exception)
+                {
+                    // 路径畸形就只靠文件名兜底，不影响继续扫别的。
+                }
+            }
+
+            var orphans = Directory
+                .EnumerateFiles(chapterFolder, "*.wav", SearchOption.TopDirectoryOnly)
+                .Where(file =>
+                {
+                    var name = Path.GetFileName(file);
+                    if (referencedNames.Contains(name))
+                    {
+                        return false;
+                    }
+
+                    try
+                    {
+                        return !referencedPaths.Contains(Path.GetFullPath(file));
+                    }
+                    catch (Exception)
+                    {
+                        // 判断不了就当它被引用 —— 不删。
+                        return false;
+                    }
+                })
+                .ToList();
+
+            if (orphans.Count == 0)
+            {
+                return 0;
+            }
+
+            // 备份目录：{项目}/Tools/Backups/VoiceOrphans/{章节}-{时间戳}/
+            backupFolder = Path.Combine(
+                _currentProject.Path,
+                WorkspacePathUtility.ToolsFolderName,
+                "Backups",
+                "VoiceOrphans",
+                $"{_selectedTextToolChapter.Code}-{DateTime.Now:yyyyMMdd-HHmmss}");
+
+            var moved = 0;
+            foreach (var orphan in orphans)
+            {
+                try
+                {
+                    Directory.CreateDirectory(backupFolder);
+                    File.Move(orphan, Path.Combine(backupFolder, Path.GetFileName(orphan)));
+                    AppendLog(LogKind.Info, $"清理多余语音：{Path.GetFileName(orphan)} → {backupFolder}");
+                    moved++;
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    AppendLog(LogKind.Warning, $"清理多余语音失败：{Path.GetFileName(orphan)}", error);
+                }
+            }
+
+            return moved;
+        }
+
         /// <summary>把当前章节量到的数字写进缓存。只写「文件还在、值有效」的条目。</summary>
         private void WriteVoiceLoudnessCache(IReadOnlyList<string> files, VoiceLoudnessPreset preset)
         {
@@ -898,6 +1000,17 @@ namespace GalExcleTools
                 return;
             }
 
+            // ⓪ 先清理「没挂到任何行」的孤儿文件。
+            //
+            //    它们在文件夹里既会被同步当成多余素材，也会被规整挑中去处理 ——
+            //    而表格里一条都看不到（没有行），用户只会觉得"这工具在乱跑"。
+            //    移到备份目录而不是直接删：音频是不可再生的东西。
+            var orphanCount = CleanupOrphanVoiceFiles(out var orphanBackupFolder);
+            if (orphanCount > 0)
+            {
+                AppendLog(LogKind.Info, $"已清理 {orphanCount} 个多余语音文件，备份在：{orphanBackupFolder}");
+            }
+
             // ① 先把文件名规范掉（Unreal 非法字符 → _），再谈响度。
             //
             // 顺序不能反：改名会换掉缓存键与映射路径，先改完名再规整，
@@ -1073,7 +1186,8 @@ namespace GalExcleTools
                 ? string.Empty
                 : $"（未处理：{string.Join("、", skipParts)}）";
 
-            var summary = (renamedCount > 0 ? $"已规范 {renamedCount} 个文件名；" : string.Empty)
+            var summary = (orphanCount > 0 ? $"清理 {orphanCount} 个多余文件；" : string.Empty)
+                + (renamedCount > 0 ? $"已规范 {renamedCount} 个文件名；" : string.Empty)
                 + $"成功 {result.SuccessCount} / {result.Outcomes.Count} 条"
                 + (result.FailureCount > 0 ? $"，失败 {result.FailureCount} 条" : string.Empty)
                 + skipNote;
