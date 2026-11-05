@@ -22,6 +22,8 @@ Desktop.ini
 *.msixbundle
 *.cer
 
+.workbuddy
+
 # 语音规整用的 ffmpeg（150 MB，LGPL 共享构建）。**不提交，但必须留在工作目录里**：
 #   · csproj 把 Tools\** 当 Content 复制到输出目录，文件不在就打包少这一块，
 #     客户端一用就报「没找到 ffmpeg」；

@@ -1053,7 +1053,7 @@ namespace GalExcleTools
             {
                 var path = targets[index];
                 ReportVoiceStep(
-                    $"正在抢救 {index + 1} / {targets.Count}",
+                    $"正在抢救 {index + 1} / {targets.Count} · SoundCraft 限幅",
                     (double)index / targets.Count,
                     Path.GetFileName(path));
 
@@ -1353,14 +1353,33 @@ namespace GalExcleTools
                         (double)index / pending.Count,
                         Path.GetFileName(file));
 
-                    // 把 pymss 内部的百分比映射到"这一条占总进度多少"。
+                    // 主标题持续变化：条号 + 阶段 + 这一条内部的百分比。
+                    // 一条要 100 秒，标题不动的话看起来还是"卡住了"。
                     var fileIndex = index;
+                    var withinFraction = 0d;
+                    var phaseText = "准备中";
+
+                    void ReportDenoise()
+                    {
+                        ReportVoiceStep(
+                            $"正在去噪 {fileIndex + 1} / {pending.Count} · {phaseText} · {withinFraction * 100:0}%",
+                            (fileIndex + Math.Clamp(withinFraction, 0d, 1d)) / pending.Count,
+                            Path.GetFileName(file));
+                    }
+
+                    ReportDenoise();
                     var (succeeded, message) = await service.DenoiseAsync(
                         cliPath, modelDir, ffmpegPath, file, workDir,
-                        within => ReportVoiceStep(
-                            $"正在去噪 {fileIndex + 1} / {pending.Count}",
-                            (fileIndex + Math.Clamp(within, 0d, 1d)) / pending.Count,
-                            Path.GetFileName(file)),
+                        within =>
+                        {
+                            withinFraction = within;
+                            ReportDenoise();
+                        },
+                        phase =>
+                        {
+                            phaseText = phase;
+                            ReportDenoise();
+                        },
                         GetGlobalProgressCancellationToken());
 
                     if (succeeded)

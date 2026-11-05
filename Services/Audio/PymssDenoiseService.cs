@@ -49,6 +49,22 @@ internal sealed class PymssDenoiseService
         return CandidateModelDirs.FirstOrDefault(Directory.Exists);
     }
 
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(3000);
+            }
+        }
+        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // 已经退了就没什么可杀的。
+        }
+    }
+
     /// <summary>
     /// 从 tqdm 的一行里抠百分比。形如
     /// <c>Processing VR batches:  45%|████     | 1/3 [00:20&lt;00:35, 30s/it]</c>。
@@ -149,6 +165,7 @@ internal sealed class PymssDenoiseService
         string voicePath,
         string workDir,
         Action<double>? onProgress,
+        Action<string>? onPhase,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(workDir);
@@ -156,6 +173,7 @@ internal sealed class PymssDenoiseService
         // 先把素材拉到"模型熟悉的电平"再喂给它。
         // 这批语音大多在 -20 ~ -25 LUFS，直接去噪时模型的判断阈值会偏 ——
         // 拉到 -18 只是临时工位电平，最终响度由后面那一步统一到 -12。
+        onPhase?.Invoke("正在量电平");
         var workingPath = voicePath;
         var preGainPath = Path.Combine(workDir, "__denoise_pre.wav");
         var lufs = await MeasureLufsAsync(ffmpegPath, voicePath, cancellationToken).ConfigureAwait(false);
@@ -200,6 +218,8 @@ internal sealed class PymssDenoiseService
             startInfo.ArgumentList.Add(argument);
         }
 
+        onPhase?.Invoke("正在去噪");
+
         using var process = Process.Start(startInfo);
         if (process is null)
         {
@@ -213,22 +233,32 @@ internal sealed class PymssDenoiseService
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var lastPercent = -1.0;
 
-        while (true)
+        try
         {
-            var line = await process.StandardError.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-            if (line is null)
+            while (true)
             {
-                break;
-            }
+                var line = await process.StandardError.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (line is null)
+                {
+                    break;
+                }
 
-            var percent = ParseProgressPercent(line);
-            if (percent is null || onProgress is null || Math.Abs(percent.Value - lastPercent) < 0.5)
-            {
-                continue;
-            }
+                var percent = ParseProgressPercent(line);
+                if (percent is null || onProgress is null || Math.Abs(percent.Value - lastPercent) < 0.5)
+                {
+                    continue;
+                }
 
-            lastPercent = percent.Value;
-            onProgress(percent.Value / 100d);
+                lastPercent = percent.Value;
+                onProgress(percent.Value / 100d);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 只取消"读"没用：pymss 还在跑，界面就一直卡在"正在取消"。
+            // 必须把整棵进程树杀掉，才算真的停下。
+            TryKill(process);
+            throw;
         }
 
         var stdout = await stdoutTask.ConfigureAwait(false);
