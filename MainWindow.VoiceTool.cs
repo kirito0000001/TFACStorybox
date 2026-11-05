@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using GalExcleTools.Controls;
 using GalExcleTools.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
