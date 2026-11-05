@@ -1272,7 +1272,7 @@ namespace GalExcleTools
         private static void UpdateProjectVoiceButton(Button button, string voicePath)
         {
             var hasVoice = !string.IsNullOrWhiteSpace(voicePath);
-            button.Content = hasVoice ? Path.GetFileName(voicePath) : "点击选择语音文件";
+            button.Content = hasVoice ? Path.GetFileName(voicePath) : "点击/拖入 设置语音文件";
             button.Foreground = Application.Current.Resources[
                 hasVoice ? "TextFillColorPrimaryBrush" : "TextFillColorTertiaryBrush"] as Brush;
             button.FontWeight = hasVoice
