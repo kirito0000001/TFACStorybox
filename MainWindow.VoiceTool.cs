@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using GalExcleTools.Controls;
 using GalExcleTools.Services;
@@ -897,6 +898,137 @@ namespace GalExcleTools
         private double _voiceStepBasePercent;
 
         private double _voiceStepSpanPercent = 100;
+
+        /// <summary>
+        /// 影视化（轻度）：把对白往"贴脸、沉稳"的方向推一点。
+        ///
+        /// 四步缺一不可，顺序也不能换：
+        ///   高通 90Hz     去隆隆和喷麦
+        ///   250Hz -2.5dB  去胸腔浑浊（"闷"的主要来源）
+        ///   3kHz  +2dB    提"存在感"，贴脸感的来源
+        ///   去齿音 0.3    提亮之后必须补，否则 s/sh 发刺
+        ///   压缩 3:1      句内忽大忽小拉平 —— 专业感最大的来源
+        /// 最后再用 loudnorm + alimiter 收回 -12 / -3，保证不破坏规范。
+        /// </summary>
+        private const string CinematicLightFilter =
+            "highpass=f=90,"
+            + "equalizer=f=250:width_type=q:w=1.2:g=-2.5,"
+            + "equalizer=f=3000:width_type=q:w=1.2:g=2,"
+            + "deesser=i=0.3,"
+            + "acompressor=threshold=0.1:ratio=3:attack=10:release=150,"
+            + "loudnorm=I=-12:TP=-3,"
+            + "alimiter=limit=0.695:level=false";
+
+        /// <summary>右键「后期处理」的弹窗。目前只有一项，结构留好以后加别的。</summary>
+        private async Task ShowVoicePostProcessDialogAsync(ProjectTextRow row)
+        {
+            if (_currentProject is null ||
+                !_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) ||
+                !File.Exists(voicePath))
+            {
+                ShowChapterStatus(InfoBarSeverity.Warning, "没有可处理的语音", "请先为这一行设置 wav 文件。");
+                return;
+            }
+
+            var cinematic = new CheckBox
+            {
+                Content = "影视化（轻度）",
+                IsChecked = false,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var form = ToolboxDialog.BuildForm(
+                new TextBlock
+                {
+                    Text = Path.GetFileName(voicePath),
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
+                },
+                cinematic,
+                new TextBlock
+                {
+                    Text = "高通去隆隆 · 250Hz 减浑浊 · 3kHz 提贴脸 · 去齿音 · 3:1 压缩，"
+                        + "最后仍归一到 -12 LUFS / -3 dBTP。",
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush
+                });
+
+            if (!await ToolboxDialog.ShowAsync(RootGrid.XamlRoot, "后期处理", form, "应用", "取消"))
+            {
+                return;
+            }
+
+            if (cinematic.IsChecked != true)
+            {
+                return;
+            }
+
+            var ffmpegPath = await ResolveFfmpegPathAsync();
+            if (ffmpegPath is null)
+            {
+                return;
+            }
+
+            var temp = voicePath + ".post.wav";
+            try
+            {
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = ffmpegPath,
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                foreach (var argument in new[]
+                {
+                    "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", voicePath,
+                    "-af", CinematicLightFilter, "-ar", "48000", "-c:a", "pcm_s16le", temp
+                })
+                {
+                    startInfo.ArgumentList.Add(argument);
+                }
+
+                using var process = Process.Start(startInfo);
+                if (process is null)
+                {
+                    return;
+                }
+
+                await process.StandardError.ReadToEndAsync();
+                await process.WaitForExitAsync();
+
+                if (process.ExitCode != 0 || !File.Exists(temp))
+                {
+                    AtomicFileWriter.TryDelete(temp);
+                    ShowChapterStatus(InfoBarSeverity.Error, "后期处理失败", "ffmpeg 返回错误，详见 Log。");
+                    return;
+                }
+
+                File.Move(temp, voicePath, overwrite: true);
+
+                // 内容变了：旧测量作废，重新量一遍再把数字填回 DB 列。
+                var report = await _voiceBatchProcessor.MeasureAsync(
+                    ffmpegPath, [voicePath], VoiceLoudnessPreset.GameDialogue, null,
+                    CancellationToken.None);
+                ApplyVoiceLoudnessReport(report, GetCurrentChapterVoiceFiles());
+
+                // 这文件已经去过噪，换个 mtime 不该让它重跑 UVR。
+                new VoiceDenoiseCacheService().MarkDenoised(_currentProject, _selectedTextToolChapter!.Code, voicePath);
+
+                ShowFloatingTip(
+                    InfoBarSeverity.Success,
+                    "已应用影视化",
+                    Path.GetFileName(voicePath),
+                    logMessage: $"后期处理（影视化 轻度）：{Path.GetFileName(voicePath)}");
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                AtomicFileWriter.TryDelete(temp);
+                AppendLog(LogKind.Warning, $"后期处理失败：{Path.GetFileName(voicePath)}", error);
+            }
+        }
 
         /// <summary>设置弹窗里那个「清空所有音频处理」是否被点过。</summary>
         private bool _voiceResetRequested;
