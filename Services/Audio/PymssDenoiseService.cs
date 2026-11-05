@@ -62,7 +62,7 @@ internal sealed class PymssDenoiseService
         string ffmpegPath,
         IReadOnlyList<string> files,
         string workDir,
-        Action<double>? onProgress,
+        Action<double, string>? onProgress,
         Action<string>? onPhase,
         CancellationToken cancellationToken)
     {
@@ -99,7 +99,10 @@ internal sealed class PymssDenoiseService
             }
 
             // 准备只占一小截：这一步每条 0.2 秒，推理才是大头。
-            onProgress?.Invoke((index + 1) / (double)files.Count * 0.08);
+            onProgress?.Invoke(
+                (index + 1) / (double)files.Count * 0.08,
+                $"第 {index + 1} / {files.Count} 条 · {Path.GetFileName(source)} · "
+                + (double.IsNaN(lufs) ? "量不出响度，按原样送入" : $"{lufs:0.0} → -18.0 LUFS（{gain:+0.0;-0.0} dB）"));
         }
 
         if (staged.Count == 0)
@@ -139,7 +142,8 @@ internal sealed class PymssDenoiseService
             }
         }
 
-        onProgress?.Invoke(1d);
+        onProgress?.Invoke(1d, $"回写完成：{succeeded.Count} 条成功"
+            + (failed.Count > 0 ? $"，{failed.Count} 条失败" : string.Empty));
         return new DenoiseBatchResult(succeeded, failed);
     }
 
@@ -148,7 +152,7 @@ internal sealed class PymssDenoiseService
         string modelDir,
         string inputDir,
         string outputDir,
-        Action<double>? onProgress,
+        Action<double, string>? onProgress,
         Action<string>? onPhase,
         CancellationToken cancellationToken)
     {
@@ -213,8 +217,13 @@ internal sealed class PymssDenoiseService
 
                 lastPercent = percent.Value;
 
+                var (doneFiles, totalFiles) = ParseFileCounter(line);
+                var counter = totalFiles > 0 ? $"第 {doneFiles} / {totalFiles} 条 · " : string.Empty;
+
                 // 推理占整段 8% ~ 100%：准备只要零点几秒，推理是几十秒到几十分钟。
-                onProgress?.Invoke(0.08 + percent.Value / 100d * 0.92);
+                onProgress?.Invoke(
+                    0.08 + percent.Value / 100d * 0.92,
+                    $"{counter}UVR-DeNoise 批内 {percent.Value:0}% · 已完成 {doneFiles} 条");
             }
         }
         catch (OperationCanceledException)
@@ -227,6 +236,21 @@ internal sealed class PymssDenoiseService
         await stdoutTask.ConfigureAwait(false);
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         return process.ExitCode;
+    }
+
+    /// <summary>从 tqdm 的 <c>5/40</c> 里抠出"第几条 / 共几条"。</summary>
+    private static (int Done, int Total) ParseFileCounter(string line)
+    {
+        var match = Regex.Match(line, @"(\d+)/(\d+)");
+        if (!match.Success ||
+            !int.TryParse(match.Groups[1].Value, out var done) ||
+            !int.TryParse(match.Groups[2].Value, out var total) ||
+            total <= 0 || done > total)
+        {
+            return (0, 0);
+        }
+
+        return (done, total);
     }
 
     /// <summary>

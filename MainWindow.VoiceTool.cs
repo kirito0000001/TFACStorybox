@@ -891,6 +891,9 @@ namespace GalExcleTools
         /// 为什么按**预估耗时**分配而不是按条目数：去噪一条要 100 秒，
         /// 格式转换一条不到 0.5 秒 —— 平均分的话进度条会先疯跑再卡死。
         /// </summary>
+        /// <summary>规整的总计时器 —— 用来在副标题里显示"已用 / 剩余"。</summary>
+        private readonly System.Diagnostics.Stopwatch _voiceProgressWatch = new();
+
         private double _voiceStepBasePercent;
 
         private double _voiceStepSpanPercent = 100;
@@ -1022,13 +1025,45 @@ namespace GalExcleTools
             // 进度回调可能来自线程池（服务里用了 ConfigureAwait(false)），
             // 直接改 XAML 会抛 RPC_E_WRONG_THREAD —— 而那个异常会把整批处理打断，
             // 表现就是"卡在某个百分比不动"（2026-11-05 实测）。
+            var text = WithTiming(percent / 100d, detail);
             if (DispatcherQueue.HasThreadAccess)
             {
-                UpdateGlobalProgress(message, percent, detail);
+                UpdateGlobalProgress(message, percent, text);
                 return;
             }
 
-            DispatcherQueue.TryEnqueue(() => UpdateGlobalProgress(message, percent, detail));
+            DispatcherQueue.TryEnqueue(() => UpdateGlobalProgress(message, percent, text));
+        }
+
+        /// <summary>
+        /// 把"已用多久 / 大概还要多久"接到副标题尾巴上。
+        ///
+        /// 剩余时间用 elapsed × (1-f)/f 估：前 3% 不显示 —— 分母太小会算出离谱的数。
+        /// </summary>
+        private string WithTiming(double fraction, string? detail)
+        {
+            var text = detail ?? string.Empty;
+            if (!_voiceProgressWatch.IsRunning)
+            {
+                return text;
+            }
+
+            var elapsed = _voiceProgressWatch.Elapsed;
+            var parts = new List<string>(2);
+            if (text.Length > 0)
+            {
+                parts.Add(text);
+            }
+
+            parts.Add("已用 " + elapsed.ToString(@"mm\:ss"));
+
+            if (fraction > 0.03 && fraction < 1)
+            {
+                var remaining = TimeSpan.FromTicks((long)(elapsed.Ticks * (1 - fraction) / fraction));
+                parts.Add("剩余约 " + remaining.ToString(@"mm\:ss"));
+            }
+
+            return string.Join(" · ", parts);
         }
 
         private async Task<List<string>> RescueStillOffWithSoundCraftAsync(VoiceNormalizeResult result, string ffmpegPath)
@@ -1357,8 +1392,9 @@ namespace GalExcleTools
 
             // 整批跑一次：pymss 每次启动都要重新加载模型（十几秒），
             // 一条一进程的话 40 条光加载就白烧 10 分钟。
-            var phaseText = "正在准备";
+            var phaseText = "正在准备（拉电平）";
             var batchProgress = 0d;
+            var batchDetail = $"{pending.Count} 条待处理";
 
             void ReportDenoise()
             {
@@ -1366,15 +1402,16 @@ namespace GalExcleTools
                 ReportVoiceStep(
                     phaseText,
                     batchProgress,
-                    $"{pending.Count} 条 · {batchProgress * 100:0}%");
+                    $"{batchProgress * 100:0}% · {batchDetail}");
             }
 
             ReportDenoise();
             var batch = await service.DenoiseBatchAsync(
                 cliPath, modelDir, ffmpegPath, pending, workDir,
-                value =>
+                (value, detail) =>
                 {
                     batchProgress = Math.Clamp(value, 0d, 1d);
+                    batchDetail = detail;
                     ReportDenoise();
                 },
                 phase =>
@@ -1464,7 +1501,7 @@ namespace GalExcleTools
                 ReportVoiceStep(
                     "正在统一格式",
                     (double)(convertedIndex - 1) / Math.Max(1, candidates.Count),
-                    $"{convertedIndex} / {candidates.Count} · {(double)(convertedIndex - 1) / Math.Max(1, candidates.Count) * 100:0}%");
+                    $"{convertedIndex} / {candidates.Count} · {(double)(convertedIndex - 1) / Math.Max(1, candidates.Count) * 100:0}% · {Path.GetFileName(file)}");
 
                 var name = Path.GetFileName(file);
                 var tempPath = file + ".converting.wav";
@@ -1548,6 +1585,7 @@ namespace GalExcleTools
             // 放在响度之前：格式一变，原来量到的数字就作废了（重采样改变了波形），
             // 先统一再量，顺序才对。规整自己落盘已经是 48k，所以这里只需要处理
             // "格式不对、但这次又不会被规整到"的那些（合规/未检查的）。
+            _voiceProgressWatch.Restart();
             ShowGlobalProgress("语音规整", "准备中…");
 
             // ① 去噪（PyMSS UVR-DeNoise）。放在最前面：噪声要先清掉，
@@ -1699,7 +1737,7 @@ namespace GalExcleTools
                 ReportVoiceStep(
                     "正在修响度",
                     item.OverallFraction,
-                    $"{item.CompletedCount} / {item.TotalCount} · {item.OverallFraction * 100:0}% · {item.FileName}"));
+                    $"{item.CompletedCount} / {item.TotalCount} · {item.FileName}"));
             VoiceNormalizeResult result;
             try
             {
