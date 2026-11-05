@@ -1018,7 +1018,17 @@ namespace GalExcleTools
                 _voiceStepBasePercent + Math.Clamp(localFraction, 0d, 1d) * _voiceStepSpanPercent,
                 0d,
                 100d);
-            UpdateGlobalProgress(message, percent, detail);
+
+            // 进度回调可能来自线程池（服务里用了 ConfigureAwait(false)），
+            // 直接改 XAML 会抛 RPC_E_WRONG_THREAD —— 而那个异常会把整批处理打断，
+            // 表现就是"卡在某个百分比不动"（2026-11-05 实测）。
+            if (DispatcherQueue.HasThreadAccess)
+            {
+                UpdateGlobalProgress(message, percent, detail);
+                return;
+            }
+
+            DispatcherQueue.TryEnqueue(() => UpdateGlobalProgress(message, percent, detail));
         }
 
         private async Task<List<string>> RescueStillOffWithSoundCraftAsync(VoiceNormalizeResult result, string ffmpegPath)
