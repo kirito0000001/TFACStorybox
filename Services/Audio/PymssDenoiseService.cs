@@ -218,7 +218,9 @@ internal sealed class PymssDenoiseService
             startInfo.ArgumentList.Add(argument);
         }
 
-        onPhase?.Invoke("正在去噪");
+        // 进程起来到第一条 tqdm 之间要加载模型（CPU 上十几秒），
+        // 这段不单独标出来，用户会以为卡在"量电平"上了。
+        onPhase?.Invoke("正在加载模型");
 
         using var process = Process.Start(startInfo);
         if (process is null)
@@ -232,6 +234,7 @@ internal sealed class PymssDenoiseService
         // 而且管道写满时进程会阻塞。
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var lastPercent = -1.0;
+        var firstLine = true;
 
         try
         {
@@ -244,7 +247,18 @@ internal sealed class PymssDenoiseService
                 }
 
                 var percent = ParseProgressPercent(line);
-                if (percent is null || onProgress is null || Math.Abs(percent.Value - lastPercent) < 0.5)
+                if (percent is null)
+                {
+                    continue;
+                }
+
+                if (firstLine)
+                {
+                    firstLine = false;
+                    onPhase?.Invoke("正在去噪");
+                }
+
+                if (onProgress is null || Math.Abs(percent.Value - lastPercent) < 0.5)
                 {
                     continue;
                 }
