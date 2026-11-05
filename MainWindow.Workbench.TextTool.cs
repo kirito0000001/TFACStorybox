@@ -776,6 +776,11 @@ namespace GalExcleTools
             var rows = _projectTextToolMode == ProjectTextToolMode.Voice
                 ? ApplyVoiceRowFilter(chapterRows)
                 : chapterRows;
+
+            // 记下"当前屏幕上这一屏到底是哪些行、什么顺序"：
+            // 批量拖放要按这个顺序落位（用户看到什么就填什么），
+            // 而不是去猜文件名里的行号。
+            _visibleVoiceRows = rows;
             ProjectTextToolTitleText.Text = _projectTextToolMode == ProjectTextToolMode.Voice
                 ? $"文本语音 {_selectedTextToolChapter.Name}"
                 : $"文本本地化 {_selectedTextToolChapter.Name}";

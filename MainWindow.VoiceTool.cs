@@ -1602,6 +1602,13 @@ namespace GalExcleTools
         /// 用缩放而不是改 Width：不必等布局算出行宽，也不会每帧触发一次布局 ——
         /// 一屏几百行时，后者会把滚动搞卡。
         /// </summary>
+        /// <summary>
+        /// 上一次刷新后**屏幕上真实显示的行**（已按当前筛选过滤，顺序即显示顺序）。
+        ///
+        /// 批量拖放靠它落位：用户看到的是这一屏，就按这一屏从上往下填。
+        /// </summary>
+        private List<ProjectTextRow> _visibleVoiceRows = [];
+
         /// <summary>拖放高亮（行底部一条主题色线），key = 行 Id。</summary>
         private readonly Dictionary<string, Border> _voiceDropHighlights =
             new(StringComparer.OrdinalIgnoreCase);
@@ -1686,10 +1693,13 @@ namespace GalExcleTools
         }
 
         /// <summary>
-        /// 拖进来的文件落地：1 个 → 直接设给拖到的那一行；多个 → **按文件名里的行号**批量落位。
+        /// 拖进来的文件落地：
+        /// · 1 个 → 直接设给拖到的那一行；
+        /// · 多个 → 从拖到的那一行开始，**按当前筛选结果的显示顺序**依次往下填。
         ///
-        /// 批量只认文件名开头的数字（`Vo-012-…` / `012-…` / `12…`），不猜内容 ——
-        /// 猜错行等于把语音装到别人嘴里，比不做更糟。
+        /// 【为什么不按文件名里的行号匹配】文件名是别人给的，靠不住；
+        /// 而"屏幕上第几条"是用户自己看得见、可以预期的。
+        /// 文件顺序取自拖入时选择的顺序，不再二次排序。
         /// </summary>
         private async Task HandleVoiceFilesDroppedAsync(
             ProjectTextRow row,
@@ -1706,62 +1716,65 @@ namespace GalExcleTools
                 return;
             }
 
-            var chapterRows = _projectTextRows
-                .Where(item => _selectedTextToolChapter is not null &&
-                    string.Equals(item.ChapterCode, _selectedTextToolChapter.Code, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            var rowsByNumber = new Dictionary<int, ProjectTextRow>();
-            foreach (var item in chapterRows)
+            var visible = _visibleVoiceRows;
+            var startIndex = visible.FindIndex(item => string.Equals(item.Id, row.Id, StringComparison.Ordinal));
+            if (startIndex < 0)
             {
-                if (int.TryParse(item.RowName, out var number))
-                {
-                    rowsByNumber[number] = item;
-                }
+                startIndex = 0;
             }
 
-            var count = chapterRows.Count > 0 ? chapterRows.Count : rowCount;
-            var matched = 0;
-            var unmatched = new List<string>();
+            var slot = startIndex;
+            var placed = 0;
+            var failed = 0;
+            var overflow = 0;
+
             foreach (var file in files)
             {
-                var number = ExtractVoiceRowNumber(Path.GetFileNameWithoutExtension(file));
-                if (number is null || !rowsByNumber.TryGetValue(number.Value, out var target))
+                if (slot >= visible.Count)
                 {
-                    unmatched.Add(Path.GetFileName(file));
+                    overflow++;
                     continue;
                 }
 
-                if (await ImportVoiceIntoRowAsync(target, count, file))
+                // 每个文件都占一个位置：失败也往下走，
+                // 否则"中间错一条、后面全体错位"更难查。
+                var target = visible[slot];
+                slot++;
+
+                if (await ImportVoiceIntoRowAsync(target, rowCount, file))
                 {
-                    matched++;
+                    placed++;
+                }
+                else
+                {
+                    failed++;
                 }
             }
 
-            var message = $"按文件名匹配并设置 {matched} 条";
-            if (unmatched.Count > 0)
+            var message = $"从当前行起，按显示顺序设置 {placed} 条";
+            if (failed > 0)
             {
-                message += $"；{unmatched.Count} 个没匹配到行号（{string.Join("、", unmatched.Take(3))}"
-                    + (unmatched.Count > 3 ? "…" : string.Empty) + "）";
+                message += $"；{failed} 条导入失败（详见 Log）";
+            }
+
+            if (overflow > 0)
+            {
+                message += $"；{overflow} 个文件超出列表末尾没放下";
             }
 
             ShowFloatingTip(
-                unmatched.Count > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
-                unmatched.Count > 0 ? "部分文件没落位" : "批量导入完成",
+                failed > 0 || overflow > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                failed > 0 || overflow > 0 ? "批量导入完成（有未落位的）" : "批量导入完成",
                 message);
-            AppendLog(LogKind.Info, $"拖放导入（{_selectedTextToolChapter?.Code}）：{message}");
+            AppendLog(LogKind.Info, $"拖放批量导入（{_selectedTextToolChapter?.Code}）：{message}");
         }
 
-        /// <summary>从文件名取行号：`Vo-012-不要` / `012-不要` / `12不要` 都认，认不出返回 null。</summary>
-        private static int? ExtractVoiceRowNumber(string fileNameWithoutExtension)
-        {
-            var match = Regex.Match(
-                fileNameWithoutExtension,
-                @"^(?:Vo[-_]?)?(\d{1,4})",
-                RegexOptions.IgnoreCase);
-            return match.Success && int.TryParse(match.Groups[1].Value, out var number) ? number : null;
-        }
-
+        /// <summary>
+        /// 按播放进度更新当前行的绿条（ScaleX = 已播 / 总长）。
+        ///
+        /// 用缩放而不是改 Width：不必等布局算出行宽，也不会每帧触发一次布局 ——
+        /// 一屏几百行时，后者会把滚动搞卡。
+        /// </summary>
         private void UpdateVoicePlaybackProgress()
         {
             if (_voicePlayingRowId is null ||
