@@ -277,8 +277,20 @@ internal sealed class PymssDenoiseService
             return double.NaN;
         }
 
-        var error = await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        string error;
+        try
+        {
+            // 加超时：ffmpeg 万一卡住（比如文件被占用），不能把整批拖死。
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            error = await process.StandardError.ReadToEndAsync(timeout.Token).ConfigureAwait(false);
+            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            throw;
+        }
 
         var match = Regex.Match(error, @"""input_i""\s*:\s*""(-?[\d.]+)""");
         return match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Float,
@@ -309,8 +321,16 @@ internal sealed class PymssDenoiseService
             return;
         }
 
-        await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            throw;
+        }
     }
 
     private static void ResetDirectory(string path)
