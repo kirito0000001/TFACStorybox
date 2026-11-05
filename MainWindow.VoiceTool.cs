@@ -148,6 +148,35 @@ namespace GalExcleTools
                 .ToList();
         }
 
+        /// <summary>
+        /// 本章有没有"格式不对"的音频（不是 wav/48k/16bit）。
+        ///
+        /// 只读文件头，不起进程。用来决定「规整语音」按钮要不要亮：
+        /// 统一规格已经并进规整流程，如果只在"响度超差"时点亮，
+        /// 那一个 44.1k 的合规文件就永远没人能处理。
+        /// </summary>
+        private bool HasNonCanonicalVoiceFiles()
+        {
+            if (_currentProject is null || _selectedTextToolChapter is null)
+            {
+                return false;
+            }
+
+            var folderPath = WorkspacePathUtility.GetProjectChapterVoiceFolderPath(
+                _currentProject,
+                _selectedTextToolChapter.Code);
+            if (!Directory.Exists(folderPath))
+            {
+                return false;
+            }
+
+            return Directory
+                .EnumerateFiles(folderPath, "*.*", SearchOption.TopDirectoryOnly)
+                .Where(path => ProjectVoiceAssetService.Extensions.Contains(
+                    Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+                .Any(path => !VoiceAudioFormat.IsCanonicalWav(path));
+        }
+
         // ---------------------------------------------------------------------
         // DB 列
         // ---------------------------------------------------------------------
@@ -463,7 +492,10 @@ namespace GalExcleTools
                 pair.Value.Measurement.IsUsable &&
                 pair.Value.NeedsFix &&
                 !_voiceNormalizeBlocked.Contains(pair.Key));
-            VoiceLoudnessNormalizeButton.IsEnabled = needsFix;
+
+            // 只有"格式不对"时也要能点：统一规格已经并进规整流程了，
+            // 不让点的话用户就只能干看着一个 44.1k 文件没法处理。
+            VoiceLoudnessNormalizeButton.IsEnabled = needsFix || HasNonCanonicalVoiceFiles();
         }
 
         /// <summary>
@@ -1037,6 +1069,96 @@ namespace GalExcleTools
         // 规整语音
         // ---------------------------------------------------------------------
 
+        /// <summary>
+        /// 把本章里不是 wav / 48 kHz / 16 bit 的音频统一成规格，返回（转换数, 失败数）。
+        ///
+        /// 【为什么并进「规整」而不是单独一个按钮】两者都是"把素材收拾干净"，
+        /// 点一次就该把该做的一次做完；多一个按钮只是多一次选择成本。
+        ///
+        /// 【必须先格式后响度】重采样会改变波形，旧的测量值随之作废 ——
+        /// 顺序反了就是拿过期数字下判断。
+        ///
+        /// 【为什么先备份】44.1k → 48k 是不可逆的重采样（听不出来，但波形确实变了）。
+        /// 原文件先复制到 Tools/Backups/VoiceFormat/{章节}-{时间戳}/。
+        /// </summary>
+        private async Task<(int Converted, int Failed)> UnifyVoiceFormatsAsync()
+        {
+            if (_currentProject is null || _selectedTextToolChapter is null)
+            {
+                return (0, 0);
+            }
+
+            var chapterCode = _selectedTextToolChapter.Code;
+            var folder = WorkspacePathUtility.GetProjectChapterVoiceFolderPath(_currentProject, chapterCode);
+            if (!Directory.Exists(folder))
+            {
+                return (0, 0);
+            }
+
+            // 只扫顶层：Originals / 备份都在别的目录，别把它们当成待转换素材。
+            var candidates = Directory
+                .EnumerateFiles(folder, "*.*", SearchOption.TopDirectoryOnly)
+                .Where(path => ProjectVoiceAssetService.Extensions.Contains(
+                    Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+                .Where(path => !VoiceAudioFormat.IsCanonicalWav(path))
+                .ToList();
+
+            if (candidates.Count == 0)
+            {
+                return (0, 0);
+            }
+
+            var ffmpegPath = await ResolveFfmpegPathAsync();
+            if (ffmpegPath is null)
+            {
+                return (0, 0);
+            }
+
+            var backupFolder = Path.Combine(
+                _currentProject.Path,
+                WorkspacePathUtility.ToolsFolderName,
+                "Backups",
+                "VoiceFormat",
+                $"{chapterCode}-{DateTime.Now:yyyyMMdd-HHmmss}");
+
+            var converted = 0;
+            var failed = 0;
+            foreach (var file in candidates)
+            {
+                var name = Path.GetFileName(file);
+                var tempPath = file + ".converting.wav";
+                try
+                {
+                    Directory.CreateDirectory(backupFolder);
+                    File.Copy(file, Path.Combine(backupFolder, name), overwrite: true);
+
+                    await Task.Run(() => VoiceAudioFormat.Convert(ffmpegPath, file, tempPath, out _));
+                    File.Move(tempPath, file, overwrite: true);
+
+                    // 测量值**保留**：重采样对积分响度的影响在 0.1 dB 量级，
+                    // 远小于 ±2 的容差。作废掉的话，整章刚转完就全变成"未检查"，
+                    // 用户还得再点一次检查 —— 收益没有，麻烦一件。
+                    // 下面的 WriteVoiceLoudnessCache 会按新的大小/时间重新记一次身份。
+                    converted++;
+                }
+                catch (Exception error)
+                {
+                    failed++;
+                    AtomicFileWriter.TryDelete(tempPath);
+                    AppendLog(LogKind.Warning, $"统一规格失败：{name}", error);
+                }
+            }
+
+            if (converted > 0)
+            {
+                // 缓存按「大小 + 修改时间」判新鲜度，本来也会失效；
+                // 这里显式重写一次，免得磁盘上留着一份"内容已经变了"的数字。
+                WriteVoiceLoudnessCache(GetCurrentChapterVoiceFiles(), VoiceLoudnessPreset.GameDialogue);
+            }
+
+            return (converted, failed);
+        }
+
         private async void NormalizeVoiceLoudnessButton_Click(object sender, RoutedEventArgs e)
         {
             if (_isVoiceLoudnessBusy)
@@ -1071,6 +1193,19 @@ namespace GalExcleTools
             if (orphanCount > 0)
             {
                 AppendLog(LogKind.Info, $"已清理 {orphanCount} 个多余语音文件，备份在：{orphanBackupFolder}");
+            }
+
+            // ⓪.5 统一音频规格（wav / 48k / 16bit）。
+            //
+            // 放在响度之前：格式一变，原来量到的数字就作废了（重采样改变了波形），
+            // 先统一再量，顺序才对。规整自己落盘已经是 48k，所以这里只需要处理
+            // "格式不对、但这次又不会被规整到"的那些（合规/未检查的）。
+            var (formatConverted, formatFailed) = await UnifyVoiceFormatsAsync();
+            if (formatConverted > 0 || formatFailed > 0)
+            {
+                AppendLog(
+                    LogKind.Info,
+                    $"统一音频规格：转换 {formatConverted} 条，失败 {formatFailed} 条。");
             }
 
             // ① 先把文件名规范掉（Unreal 非法字符 → _），再谈响度。
@@ -1140,6 +1275,15 @@ namespace GalExcleTools
 
             if (targets.Count == 0)
             {
+                if (formatConverted > 0)
+                {
+                    ShowFloatingTip(
+                        InfoBarSeverity.Success,
+                        "格式已统一",
+                        $"统一了 {formatConverted} 个文件的格式；响度上没有需要规整的条目。");
+                    return;
+                }
+
                 ShowFloatingTip(
                     skippedBlocked > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
                     skippedBlocked > 0 ? "没有可再规整的语音" : "没有需要规整的语音",
@@ -1257,9 +1401,11 @@ namespace GalExcleTools
 
             var summary = (orphanCount > 0 ? $"清理 {orphanCount} 个多余文件；" : string.Empty)
                 + (renamedCount > 0 ? $"已规范 {renamedCount} 个文件名；" : string.Empty)
+                + (formatConverted > 0 ? $"统一 {formatConverted} 个文件格式；" : string.Empty)
                 + (compressTargets.Count > 0 ? $"{compressTargets.Count} 条先压缩再拉响度；" : string.Empty)
                 + $"成功 {result.SuccessCount} / {result.Outcomes.Count} 条"
                 + (result.FailureCount > 0 ? $"，失败 {result.FailureCount} 条" : string.Empty)
+                + (formatFailed > 0 ? $"，{formatFailed} 条格式转换失败（详见 Log）" : string.Empty)
                 + skipNote;
             CompleteGlobalProgress("规整完成", summary);
             AppendLog(LogKind.Info, $"规整语音（{chapterCode}）：{summary}");
