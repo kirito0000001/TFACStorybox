@@ -878,6 +878,69 @@ namespace GalExcleTools
         }
 
         /// <summary>把一次检查的结论灌进 DB 列并落缓存。</summary>
+        /// <summary>
+        /// 对"压完仍超差且被峰值卡住"的条目，用 SoundCraft 的 Maximizer 再救一次。
+        ///
+        /// 只挑 IsPeakLimited 的：普通超差 ffmpeg 自己就能修，没必要多起一个进程。
+        /// 找不到 soundcraft-cli 就整体跳过 —— 这是可选增强，不该让规整因此失败。
+        /// </summary>
+        private async Task<List<string>> RescueStillOffWithSoundCraftAsync(VoiceNormalizeResult result)
+        {
+            var cliPath = SoundCraftRescueService.LocateCli();
+            if (cliPath is null || _currentProject is null || _selectedTextToolChapter is null)
+            {
+                return [];
+            }
+
+            var targets = new List<string>();
+            foreach (var outcome in result.Outcomes.Where(item => item.Succeeded))
+            {
+                var name = Path.GetFileName(outcome.SourcePath);
+                if (_chapterVoiceLoudness.TryGetValue(name, out var entry) &&
+                    entry.Measurement.IsUsable &&
+                    entry.NeedsFix &&
+                    entry.IsPeakLimited)
+                {
+                    targets.Add(outcome.SourcePath);
+                }
+            }
+
+            if (targets.Count == 0)
+            {
+                return [];
+            }
+
+            var service = new SoundCraftRescueService();
+            var rescued = new List<string>();
+            foreach (var path in targets)
+            {
+                var tempPath = path + ".rescue.wav";
+                try
+                {
+                    var (succeeded, message) = await service.RescueAsync(
+                        cliPath, path, tempPath, GetGlobalProgressCancellationToken());
+
+                    if (!succeeded)
+                    {
+                        AtomicFileWriter.TryDelete(tempPath);
+                        AppendLog(LogKind.Warning, $"SoundCraft 救援未成：{Path.GetFileName(path)}（{message}）");
+                        continue;
+                    }
+
+                    File.Move(tempPath, path, overwrite: true);
+                    rescued.Add(path);
+                    AppendLog(LogKind.Info, $"SoundCraft 救援：{Path.GetFileName(path)} → {message}");
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    AtomicFileWriter.TryDelete(tempPath);
+                    AppendLog(LogKind.Warning, $"SoundCraft 救援失败：{Path.GetFileName(path)}", error);
+                }
+            }
+
+            return rescued;
+        }
+
         private void ApplyVoiceLoudnessReport(VoiceComplianceReport report, IReadOnlyList<string> files)
         {
             foreach (var item in report.Items)
@@ -1419,6 +1482,20 @@ namespace GalExcleTools
             // 就地更新 DB 列（规整后实测值），不重铺页面 —— 重铺会把滚动位置打回顶部，
             // 而这正是素材页那份问题清单里反复挨骂的一条。
             ApplyVoiceNormalizeResult(result);
+
+            // ② 第二套：ffmpeg 拉不动的（撞在真峰值天花板上），交给 SoundCraft 的 Maximizer。
+            //    它的限幅器有前视与释放曲线，比 ffmpeg 能多压 1~2 dB（2026-11-05 实测 25/26 达标）。
+            var rescuedPaths = await RescueStillOffWithSoundCraftAsync(result);
+            if (rescuedPaths.Count > 0)
+            {
+                // 换过文件内容 → 必须重新量一遍，否则 DB 列显示的还是旧值。
+                var rescueReport = await _voiceBatchProcessor.MeasureAsync(
+                    ffmpegPath, rescuedPaths, preset, null, GetGlobalProgressCancellationToken());
+                // ⚠️ 第二个参数是"要写进缓存的文件列表"，不是"这次量了哪些"。
+                // 只传被救的那几条的话，整章缓存会被覆盖成只剩它们。
+                ApplyVoiceLoudnessReport(rescueReport, GetCurrentChapterVoiceFiles());
+                AppendLog(LogKind.Info, $"SoundCraft 救援：{rescuedPaths.Count} 条已重做并复测。");
+            }
 
             // 这一轮压完仍超差的，记下来：本次运行不要再把它们选进目标。
             // 否则就是"点一次做一遍、屏幕上看不出任何变化、按钮还亮着"的死循环 ——
