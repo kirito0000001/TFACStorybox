@@ -187,6 +187,9 @@ internal sealed class PymssDenoiseService
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var lastPercent = -1d;
         var firstLine = true;
+        var innerPercent = 0d;
+        var doneFiles = 0;
+        var totalFiles = 0;
 
         try
         {
@@ -198,8 +201,32 @@ internal sealed class PymssDenoiseService
                     break;
                 }
 
-                var percent = ParseProgressPercent(line);
-                if (percent is null)
+                // 两行 tqdm 的百分比含义不同：
+                //   Processing VR batches: 47%   ← 这一条内部的进度
+                //   Total progress:        12%   ← 整批文件的进度
+                // 之前两种都收，数字就在两个尺度之间来回跳（2026-11-05 实测）。
+                // 现在只认 Processing 的百分比，Total 只用来取"第几条"。
+                var isTotalLine = line.Contains("Total progress", StringComparison.OrdinalIgnoreCase);
+                var isInnerLine = !isTotalLine && line.Contains("Processing", StringComparison.OrdinalIgnoreCase);
+
+                if (isTotalLine)
+                {
+                    var (done, total) = ParseFileCounter(line);
+                    if (total > 0)
+                    {
+                        doneFiles = done;
+                        totalFiles = total;
+                    }
+                }
+                else if (isInnerLine)
+                {
+                    var parsed = ParseProgressPercent(line);
+                    if (parsed is not null)
+                    {
+                        innerPercent = parsed.Value;
+                    }
+                }
+                else
                 {
                     continue;
                 }
@@ -210,21 +237,23 @@ internal sealed class PymssDenoiseService
                     onPhase?.Invoke("正在去噪");
                 }
 
-                if (Math.Abs(percent.Value - lastPercent) < 0.5)
+                if (Math.Abs(innerPercent - lastPercent) < 0.5)
                 {
                     continue;
                 }
 
-                lastPercent = percent.Value;
+                lastPercent = innerPercent;
 
-                var (doneFiles, totalFiles) = ParseFileCounter(line);
-                var counter = totalFiles > 0 ? $"第 {doneFiles} / {totalFiles} 条 · " : string.Empty;
-
-                // 推理占整段 8% ~ 100%：准备只要零点几秒，推理是几十秒到几十分钟。
+                // 正在处理第一条时 tqdm 报的是 0/N，显示成"第 1 / N 条"更符合直觉。
+                var counter = totalFiles > 0
+                    ? $" · 第 {Math.Max(doneFiles, 1)} / {totalFiles} 条"
+                    : string.Empty;
                 var vram = ReadVramText();
+
+                // 推理占整段 8% ~ 100%：准备只要零点几秒，推理才是大头。
                 onProgress?.Invoke(
-                    0.08 + percent.Value / 100d * 0.92,
-                    $"本条 {percent.Value:0}% · {counter.TrimEnd(' ', '·', ' ')}"
+                    0.08 + Math.Clamp(innerPercent, 0d, 100d) / 100d * 0.92,
+                    $"本条 {innerPercent:0}%{counter}"
                     + (vram.Length > 0 ? " · " + vram : string.Empty));
             }
         }
