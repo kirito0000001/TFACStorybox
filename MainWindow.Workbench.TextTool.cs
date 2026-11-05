@@ -274,6 +274,13 @@ namespace GalExcleTools
                 OffContent = "只播当前音轨"
             };
 
+            var dropPreviewSwitch = new ToggleSwitch
+            {
+                IsOn = _voiceTrackSettings.PlayAfterDropImport,
+                OnContent = "拖入后自动试听一遍",
+                OffContent = "拖入后不播，直接标成已设置"
+            };
+
             var form = ToolboxDialog.BuildForm(
                 ToolboxDialog.BuildField(
                     "音轨数",
@@ -283,6 +290,10 @@ namespace GalExcleTools
                     "同步播放",
                     syncPlaybackSwitch,
                     "打开后点试听会把各音轨同时播出来（用于需要叠音的台词）。"),
+                ToolboxDialog.BuildField(
+                    "拖入试听",
+                    dropPreviewSwitch,
+                    "拖文件到某一行后自动播一遍。关掉的话，那条线会直接变绿，不发声。"),
                 BuildSpeakerIndicatorField(out var speakerChecks));
 
             var confirmed = await ToolboxDialog.ShowAsync(
@@ -302,6 +313,7 @@ namespace GalExcleTools
 
             _voiceTrackSettings.TrackCount = count;
             _voiceTrackSettings.SyncPlayback = syncPlaybackSwitch.IsOn;
+            _voiceTrackSettings.PlayAfterDropImport = dropPreviewSwitch.IsOn;
             // 只写**当前章**：别的章的勾选原样留着。
             _voiceTrackSettings.SetSpeakers(
                 _selectedTextToolChapter?.Code ?? string.Empty,
@@ -1044,13 +1056,33 @@ namespace GalExcleTools
                 args.AcceptedOperation = DataPackageOperation.Copy;
                 args.DragUIOverride.Caption = "设为这一行的语音";
                 args.DragUIOverride.IsCaptionVisible = true;
-                ShowVoiceDropHighlight(row.Id);
+
+                // 悬停即预览：直接把这一行的进度条亮出来（白条那 220ms 入场动画），
+                // 等于"松手就落在这里"的提示 —— 复用播放标识，不多造一层视觉。
+                if (!string.Equals(_voicePlayingRowId, row.Id, StringComparison.Ordinal))
+                {
+                    ShowVoiceProgressBar(row.Id);
+                }
             };
-            grid.DragLeave += (_, _) => HideVoiceDropHighlight(row.Id);
+            grid.DragLeave += (_, args) =>
+            {
+                // 正在播的那一行不能因为鼠标划走就灭掉。
+                if (string.Equals(_voicePlayingRowId, row.Id, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                // 指针只是移到这一行的子元素（文字、按钮）上时也会收到 DragLeave，
+                // 那种情况不该收线 —— 用位置判断有没有真的离开这一行的范围。
+                var position = args.GetPosition(grid);
+                if (position.X < 0 || position.Y < 0 ||
+                    position.X > grid.ActualWidth || position.Y > grid.ActualHeight)
+                {
+                    HideVoiceProgressBar(row.Id);
+                }
+            };
             grid.Drop += async (_, args) =>
             {
-                HideVoiceDropHighlight(row.Id);
-
                 // DragOver 里没法 await（拿不到文件列表），所以"是不是音频"只能在落地时判。
                 if (!args.DataView.Contains(StandardDataFormats.StorageItems))
                 {
@@ -1066,6 +1098,12 @@ namespace GalExcleTools
 
                 if (files.Count == 0)
                 {
+                    // 拖了不支持的东西：把悬停时亮起来的线收回去，别留一条空的。
+                    if (!string.Equals(_voicePlayingRowId, row.Id, StringComparison.Ordinal))
+                    {
+                        HideVoiceProgressBar(row.Id);
+                    }
+
                     ShowFloatingTip(
                         InfoBarSeverity.Warning,
                         "不是支持的音频格式",
@@ -1100,20 +1138,6 @@ namespace GalExcleTools
                     IsHitTestVisible = false
                 });
             }
-
-            // 拖放高亮：拖动文件经过时点亮这一行的底边。
-            // 单独一层而不是复用进度条 —— 进度条有"正在播放"的状态，借来当高亮会互相打架。
-            var dropHighlight = new Border
-            {
-                Height = 2,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Background = Application.Current.Resources["AccentFillColorDefaultBrush"] as Brush,
-                IsHitTestVisible = false,
-                Visibility = Visibility.Collapsed
-            };
-            Grid.SetColumnSpan(dropHighlight, grid.ColumnDefinitions.Count);
-            grid.Children.Add(dropHighlight);
-            _voiceDropHighlights[row.Id] = dropHighlight;
 
             // 播放进度条：一条 2px 的轨道（白）+ 一条从左侧生长的绿线。
             //

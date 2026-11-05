@@ -191,7 +191,6 @@ namespace GalExcleTools
             _voiceDbCells.Clear();
             _voiceButtons.Clear();
             _voiceProgressBars.Clear();
-            _voiceDropHighlights.Clear();
             _voicePreviewButtons.Clear();
             _voicePlayingRowId = null;
             _chapterVoiceLoudness.Clear();
@@ -1609,24 +1608,41 @@ namespace GalExcleTools
         /// </summary>
         private List<ProjectTextRow> _visibleVoiceRows = [];
 
-        /// <summary>拖放高亮（行底部一条主题色线），key = 行 Id。</summary>
-        private readonly Dictionary<string, Border> _voiceDropHighlights =
-            new(StringComparer.OrdinalIgnoreCase);
-
-        private void ShowVoiceDropHighlight(string rowId)
+        /// <summary>
+        /// 把某一行的进度条直接标成"满格绿"（播完的样子）。
+        /// 拖入但不开自动试听时用：不发声，也让这一行和"已经播过"看起来一致。
+        /// </summary>
+        private void MarkVoiceProgressComplete(string rowId)
         {
-            if (_voiceDropHighlights.TryGetValue(rowId, out var highlight))
+            if (!_voiceProgressBars.TryGetValue(rowId, out var bar))
             {
-                highlight.Visibility = Visibility.Visible;
+                return;
+            }
+
+            if (bar.Track.RenderTransform is ScaleTransform trackScale)
+            {
+                trackScale.ScaleX = 1;
+            }
+
+            bar.Track.Opacity = 1;
+            bar.Track.Visibility = Visibility.Visible;
+            bar.Fill.Visibility = Visibility.Visible;
+
+            if (bar.Fill.RenderTransform is ScaleTransform fillScale)
+            {
+                fillScale.ScaleX = 1;
             }
         }
 
-        private void HideVoiceDropHighlight(string rowId)
+        /// <summary>从头播一遍某一行（拖入后自动试听用；已经在播就先复位再重来）。</summary>
+        private async Task PlayVoicePreviewFromStartAsync(ProjectTextRow row)
         {
-            if (_voiceDropHighlights.TryGetValue(rowId, out var highlight))
+            if (string.Equals(_voicePlayingRowId, row.Id, StringComparison.Ordinal))
             {
-                highlight.Visibility = Visibility.Collapsed;
+                ResetVoicePreviewProgress();
             }
+
+            await ToggleProjectVoicePreviewAsync(row);
         }
 
         /// <summary>
@@ -1708,11 +1724,23 @@ namespace GalExcleTools
         {
             if (files.Count == 1)
             {
-                if (await ImportVoiceIntoRowAsync(row, rowCount, files[0]))
+                if (!await ImportVoiceIntoRowAsync(row, rowCount, files[0]))
                 {
-                    ShowFloatingTip(InfoBarSeverity.Success, "语音已设置", Path.GetFileName(files[0]));
+                    return;
                 }
 
+                if (_voiceTrackSettings.PlayAfterDropImport)
+                {
+                    // 播一遍：绿条跟着走，播完自然停在满格 —— 和"点试听"完全一致。
+                    await PlayVoicePreviewFromStartAsync(row);
+                }
+                else
+                {
+                    // 不播：线直接变绿，标识"这条已经设好了"。
+                    MarkVoiceProgressComplete(row.Id);
+                }
+
+                ShowFloatingTip(InfoBarSeverity.Success, "语音已设置", Path.GetFileName(files[0]));
                 return;
             }
 
@@ -1749,6 +1777,13 @@ namespace GalExcleTools
                 {
                     failed++;
                 }
+            }
+
+            // 只把**拖到的那一行**标成满格绿。
+            // 二十条全绿会把"刚才听的是哪条"这个信号淹掉 —— 那正是这条线的用处。
+            if (placed > 0 && !_voiceTrackSettings.PlayAfterDropImport)
+            {
+                MarkVoiceProgressComplete(row.Id);
             }
 
             var message = $"从当前行起，按显示顺序设置 {placed} 条";
@@ -1846,9 +1881,16 @@ namespace GalExcleTools
                 scale.ScaleX = 0;
             }
 
+            // 已经亮着就别再播一次入场：DragOver 每秒触发几十次，
+            // 每次都重播的话白条永远停在"刚开始展开"的样子，看起来像卡住。
+            var wasVisible = bar.Track.Visibility == Visibility.Visible;
             bar.Track.Visibility = Visibility.Visible;
             bar.Fill.Visibility = Visibility.Visible;
-            PlayTrackEntrance(bar.Track);
+
+            if (!wasVisible)
+            {
+                PlayTrackEntrance(bar.Track);
+            }
         }
 
         /// <summary>

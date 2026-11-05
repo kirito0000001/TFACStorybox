@@ -31,6 +31,14 @@ internal sealed class VoiceTrackSettings
     public bool SyncPlayback { get; set; }
 
     /// <summary>
+    /// 拖入语音后自动试听一次。
+    ///
+    /// 默认开：拖进来的素材十有八九是要立刻确认"这条对不对"，
+    /// 播一遍能顺手验掉装错行、录坏、静音这类问题。
+    /// </summary>
+    public bool PlayAfterDropImport { get; set; } = true;
+
+    /// <summary>
     /// 每章"有语音"的说话人（角色名，来自 CSV 的 TalkChar）。
     ///
     /// ⚠️ **必须按章节分开**：同一个名字在不同章可能指的不是同一个人，
