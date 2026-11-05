@@ -263,18 +263,19 @@ namespace GalExcleTools
         }
 
         /// <summary>
-        /// 一行语音的「时长」与「DB」两格。没设语音的行各给一个灰色横线，
-        /// **不登记**进字典（366 行里只有 26 行有语音，省下的控件很可观）。
+        /// 一行语音的「时长」与「DB」两格。
+        ///
+        /// **每一行都要建、都要登记**，哪怕当前没有语音。
+        /// 早先为了省控件，没语音的行只给一个灰色横线、不进字典 ——
+        /// 结果新导入一条语音后，这一行根本没有单元格可更新，
+        /// 时长/DB 永远是横线，检查多少遍都不会有数字
+        /// （2026-11-05 用户实测：新导入的两条怎么点检查都没数据）。
+        ///
+        /// 代价是每行多几个空 TextBlock；换来的是"行有没有语音"和"行有没有数字"
+        /// 彻底解耦，不会再出现这种整行哑掉的死角。
         /// </summary>
         private (Border DurationCell, Border DbCell) CreateVoiceMetricsCells(ProjectTextRow row, string voicePath)
         {
-            if (string.IsNullOrWhiteSpace(voicePath))
-            {
-                return (
-                    WrapVoiceColumn(CreateVoicePlaceholder(), 2),
-                    WrapVoiceColumn(CreateVoicePlaceholder(), 3));
-            }
-
             var durationText = CreateVoiceDbValueText(12, TextAlignment.Right);
             var loudnessText = CreateVoiceDbValueText(13, TextAlignment.Right);
             var peakText = CreateVoiceDbValueText(11, TextAlignment.Right);
@@ -293,7 +294,7 @@ namespace GalExcleTools
             grid.Children.Add(rangeText);
 
             var cell = new VoiceDbCell(
-                Path.GetFileName(voicePath),
+                string.IsNullOrWhiteSpace(voicePath) ? string.Empty : Path.GetFileName(voicePath),
                 durationText,
                 loudnessText,
                 peakText,
@@ -303,14 +304,6 @@ namespace GalExcleTools
 
             return (WrapVoiceColumn(durationText, 2), WrapVoiceColumn(grid, 3));
         }
-
-        private static TextBlock CreateVoicePlaceholder() => new()
-        {
-            Text = "—",
-            TextAlignment = TextAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush
-        };
 
         private static Border WrapVoiceColumn(UIElement content, int column)
         {
@@ -1741,6 +1734,30 @@ namespace GalExcleTools
             }
         }
 
+        /// <summary>
+        /// 这一行的语音文件换了名字 → 把 DB 单元格的查询键一起换掉。
+        ///
+        /// <see cref="VoiceDbCell"/> 的 FileName 是建行时定下的（只读记录字段），
+        /// 而响度按文件名索引；换语音 / 改备注改名 / 移除之后不重绑，
+        /// 那一行的「时长 / DB」就会永远横线，哪怕刚检查过
+        /// （2026-11-05 用户实测：新导入的两条怎么检查都没数字）。
+        /// </summary>
+        private void RebindVoiceDbCell(string rowId, string voicePath)
+        {
+            if (!_voiceDbCells.TryGetValue(rowId, out var cell))
+            {
+                return;
+            }
+
+            var rebound = cell with
+            {
+                FileName = string.IsNullOrWhiteSpace(voicePath) ? string.Empty : Path.GetFileName(voicePath)
+            };
+
+            _voiceDbCells[rowId] = rebound;
+            UpdateVoiceDbCell(rebound);
+        }
+
         private bool VoiceRowHasFile(string rowId) =>
             _projectVoiceMapState.Voices.TryGetValue(rowId, out var path) &&
             !string.IsNullOrWhiteSpace(path) &&
@@ -1801,6 +1818,8 @@ namespace GalExcleTools
                 {
                     UpdateProjectVoicePreviewButton(previewButton, importedPath);
                 }
+
+                RebindVoiceDbCell(row.Id, importedPath);
 
                 PlaySelectionSound();
                 AppendLog(

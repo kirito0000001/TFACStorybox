@@ -888,6 +888,9 @@ namespace GalExcleTools
                 {
                     UpdateProjectVoicePreviewButton(previewButton, updatedPath);
                 }
+
+                // 改名后单元格的查询键也要跟着换，否则这一行立刻变横线。
+                RebindVoiceDbCell(row.Id, updatedPath);
             }
             else
             {
@@ -932,6 +935,8 @@ namespace GalExcleTools
             if (button is not null)
             {
                 UpdateProjectVoiceButton(button, string.Empty);
+                // 移除后清掉查询键，别让那一行继续挂着上一条的数字。
+                RebindVoiceDbCell(row.Id, string.Empty);
                 if (previewButton is not null)
                 {
                     UpdateProjectVoicePreviewButton(previewButton, string.Empty);
