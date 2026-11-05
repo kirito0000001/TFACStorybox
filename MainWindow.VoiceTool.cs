@@ -1504,6 +1504,13 @@ namespace GalExcleTools
             {
                 await RunVoiceLoudnessNormalizeAsync();
             }
+            catch (OperationCanceledException)
+            {
+                // 取消可能发生在去噪阶段 —— 那一段在原来的 try 之外，
+                // 没人接这个异常，浮条就永远停在「正在取消…」。
+                CompleteGlobalProgress("已取消", "语音规整已停止；已完成的条目已写回磁盘。");
+                await HideGlobalProgressAfterDelayAsync();
+            }
             finally
             {
                 _isVoiceLoudnessBusy = false;
