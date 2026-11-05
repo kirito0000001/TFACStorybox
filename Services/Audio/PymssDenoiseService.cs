@@ -366,3 +366,67 @@ internal sealed class PymssDenoiseService
         }
     }
 }
+
+/// <summary>
+/// 记录"哪些文件已经去噪过"。
+///
+/// 去噪一条要一两分钟，不能每次规整都重跑 —— 靠「文件名 + 大小 + 修改时间」
+/// 认身份，文件被换掉（大小或时间变了）就自然失效，需要重新去噪。
+/// </summary>
+internal sealed class VoiceDenoiseCacheService
+{
+    private sealed record Entry(string FileName, long Length, long Ticks);
+
+    public bool IsDenoised(ProjectInfo project, string chapterCode, string filePath)
+    {
+        var entry = Load(project, chapterCode).FirstOrDefault(item =>
+            string.Equals(item.FileName, Path.GetFileName(filePath), StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            return false;
+        }
+
+        var info = new FileInfo(filePath);
+        return info.Exists && entry.Length == info.Length && entry.Ticks == info.LastWriteTimeUtc.Ticks;
+    }
+
+    public void MarkDenoised(ProjectInfo project, string chapterCode, string filePath)
+    {
+        var info = new FileInfo(filePath);
+        if (!info.Exists)
+        {
+            return;
+        }
+
+        var entries = Load(project, chapterCode)
+            .Where(item => !string.Equals(item.FileName, info.Name, StringComparison.OrdinalIgnoreCase))
+            .Append(new Entry(info.Name, info.Length, info.LastWriteTimeUtc.Ticks))
+            .ToList();
+
+        var path = GetPath(project, chapterCode);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(
+            entries, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private static List<Entry> Load(ProjectInfo project, string chapterCode)
+    {
+        var path = GetPath(project, chapterCode);
+        if (!File.Exists(path))
+        {
+            return [];
+        }
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(path)) ?? [];
+        }
+        catch (Exception error) when (error is IOException or System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static string GetPath(ProjectInfo project, string chapterCode) =>
+        Path.Combine(project.Path, WorkspacePathUtility.ToolsFolderName, "VoiceDenoise", chapterCode + ".json");
+}
