@@ -1150,6 +1150,113 @@ namespace GalExcleTools
         /// 【为什么先备份】44.1k → 48k 是不可逆的重采样（听不出来，但波形确实变了）。
         /// 原文件先复制到 Tools/Backups/VoiceFormat/{章节}-{时间戳}/。
         /// </summary>
+        /// <summary>
+        /// 用 PyMSS 的 UVR-DeNoise 给本章语音去噪，跳过"已去噪且文件没变"的。
+        ///
+        /// 【为什么要先问一句】一条 15 秒素材要 100 秒（VR 架构慢），
+        /// 26 条将近 45 分钟 —— 不给预估时间，用户会以为卡死了。
+        ///
+        /// 【为什么去完要复量】文件内容变了，旧的响度结论全部作废；
+        /// 不量一遍，接下去的响度规整会因为"没有测量值"直接跳过所有条目。
+        /// </summary>
+        private async Task<(int Done, int Failed)> RunVoiceDenoiseAsync()
+        {
+            if (_currentProject is null || _selectedTextToolChapter is null)
+            {
+                return (0, 0);
+            }
+
+            var cliPath = PymssDenoiseService.LocateCli();
+            var modelDir = PymssDenoiseService.LocateModelDir();
+            if (cliPath is null || modelDir is null)
+            {
+                return (0, 0);
+            }
+
+            var chapterCode = _selectedTextToolChapter.Code;
+            var cache = new VoiceDenoiseCacheService();
+            var files = GetCurrentChapterVoiceFiles();
+            var pending = files.Where(file => !cache.IsDenoised(_currentProject, chapterCode, file)).ToList();
+            if (pending.Count == 0)
+            {
+                return (0, 0);
+            }
+
+            var minutes = Math.Max(1, (int)Math.Round(pending.Count * 1.8));
+            var content = ToolboxDialog.BuildForm(
+                new TextBlock
+                {
+                    Text = $"本章有 {pending.Count} 条语音还没去噪（共 {files.Count} 条）。",
+                    TextWrapping = TextWrapping.Wrap
+                },
+                new TextBlock
+                {
+                    Text = $"UVR-DeNoise 一条大约 1~2 分钟，预计 {minutes} 分钟。已去噪的会自动跳过。",
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
+                });
+
+            if (!await ToolboxDialog.ShowAsync(RootGrid.XamlRoot, "先做去噪？", content, "开始去噪", "跳过"))
+            {
+                return (0, 0);
+            }
+
+            var service = new PymssDenoiseService();
+            var workDir = Path.Combine(_currentProject.Path, WorkspacePathUtility.ToolsFolderName, "VoiceDenoise", "work");
+            var done = 0;
+            var failed = 0;
+            var denoisedPaths = new List<string>();
+
+            ShowGlobalProgress("语音去噪", $"0 / {pending.Count}");
+            try
+            {
+                for (var index = 0; index < pending.Count; index++)
+                {
+                    var file = pending[index];
+                    UpdateGlobalProgress(
+                        $"正在去噪 {index + 1} / {pending.Count}",
+                        (double)index / pending.Count,
+                        Path.GetFileName(file));
+
+                    var (succeeded, message) = await service.DenoiseAsync(
+                        cliPath, modelDir, file, workDir, GetGlobalProgressCancellationToken());
+
+                    if (succeeded)
+                    {
+                        cache.MarkDenoised(_currentProject, chapterCode, file);
+                        denoisedPaths.Add(file);
+                        done++;
+                    }
+                    else
+                    {
+                        failed++;
+                        AppendLog(LogKind.Warning, $"去噪失败：{Path.GetFileName(file)}（{message}）");
+                    }
+                }
+
+                if (denoisedPaths.Count > 0)
+                {
+                    // 内容变了 → 复量，否则后面的响度规整没有依据（会一条都不选）。
+                    var ffmpegPath = await ResolveFfmpegPathAsync();
+                    if (ffmpegPath is not null)
+                    {
+                        var report = await _voiceBatchProcessor.MeasureAsync(
+                            ffmpegPath, denoisedPaths, VoiceLoudnessPreset.GameDialogue, null,
+                            GetGlobalProgressCancellationToken());
+                        ApplyVoiceLoudnessReport(report, GetCurrentChapterVoiceFiles());
+                    }
+                }
+
+                CompleteGlobalProgress("去噪完成", $"{done} 条成功" + (failed > 0 ? $"，{failed} 条失败" : string.Empty));
+            }
+            finally
+            {
+                await HideGlobalProgressAfterDelayAsync();
+            }
+
+            return (done, failed);
+        }
+
         private async Task<(int Converted, int Failed)> UnifyVoiceFormatsAsync()
         {
             if (_currentProject is null || _selectedTextToolChapter is null)
@@ -1269,6 +1376,10 @@ namespace GalExcleTools
             // 放在响度之前：格式一变，原来量到的数字就作废了（重采样改变了波形），
             // 先统一再量，顺序才对。规整自己落盘已经是 48k，所以这里只需要处理
             // "格式不对、但这次又不会被规整到"的那些（合规/未检查的）。
+            // ① 去噪（PyMSS UVR-DeNoise）。放在最前面：噪声要先清掉，
+            //    后面拉响度才不会被一起推高（底噪跟着涨是这批素材最初的问题）。
+            var (denoised, denoiseFailed) = await RunVoiceDenoiseAsync();
+
             var (formatConverted, formatFailed) = await UnifyVoiceFormatsAsync();
             if (formatConverted > 0 || formatFailed > 0)
             {
@@ -1470,6 +1581,8 @@ namespace GalExcleTools
 
             var summary = (orphanCount > 0 ? $"清理 {orphanCount} 个多余文件；" : string.Empty)
                 + (renamedCount > 0 ? $"已规范 {renamedCount} 个文件名；" : string.Empty)
+                + (denoised > 0 ? $"去噪 {denoised} 条；" : string.Empty)
+                + (denoiseFailed > 0 ? $"去噪失败 {denoiseFailed} 条；" : string.Empty)
                 + (formatConverted > 0 ? $"统一 {formatConverted} 个文件格式；" : string.Empty)
                 + (compressTargets.Count > 0 ? $"{compressTargets.Count} 条先压缩再拉响度；" : string.Empty)
                 + $"成功 {result.SuccessCount} / {result.Outcomes.Count} 条"
@@ -2279,7 +2392,7 @@ namespace GalExcleTools
         /// <summary>
         /// 外部音频编辑器。**路径写死**：换位置就改这一行（将来要成设置项也很容易）。
         /// </summary>
-        private const string VoiceAudioEditorPath = @"E:\ARTcraft\SoundCraft\soundcraft.exe";
+        private const string VoiceAudioEditorPath = @"E:\Pymss Studio\Pymss Studio.exe";
 
         private void EditProjectVoiceAudio(ProjectTextRow row)
         {
