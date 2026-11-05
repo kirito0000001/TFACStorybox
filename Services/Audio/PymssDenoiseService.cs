@@ -49,6 +49,31 @@ internal sealed class PymssDenoiseService
         return CandidateModelDirs.FirstOrDefault(Directory.Exists);
     }
 
+    /// <summary>
+    /// 从 tqdm 的一行里抠百分比。形如
+    /// <c>Processing VR batches:  45%|████     | 1/3 [00:20&lt;00:35, 30s/it]</c>。
+    ///
+    /// 「Total progress」是文件级（1/1），「Processing」才是这一条内部 ——
+    /// 优先取后者，没有就退回前者。
+    /// </summary>
+    private static double? ParseProgressPercent(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return null;
+        }
+
+        var isInner = line.Contains("Processing", StringComparison.OrdinalIgnoreCase);
+        var isTotal = line.Contains("Total progress", StringComparison.OrdinalIgnoreCase);
+        if (!isInner && !isTotal)
+        {
+            return null;
+        }
+
+        var match = System.Text.RegularExpressions.Regex.Match(line, @"(\d{1,3})%");
+        return match.Success && double.TryParse(match.Groups[1].Value, out var value) ? value : null;
+    }
+
     /// <summary>用 ffmpeg 量一次积分响度（NaN = 量不出来）。</summary>
     private static async Task<double> MeasureLufsAsync(string ffmpegPath, string path, CancellationToken cancellationToken)
     {
@@ -123,6 +148,7 @@ internal sealed class PymssDenoiseService
         string ffmpegPath,
         string voicePath,
         string workDir,
+        Action<double>? onProgress,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(workDir);
@@ -180,11 +206,33 @@ internal sealed class PymssDenoiseService
             return (false, "无法启动 pymss");
         }
 
-        // 进度条走 stderr，不能等到结束再读 —— 那条管道会写满把进程卡死。
-        var drain = process.StandardError.ReadToEndAsync(cancellationToken);
-        var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        // pymss 自己就带 tqdm 进度条（走 stderr）。逐行读出来喂给界面 ——
+        // 一条要 100 秒，只显示"第 3/26 条"的话用户会以为卡死。
+        // 注意必须边读边处理：整段 ReadToEnd 会把进度全攒到最后，
+        // 而且管道写满时进程会阻塞。
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var lastPercent = -1.0;
+
+        while (true)
+        {
+            var line = await process.StandardError.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            if (line is null)
+            {
+                break;
+            }
+
+            var percent = ParseProgressPercent(line);
+            if (percent is null || onProgress is null || Math.Abs(percent.Value - lastPercent) < 0.5)
+            {
+                continue;
+            }
+
+            lastPercent = percent.Value;
+            onProgress(percent.Value / 100d);
+        }
+
+        var stdout = await stdoutTask.ConfigureAwait(false);
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        await drain.ConfigureAwait(false);
 
         if (process.ExitCode != 0)
         {

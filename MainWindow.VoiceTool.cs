@@ -1494,8 +1494,15 @@ namespace GalExcleTools
                         (double)index / pending.Count,
                         Path.GetFileName(file));
 
+                    // 把 pymss 内部的百分比映射到"这一条占总进度多少"。
+                    var fileIndex = index;
                     var (succeeded, message) = await service.DenoiseAsync(
-                        cliPath, modelDir, ffmpegPath, file, workDir, GetGlobalProgressCancellationToken());
+                        cliPath, modelDir, ffmpegPath, file, workDir,
+                        within => ReportVoiceStep(
+                            $"正在去噪 {fileIndex + 1} / {pending.Count}",
+                            (fileIndex + Math.Clamp(within, 0d, 1d)) / pending.Count,
+                            Path.GetFileName(file)),
+                        GetGlobalProgressCancellationToken());
 
                     if (succeeded)
                     {
