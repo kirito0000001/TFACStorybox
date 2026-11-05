@@ -221,9 +221,11 @@ internal sealed class PymssDenoiseService
                 var counter = totalFiles > 0 ? $"第 {doneFiles} / {totalFiles} 条 · " : string.Empty;
 
                 // 推理占整段 8% ~ 100%：准备只要零点几秒，推理是几十秒到几十分钟。
+                var vram = ReadVramText();
                 onProgress?.Invoke(
                     0.08 + percent.Value / 100d * 0.92,
-                    $"{counter}UVR-DeNoise 批内 {percent.Value:0}% · 已完成 {doneFiles} 条");
+                    $"{counter}UVR-DeNoise 批内 {percent.Value:0}% · 已完成 {doneFiles} 条"
+                    + (vram.Length > 0 ? " · " + vram : string.Empty));
             }
         }
         catch (OperationCanceledException)
@@ -236,6 +238,79 @@ internal sealed class PymssDenoiseService
         await stdoutTask.ConfigureAwait(false);
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         return process.ExitCode;
+    }
+
+    private static string _vramCache = string.Empty;
+    private static DateTime _vramCacheAt = DateTime.MinValue;
+
+    /// <summary>
+    /// 读一次显存占用。用户要拿它判断"能不能同时开别的程序"。
+    ///
+    /// nvidia-smi 一次要 50~100ms，进度回调却是几十毫秒一次，
+    /// 所以缓存 5 秒 —— 数字够新，又不会把推理拖慢。
+    /// </summary>
+    private static string ReadVramText()
+    {
+        if (DateTime.UtcNow - _vramCacheAt < TimeSpan.FromSeconds(5))
+        {
+            return _vramCache;
+        }
+
+        _vramCacheAt = DateTime.UtcNow;
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "nvidia-smi",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            foreach (var argument in new[]
+            {
+                "--query-gpu=memory.used,memory.total",
+                "--format=csv,noheader,nounits"
+            })
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                _vramCache = string.Empty;
+                return _vramCache;
+            }
+
+            var output = process.StandardOutput.ReadLine();
+            process.WaitForExit(1500);
+
+            if (string.IsNullOrWhiteSpace(output))
+            {
+                _vramCache = string.Empty;
+                return _vramCache;
+            }
+
+            var parts = output.Split(',', StringSplitOptions.TrimEntries);
+            if (parts.Length < 2 ||
+                !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var used) ||
+                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var total))
+            {
+                _vramCache = string.Empty;
+                return _vramCache;
+            }
+
+            _vramCache = $"显存 {used / 1024:0.0}/{total / 1024:0.0} GB（剩 {(total - used) / 1024:0.0} GB）";
+        }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // 没有 NVIDIA 显卡或没装驱动：不显示这一段就是了。
+            _vramCache = string.Empty;
+        }
+
+        return _vramCache;
     }
 
     /// <summary>从 tqdm 的 <c>5/40</c> 里抠出"第几条 / 共几条"。</summary>
