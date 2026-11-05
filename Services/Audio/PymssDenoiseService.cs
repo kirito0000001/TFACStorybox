@@ -224,7 +224,7 @@ internal sealed class PymssDenoiseService
                 var vram = ReadVramText();
                 onProgress?.Invoke(
                     0.08 + percent.Value / 100d * 0.92,
-                    $"{counter}UVR-DeNoise 批内 {percent.Value:0}% · 已完成 {doneFiles} 条"
+                    $"本条 {percent.Value:0}% · {counter.TrimEnd(' ', '·', ' ')}"
                     + (vram.Length > 0 ? " · " + vram : string.Empty));
             }
         }

@@ -1399,10 +1399,12 @@ namespace GalExcleTools
             void ReportDenoise()
             {
                 // 主标题只写"在干什么"，一直在变的东西全放副标题。
+                // 最前面那个百分比给"这一条跑到哪"（pymss 的 tqdm 值），
+                // 整体进度放后面 —— 条内的数字跳得快，才看得出它没卡。
                 ReportVoiceStep(
                     phaseText,
                     batchProgress,
-                    $"{batchProgress * 100:0}% · {batchDetail}");
+                    $"{batchDetail} · 总 {batchProgress * 100:0}%");
             }
 
             ReportDenoise();
