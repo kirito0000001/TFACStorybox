@@ -1057,28 +1057,20 @@ namespace GalExcleTools
                 args.DragUIOverride.Caption = "设为这一行的语音";
                 args.DragUIOverride.IsCaptionVisible = true;
 
-                // 悬停即预览：直接把这一行的进度条亮出来（白条那 220ms 入场动画），
-                // 等于"松手就落在这里"的提示 —— 复用播放标识，不多造一层视觉。
-                if (!string.Equals(_voicePlayingRowId, row.Id, StringComparison.Ordinal))
-                {
-                    ShowVoiceProgressBar(row.Id);
-                }
+                // 悬停即预览：亮出这一行的进度条（白条那 220ms 入场动画），
+                // 同时收掉上一条悬停白条 —— 靠"当前悬停是谁"来收，
+                // 不指望 DragLeave（它在行与行之间经常不触发，会留一串白条）。
+                SetVoiceDropHover(row.Id);
             };
             grid.DragLeave += (_, args) =>
             {
-                // 正在播的那一行不能因为鼠标划走就灭掉。
-                if (string.Equals(_voicePlayingRowId, row.Id, StringComparison.Ordinal))
-                {
-                    return;
-                }
-
                 // 指针只是移到这一行的子元素（文字、按钮）上时也会收到 DragLeave，
                 // 那种情况不该收线 —— 用位置判断有没有真的离开这一行的范围。
                 var position = args.GetPosition(grid);
                 if (position.X < 0 || position.Y < 0 ||
                     position.X > grid.ActualWidth || position.Y > grid.ActualHeight)
                 {
-                    HideVoiceProgressBar(row.Id);
+                    ClearVoiceDropHover(row.Id);
                 }
             };
             grid.Drop += async (_, args) =>

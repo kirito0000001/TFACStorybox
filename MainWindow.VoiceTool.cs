@@ -77,6 +77,17 @@ namespace GalExcleTools
         /// <summary>当前正在/刚暂停的行 Id。</summary>
         private string? _voicePlayingRowId;
 
+        /// <summary>拖动时鼠标当前悬停在哪一行 —— 用来收掉上一条"悬停白条"。</summary>
+        private string? _voiceDropHoverRowId;
+
+        /// <summary>
+        /// 上一条"播完 / 已设置"留下的满格绿线属于哪一行。
+        ///
+        /// 拖动期间这条绿线要**留着**：用户靠它判断刚才听的是哪条、现在拖到哪了。
+        /// 所以收白条时不能一把清空，得认出这条是真结果，别碰它。
+        /// </summary>
+        private string? _voiceCompletedRowId;
+
         /// <summary>当前是否处于"暂停但可继续"的状态（区别于换了一条重播）。</summary>
         private bool _voicePreviewPaused;
 
@@ -193,6 +204,8 @@ namespace GalExcleTools
             _voiceProgressBars.Clear();
             _voicePreviewButtons.Clear();
             _voicePlayingRowId = null;
+            _voiceDropHoverRowId = null;
+            _voiceCompletedRowId = null;
             _chapterVoiceLoudness.Clear();
             if (VoiceLoudnessNormalizeButton is not null)
             {
@@ -1609,6 +1622,97 @@ namespace GalExcleTools
         private List<ProjectTextRow> _visibleVoiceRows = [];
 
         /// <summary>
+        /// 悬停到某一行：收掉**上一条悬停白条**，点亮这一行。
+        ///
+        /// 拖动时允许"已完成的那条绿线 + 当前悬停白条"同时存在（绿线是位置参照），
+        /// 但绝不能越拖越多 —— 之前 DragLeave 不可靠时就会留下一串白条
+        /// （2026-11-05 用户实测：拖了两个，两条都一直亮着）。
+        /// </summary>
+        private void SetVoiceDropHover(string rowId)
+        {
+            if (string.Equals(_voiceDropHoverRowId, rowId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var previous = _voiceDropHoverRowId;
+            _voiceDropHoverRowId = rowId;
+
+            if (previous is not null)
+            {
+                RestoreVoiceProgressVisual(previous);
+            }
+
+            ShowVoiceProgressBar(rowId);
+        }
+
+        private void ClearVoiceDropHover(string rowId)
+        {
+            if (!string.Equals(_voiceDropHoverRowId, rowId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _voiceDropHoverRowId = null;
+            RestoreVoiceProgressVisual(rowId);
+        }
+
+        /// <summary>把某一行恢复成"它本该有的样子"：播放中/已播过的保持，其余收掉。</summary>
+        private void RestoreVoiceProgressVisual(string rowId)
+        {
+            if (string.Equals(_voicePlayingRowId, rowId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (string.Equals(_voiceCompletedRowId, rowId, StringComparison.Ordinal) &&
+                _voiceProgressBars.TryGetValue(rowId, out var done))
+            {
+                if (done.Track.RenderTransform is ScaleTransform trackScale)
+                {
+                    trackScale.ScaleX = 1;
+                }
+
+                done.Track.Opacity = 1;
+                done.Track.Visibility = Visibility.Visible;
+                done.Fill.Visibility = Visibility.Visible;
+
+                if (done.Fill.RenderTransform is ScaleTransform fillScale)
+                {
+                    fillScale.ScaleX = 1;
+                }
+
+                return;
+            }
+
+            HideVoiceProgressBar(rowId);
+        }
+
+        /// <summary>
+        /// 只留一条线：把除 <paramref name="keepRowId"/> 之外所有行的进度条收掉。
+        ///
+        /// **只在"落下之后"调用**。拖拽过程中千万别清 —— 旧的那条绿线是位置参照，
+        /// 拖的时候还看得见自己上一次处理的是哪条，心里才有数
+        /// （2026-11-05 用户明确：拖动时旧绿条留着，落了只能显示一个）。
+        /// </summary>
+        private void HideAllVoiceProgressBarsExcept(string? keepRowId)
+        {
+            foreach (var pair in _voiceProgressBars)
+            {
+                if (string.Equals(pair.Key, keepRowId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (pair.Value.Track.Visibility == Visibility.Visible ||
+                    pair.Value.Fill.Visibility == Visibility.Visible)
+                {
+                    HideVoiceProgressBar(pair.Key);
+                }
+            }
+        }
+
+        /// <summary>
         /// 把某一行的进度条直接标成"满格绿"（播完的样子）。
         /// 拖入但不开自动试听时用：不发声，也让这一行和"已经播过"看起来一致。
         /// </summary>
@@ -1618,6 +1722,9 @@ namespace GalExcleTools
             {
                 return;
             }
+
+            _voiceCompletedRowId = rowId;
+            HideAllVoiceProgressBarsExcept(rowId);
 
             if (bar.Track.RenderTransform is ScaleTransform trackScale)
             {
@@ -1633,6 +1740,11 @@ namespace GalExcleTools
                 fillScale.ScaleX = 1;
             }
         }
+
+        private bool VoiceRowHasFile(string rowId) =>
+            _projectVoiceMapState.Voices.TryGetValue(rowId, out var path) &&
+            !string.IsNullOrWhiteSpace(path) &&
+            File.Exists(path);
 
         /// <summary>从头播一遍某一行（拖入后自动试听用；已经在播就先复位再重来）。</summary>
         private async Task PlayVoicePreviewFromStartAsync(ProjectTextRow row)
@@ -1729,6 +1841,9 @@ namespace GalExcleTools
                     return;
                 }
 
+                // 落定：先收掉其它行的线，只留这一条。
+                HideAllVoiceProgressBarsExcept(row.Id);
+
                 if (_voiceTrackSettings.PlayAfterDropImport)
                 {
                     // 播一遍：绿条跟着走，播完自然停在满格 —— 和"点试听"完全一致。
@@ -1779,11 +1894,25 @@ namespace GalExcleTools
                 }
             }
 
-            // 只把**拖到的那一行**标成满格绿。
-            // 二十条全绿会把"刚才听的是哪条"这个信号淹掉 —— 那正是这条线的用处。
-            if (placed > 0 && !_voiceTrackSettings.PlayAfterDropImport)
+            // 落定后只留一条线，而且只处理**拖到的那一行** —— 它才是这次操作的落点。
+            // 二十条全绿会把"刚才听的是哪条"这个信号淹掉。
+            if (placed > 0 && VoiceRowHasFile(row.Id))
             {
-                MarkVoiceProgressComplete(row.Id);
+                HideAllVoiceProgressBarsExcept(row.Id);
+
+                if (_voiceTrackSettings.PlayAfterDropImport)
+                {
+                    await PlayVoicePreviewFromStartAsync(row);
+                }
+                else
+                {
+                    MarkVoiceProgressComplete(row.Id);
+                }
+            }
+            else
+            {
+                // 一条都没落成 / 落点那行没文件：把悬停时的白条收掉，别留个空壳。
+                HideVoiceProgressBar(row.Id);
             }
 
             var message = $"从当前行起，按显示顺序设置 {placed} 条";
@@ -1862,6 +1991,7 @@ namespace GalExcleTools
                 scale.ScaleX = 1;
             }
 
+            _voiceCompletedRowId = _voicePlayingRowId;
             SetVoicePreviewButtonGlyph(_voicePlayingRowId, isPlaying: false);
             _voicePreviewPaused = false;
             _voiceAwaitingPlayback = false;
@@ -1876,14 +2006,16 @@ namespace GalExcleTools
                 return;
             }
 
-            if (bar.Fill.RenderTransform is ScaleTransform scale)
-            {
-                scale.ScaleX = 0;
-            }
-
             // 已经亮着就别再播一次入场：DragOver 每秒触发几十次，
             // 每次都重播的话白条永远停在"刚开始展开"的样子，看起来像卡住。
             var wasVisible = bar.Track.Visibility == Visibility.Visible;
+
+            // 只有从"灭"变"亮"才把绿条归零。
+            // 反过来（亮着还归零）会把已完成那条绿线擦掉 —— 拖拽时那正是位置参照。
+            if (!wasVisible && bar.Fill.RenderTransform is ScaleTransform scale)
+            {
+                scale.ScaleX = 0;
+            }
             bar.Track.Visibility = Visibility.Visible;
             bar.Fill.Visibility = Visibility.Visible;
 
