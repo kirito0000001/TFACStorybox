@@ -49,17 +49,108 @@ internal sealed class PymssDenoiseService
         return CandidateModelDirs.FirstOrDefault(Directory.Exists);
     }
 
+    /// <summary>用 ffmpeg 量一次积分响度（NaN = 量不出来）。</summary>
+    private static async Task<double> MeasureLufsAsync(string ffmpegPath, string path, CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var argument in new[]
+        {
+            "-hide_banner", "-nostats", "-i", path,
+            "-af", "loudnorm=I=-12:TP=-3:print_format=json",
+            "-f", "null", "-"
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            return double.NaN;
+        }
+
+        var error = await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+
+        var match = System.Text.RegularExpressions.Regex.Match(error, @"""input_i""\s*:\s*""(-?[\d.]+)""");
+        return match.Success && double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var value)
+            ? value
+            : double.NaN;
+    }
+
+    private static async Task RunFfmpegAsync(
+        string ffmpegPath, string[] arguments, CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            return;
+        }
+
+        await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// 去噪一条。成功后**就地覆盖**原文件，并把"抽走的噪声"留在 workDir 里备查。
     /// </summary>
     public async Task<(bool Succeeded, string Message)> DenoiseAsync(
         string cliPath,
         string modelDir,
+        string ffmpegPath,
         string voicePath,
         string workDir,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(workDir);
+
+        // 先把素材拉到"模型熟悉的电平"再喂给它。
+        // 这批语音大多在 -20 ~ -25 LUFS，直接去噪时模型的判断阈值会偏 ——
+        // 拉到 -18 只是临时工位电平，最终响度由后面那一步统一到 -12。
+        var workingPath = voicePath;
+        var preGainPath = Path.Combine(workDir, "__denoise_pre.wav");
+        var lufs = await MeasureLufsAsync(ffmpegPath, voicePath, cancellationToken).ConfigureAwait(false);
+        if (!double.IsNaN(lufs))
+        {
+            var gain = Math.Clamp(-18.0 - lufs, -24.0, 24.0);
+            if (Math.Abs(gain) > 0.5)
+            {
+                await RunFfmpegAsync(
+                    ffmpegPath,
+                    ["-hide_banner", "-loglevel", "error", "-y", "-i", voicePath,
+                     "-af", $"volume={gain.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)}dB",
+                     "-c:a", "pcm_s16le", preGainPath],
+                    cancellationToken).ConfigureAwait(false);
+
+                if (File.Exists(preGainPath))
+                {
+                    workingPath = preGainPath;
+                }
+            }
+        }
 
         var startInfo = new ProcessStartInfo
         {
@@ -74,7 +165,7 @@ internal sealed class PymssDenoiseService
         {
             "infer", ModelName,
             "--model-dir", modelDir,
-            "-i", voicePath,
+            "-i", workingPath,
             "-o", workDir,
             "--save-as-folder",
             "--device", "cuda"
@@ -100,8 +191,8 @@ internal sealed class PymssDenoiseService
             return (false, stdout.Trim().Split('\n').LastOrDefault()?.Trim() ?? "pymss 执行失败");
         }
 
-        var stemDir = Path.Combine(workDir, Path.GetFileNameWithoutExtension(voicePath));
-        var clean = Path.Combine(stemDir, Path.GetFileNameWithoutExtension(voicePath) + CleanStemSuffix);
+        var stemDir = Path.Combine(workDir, Path.GetFileNameWithoutExtension(workingPath));
+        var clean = Path.Combine(stemDir, Path.GetFileNameWithoutExtension(workingPath) + CleanStemSuffix);
         if (!File.Exists(clean))
         {
             var actual = Directory.Exists(stemDir)
