@@ -204,6 +204,11 @@ namespace GalExcleTools
             _voiceDbCells.Clear();
             _voiceButtons.Clear();
             _voiceProgressBars.Clear();
+            _voiceSelectOverlays.Clear();
+            if (_voiceBatchSelectMode)
+            {
+                ExitVoiceBatchMode();
+            }
             // 重建页面后旧的 Border 引用全失效，必须一起清；
             // 批量模式也退出（选中的行可能已经不存在了）。
             _voiceSelectOverlays.Clear();
@@ -990,8 +995,10 @@ namespace GalExcleTools
         /// <summary>对一批文件套「影视化（轻度）」，逐条报进度。</summary>
         private async Task ApplyCinematicAsync(IReadOnlyList<string> paths)
         {
+            var project = _currentProject;
+            var chapter = _selectedTextToolChapter;
             var ffmpegPath = await ResolveFfmpegPathAsync();
-            if (ffmpegPath is null)
+            if (ffmpegPath is null || project is null || chapter is null)
             {
                 return;
             }
@@ -1053,8 +1060,7 @@ namespace GalExcleTools
                         done++;
 
                         // 换了内容：这文件已经去过噪，别让下次规整因为 mtime 变了又重跑 UVR。
-                        new VoiceDenoiseCacheService().MarkDenoised(
-                            _currentProject, _selectedTextToolChapter!.Code, voicePath);
+                        new VoiceDenoiseCacheService().MarkDenoised(project, chapter.Code, voicePath);
                     }
                     catch (Exception error) when (error is IOException or UnauthorizedAccessException)
                     {
@@ -1083,6 +1089,150 @@ namespace GalExcleTools
                 failed > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
                 "已应用影视化",
                 $"{done} 条" + (failed > 0 ? $"，{failed} 条失败（详见 Log）" : string.Empty));
+        }
+
+        // ---------- 批量选择 ----------
+
+        private bool _voiceBatchSelectMode;
+
+        private readonly HashSet<string> _voiceBatchSelection = [];
+
+        /// <summary>每行左侧那条炫彩选择条（默认隐藏，选中时显示）。</summary>
+        private readonly Dictionary<string, Border> _voiceSelectOverlays = [];
+
+        private void VoiceBatchSelectButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_voiceBatchSelectMode)
+            {
+                EnterVoiceBatchMode();
+                return;
+            }
+
+            _ = CommitVoiceBatchAsync();
+        }
+
+        private void EnterVoiceBatchMode()
+        {
+            _voiceBatchSelectMode = true;
+            _voiceBatchSelection.Clear();
+            foreach (var overlay in _voiceSelectOverlays.Values)
+            {
+                overlay.Visibility = Visibility.Collapsed;
+            }
+
+            if (VoiceBatchSelectButton is not null)
+            {
+                VoiceBatchSelectButton.Content = "选定";
+            }
+
+            ShowFloatingTip(
+                InfoBarSeverity.Informational,
+                "批量选择",
+                "点每行的语音文件按钮即可选中/取消，选完点「选定」批量处理。");
+        }
+
+        private void ExitVoiceBatchMode()
+        {
+            _voiceBatchSelectMode = false;
+            _voiceBatchSelection.Clear();
+            foreach (var overlay in _voiceSelectOverlays.Values)
+            {
+                overlay.Visibility = Visibility.Collapsed;
+            }
+
+            if (VoiceBatchSelectButton is not null)
+            {
+                VoiceBatchSelectButton.Content = "批量选择";
+            }
+        }
+
+        private void ToggleVoiceBatchSelection(string rowId)
+        {
+            if (!_voiceBatchSelection.Remove(rowId))
+            {
+                _voiceBatchSelection.Add(rowId);
+            }
+
+            if (_voiceSelectOverlays.TryGetValue(rowId, out var overlay))
+            {
+                overlay.Visibility = _voiceBatchSelection.Contains(rowId)
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+        }
+
+        /// <summary>点「选定」之后的处理入口：选动作 → 逐个执行。</summary>
+        private async Task CommitVoiceBatchAsync()
+        {
+            if (_voiceBatchSelection.Count == 0)
+            {
+                ShowFloatingTip(InfoBarSeverity.Warning, "还没有选中任何语音", "点行里的语音文件按钮来选择。");
+                return;
+            }
+
+            var choice = new RadioButtons
+            {
+                Items = { "还原初版", "移除", "后期处理" },
+                SelectedIndex = 0,
+                MaxColumns = 1
+            };
+
+            var form = ToolboxDialog.BuildForm(
+                new TextBlock
+                {
+                    Text = $"已选中 {_voiceBatchSelection.Count} 条语音。",
+                    TextWrapping = TextWrapping.Wrap
+                },
+                choice);
+
+            if (!await ToolboxDialog.ShowAsync(RootGrid.XamlRoot, "批量处理", form, "执行", "取消"))
+            {
+                return;
+            }
+
+            var ids = _voiceBatchSelection.ToList();
+            var rows = ids
+                .Select(id => _projectTextRows.FirstOrDefault(row => row.Id == id))
+                .Where(row => row is not null)
+                .Select(row => row!)
+                .ToList();
+
+            ExitVoiceBatchMode();
+
+            switch (choice.SelectedIndex)
+            {
+                case 0:
+                    foreach (var row in rows)
+                    {
+                        await RestoreProjectVoiceOriginalAsync(row);
+                    }
+
+                    break;
+
+                case 1:
+                    foreach (var row in rows)
+                    {
+                        await RemoveProjectVoiceAsync(row);
+                    }
+
+                    break;
+
+                case 2:
+                    var paths = rows
+                        .Select(row => _projectVoiceMapState.Voices.TryGetValue(row.Id, out var path) ? path : null)
+                        .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                        .Select(path => path!)
+                        .ToList();
+
+                    if (paths.Count == 0)
+                    {
+                        ShowFloatingTip(InfoBarSeverity.Warning, "没有可处理的语音文件", "选中的行里没有 wav。");
+                        break;
+                    }
+
+                    await ShowVoicePostProcessDialogAsync(paths);
+                    break;
+            }
         }
 
         /// <summary>设置弹窗里那个「清空所有音频处理」是否被点过。</summary>
