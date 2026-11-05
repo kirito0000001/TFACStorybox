@@ -1049,8 +1049,14 @@ namespace GalExcleTools
 
             var service = new SoundCraftRescueService();
             var rescued = new List<string>();
-            foreach (var path in targets)
+            for (var index = 0; index < targets.Count; index++)
             {
+                var path = targets[index];
+                ReportVoiceStep(
+                    $"正在抢救 {index + 1} / {targets.Count}",
+                    (double)index / targets.Count,
+                    Path.GetFileName(path));
+
                 var tempPath = path + ".rescue.wav";
                 try
                 {
@@ -1287,153 +1293,6 @@ namespace GalExcleTools
         /// 【为什么先备份】44.1k → 48k 是不可逆的重采样（听不出来，但波形确实变了）。
         /// 原文件先复制到 Tools/Backups/VoiceFormat/{章节}-{时间戳}/。
         /// </summary>
-        /// <summary>读音频时长（拿 ffmpeg 自带的 ffprobe，不额外找工具）。</summary>
-        private static async Task<TimeSpan> GetAudioDurationAsync(string ffmpegPath, string path)
-        {
-            var probe = Path.Combine(Path.GetDirectoryName(ffmpegPath) ?? string.Empty, "ffprobe.exe");
-            if (!File.Exists(probe))
-            {
-                return TimeSpan.Zero;
-            }
-
-            var startInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = probe,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            foreach (var argument in new[]
-            {
-                "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path
-            })
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-
-            using var process = System.Diagnostics.Process.Start(startInfo);
-            if (process is null)
-            {
-                return TimeSpan.Zero;
-            }
-
-            var output = await process.StandardOutput.ReadToEndAsync();
-            await process.WaitForExitAsync();
-
-            return double.TryParse(output.Trim(), System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var seconds)
-                ? TimeSpan.FromSeconds(seconds)
-                : TimeSpan.Zero;
-        }
-
-        /// <summary>
-        /// 裁掉每条语音开头和结尾的静音。
-        ///
-        /// 阈值 -45 dB、至少 0.1 秒才算静音：太低会把气声剪掉，太高会把噪声段留下。
-        /// 结尾额外保留 40ms，避免最后一个字被切得太秃。
-        /// </summary>
-        private async Task<int> TrimVoiceSilenceAsync()
-        {
-            if (_currentProject is null || _selectedTextToolChapter is null)
-            {
-                return 0;
-            }
-
-            var ffmpegPath = await ResolveFfmpegPathAsync();
-            if (ffmpegPath is null)
-            {
-                return 0;
-            }
-
-            const string filter =
-                "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-45dB,"
-                + "areverse,"
-                + "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-45dB,"
-                + "areverse,apad=pad_dur=0.04";
-
-            var trimmedPaths = new List<string>();
-            var trimFiles = GetCurrentChapterVoiceFiles();
-            _voiceStepBasePercent = 0;
-            _voiceStepSpanPercent = 10;
-
-            for (var index = 0; index < trimFiles.Count; index++)
-            {
-                var file = trimFiles[index];
-                ReportVoiceStep(
-                    $"正在裁剪静音 {index + 1} / {trimFiles.Count}",
-                    (double)index / Math.Max(1, trimFiles.Count),
-                    Path.GetFileName(file));
-
-                var temp = file + ".trim.wav";
-                try
-                {
-                    var startInfo = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = ffmpegPath,
-                        RedirectStandardError = true,
-                        RedirectStandardOutput = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-
-                    foreach (var argument in new[]
-                    {
-                        "-hide_banner", "-loglevel", "error", "-y", "-i", file,
-                        "-af", filter, "-ar", "48000", "-c:a", "pcm_s16le", temp
-                    })
-                    {
-                        startInfo.ArgumentList.Add(argument);
-                    }
-
-                    using var process = System.Diagnostics.Process.Start(startInfo);
-                    if (process is null)
-                    {
-                        continue;
-                    }
-
-                    await process.StandardError.ReadToEndAsync(GetGlobalProgressCancellationToken());
-                    await process.WaitForExitAsync(GetGlobalProgressCancellationToken());
-
-                    // 裁完还得有内容，并且**确实剪短了**才替换。
-                    // 没静音可裁时不替换 —— 否则每点一次规整都刷新 mtime，
-                    // 去噪缓存全部失效，等于每次都重跑几十条 UVR。
-                    var before = await GetAudioDurationAsync(ffmpegPath, file);
-                    var after = await GetAudioDurationAsync(ffmpegPath, temp);
-                    var shrank = before > TimeSpan.Zero && after > TimeSpan.Zero &&
-                        before - after >= TimeSpan.FromMilliseconds(50);
-
-                    if (process.ExitCode == 0 && File.Exists(temp) &&
-                        new FileInfo(temp).Length > 32 * 1024 && shrank)
-                    {
-                        File.Move(temp, file, overwrite: true);
-                        trimmedPaths.Add(file);
-                    }
-                    else
-                    {
-                        AtomicFileWriter.TryDelete(temp);
-                    }
-                }
-                catch (Exception error) when (error is not OperationCanceledException)
-                {
-                    AtomicFileWriter.TryDelete(temp);
-                    AppendLog(LogKind.Warning, $"裁剪静音失败：{Path.GetFileName(file)}", error);
-                }
-            }
-
-            if (trimmedPaths.Count > 0)
-            {
-                // 时长变了 → 响度结论作废，先量一遍；否则后面按旧数据选目标会错。
-                var report = await _voiceBatchProcessor.MeasureAsync(
-                    ffmpegPath, trimmedPaths, VoiceLoudnessPreset.GameDialogue, null,
-                    GetGlobalProgressCancellationToken());
-                ApplyVoiceLoudnessReport(report, GetCurrentChapterVoiceFiles());
-            }
-
-            return trimmedPaths.Count;
-        }
-
         /// <summary>
         /// 用 PyMSS 的 UVR-DeNoise 给本章语音去噪，跳过"已去噪且文件没变"的。
         ///
@@ -1655,11 +1514,6 @@ namespace GalExcleTools
             // "格式不对、但这次又不会被规整到"的那些（合规/未检查的）。
             ShowGlobalProgress("语音规整", "准备中…");
 
-            // ⓪ 裁掉首尾静音。
-            //    放在最前面有两个好处：去噪要处理的音频变短（UVR 很慢），
-            //    后面的响度也不会被一大段静音拉低。
-            var trimmed = await TrimVoiceSilenceAsync();
-
             // ① 去噪（PyMSS UVR-DeNoise）。放在最前面：噪声要先清掉，
             //    后面拉响度才不会被一起推高（底噪跟着涨是这批素材最初的问题）。
             var (denoised, denoiseFailed) = await RunVoiceDenoiseAsync();
@@ -1867,7 +1721,6 @@ namespace GalExcleTools
 
             var summary = (orphanCount > 0 ? $"清理 {orphanCount} 个多余文件；" : string.Empty)
                 + (renamedCount > 0 ? $"已规范 {renamedCount} 个文件名；" : string.Empty)
-                + (trimmed > 0 ? $"裁静音 {trimmed} 条；" : string.Empty)
                 + (denoised > 0 ? $"去噪 {denoised} 条；" : string.Empty)
                 + (denoiseFailed > 0 ? $"去噪失败 {denoiseFailed} 条；" : string.Empty)
                 + (formatConverted > 0 ? $"统一 {formatConverted} 个文件格式；" : string.Empty)
@@ -1885,6 +1738,8 @@ namespace GalExcleTools
 
             // ② 第二套：ffmpeg 拉不动的（撞在真峰值天花板上），交给 SoundCraft 的 Maximizer。
             //    它的限幅器有前视与释放曲线，比 ffmpeg 能多压 1~2 dB（2026-11-05 实测 25/26 达标）。
+            _voiceStepBasePercent = 96;
+            _voiceStepSpanPercent = 3;
             var rescuedPaths = await RescueStillOffWithSoundCraftAsync(result, ffmpegPath);
             if (rescuedPaths.Count > 0)
             {
