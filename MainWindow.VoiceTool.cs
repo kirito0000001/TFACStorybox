@@ -1063,9 +1063,9 @@ namespace GalExcleTools
             {
                 var path = targets[index];
                 ReportVoiceStep(
-                    $"正在抢救 {index + 1} / {targets.Count} · SoundCraft 限幅",
+                    "正在抢救（SoundCraft 限幅）",
                     (double)index / targets.Count,
-                    Path.GetFileName(path));
+                    $"{index + 1} / {targets.Count} · {(double)index / targets.Count * 100:0}% · {Path.GetFileName(path)}");
 
                 var tempPath = path + ".rescue.wav";
                 try
@@ -1362,10 +1362,11 @@ namespace GalExcleTools
 
             void ReportDenoise()
             {
+                // 主标题只写"在干什么"，一直在变的东西全放副标题。
                 ReportVoiceStep(
-                    $"去噪 {pending.Count} 条 · {phaseText} · {batchProgress * 100:0}%",
+                    phaseText,
                     batchProgress,
-                    "UVR-DeNoise");
+                    $"{pending.Count} 条 · {batchProgress * 100:0}%");
             }
 
             ReportDenoise();
@@ -1456,8 +1457,15 @@ namespace GalExcleTools
 
             var converted = 0;
             var failed = 0;
+            var convertedIndex = 0;
             foreach (var file in candidates)
             {
+                convertedIndex++;
+                ReportVoiceStep(
+                    "正在统一格式",
+                    (double)(convertedIndex - 1) / Math.Max(1, candidates.Count),
+                    $"{convertedIndex} / {candidates.Count} · {(double)(convertedIndex - 1) / Math.Max(1, candidates.Count) * 100:0}%");
+
                 var name = Path.GetFileName(file);
                 var tempPath = file + ".converting.wav";
                 try
@@ -1689,9 +1697,9 @@ namespace GalExcleTools
             _voiceStepSpanPercent = 10;
             var progress = new Progress<VoiceBatchProgress>(item =>
                 ReportVoiceStep(
-                    $"正在规整 {item.CompletedCount} / {item.TotalCount}",
+                    "正在修响度",
                     item.OverallFraction,
-                    item.FileName));
+                    $"{item.CompletedCount} / {item.TotalCount} · {item.OverallFraction * 100:0}% · {item.FileName}"));
             VoiceNormalizeResult result;
             try
             {
