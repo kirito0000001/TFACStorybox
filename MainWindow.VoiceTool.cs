@@ -908,10 +908,8 @@ namespace GalExcleTools
                 button.Content = "已请求 · 保存后执行";
             };
 
-            return ToolboxDialog.BuildField(
-                "清空所有音频处理",
-                button,
-                "把本章语音全部还原成导入时的原始版，并清掉去噪与响度记录。不可撤销。");
+            // 只放按钮本身：标题和说明都是多余的（按钮文字已经说清了）。
+            return button;
         }
 
         /// <summary>
@@ -1464,25 +1462,6 @@ namespace GalExcleTools
             var files = GetCurrentChapterVoiceFiles();
             var pending = files.Where(file => !cache.IsDenoised(_currentProject, chapterCode, file)).ToList();
             if (pending.Count == 0)
-            {
-                return (0, 0);
-            }
-
-            var minutes = Math.Max(1, (int)Math.Round(pending.Count * 1.8));
-            var content = ToolboxDialog.BuildForm(
-                new TextBlock
-                {
-                    Text = $"本章有 {pending.Count} 条语音还没去噪（共 {files.Count} 条）。",
-                    TextWrapping = TextWrapping.Wrap
-                },
-                new TextBlock
-                {
-                    Text = $"UVR-DeNoise 一条大约 1~2 分钟，预计 {minutes} 分钟。已去噪的会自动跳过。",
-                    TextWrapping = TextWrapping.Wrap,
-                    Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
-                });
-
-            if (!await ToolboxDialog.ShowAsync(RootGrid.XamlRoot, "先做去噪？", content, "开始去噪", "跳过"))
             {
                 return (0, 0);
             }
