@@ -1045,6 +1045,13 @@ namespace GalExcleTools
                 GridViewItemFactory.CreateMenuItem("移除", async (_, _) => await RemoveProjectVoiceAsync(row, button, previewButton)));
             button.Click += async (_, _) =>
             {
+                // 批量模式下，点这个按钮是"选中/取消"，不是换文件。
+                if (_voiceBatchSelectMode)
+                {
+                    ToggleVoiceBatchSelection(row.Id);
+                    return;
+                }
+
                 var selectedPath = await PickReplacementFileAsync(
                     ProjectVoiceAssetService.Extensions, PickerLocationId.MusicLibrary);
                 if (string.IsNullOrWhiteSpace(selectedPath))
@@ -1157,6 +1164,34 @@ namespace GalExcleTools
                     IsHitTestVisible = false
                 });
             }
+
+            // 批量选择标记：叠在角色色竖线上的一层炫彩条。
+            // 用渐变而不是纯色，是为了和"角色颜色"一眼分得开 ——
+            // 用户看的是"我选了谁"，不是"这行是谁说的"。
+            var selectOverlay = new Border
+            {
+                Width = 4,
+                Margin = new Thickness(0, 4, 0, 4),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                CornerRadius = new CornerRadius(2),
+                Visibility = Visibility.Collapsed,
+                IsHitTestVisible = false,
+                Background = new LinearGradientBrush
+                {
+                    StartPoint = new Windows.Foundation.Point(0, 0),
+                    EndPoint = new Windows.Foundation.Point(0, 1),
+                    GradientStops =
+                    {
+                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0xFF, 0x3B, 0x6E), Offset = 0.0 },
+                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xB1, 0x3B), Offset = 0.25 },
+                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x63, 0xE6, 0x4D), Offset = 0.5 },
+                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x3B, 0xD6, 0xFF), Offset = 0.75 },
+                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x9B, 0x5B, 0xFF), Offset = 1.0 }
+                    }
+                }
+            };
+            grid.Children.Add(selectOverlay);
+            _voiceSelectOverlays[row.Id] = selectOverlay;
 
             // 播放进度条：一条 2px 的轨道（白）+ 一条从左侧生长的绿线。
             //

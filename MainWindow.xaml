@@ -378,8 +378,12 @@
                             IsEnabled="False"
                             Click="NormalizeVoiceLoudnessButton_Click"
                             ToolTipService.ToolTip="一步把本章素材收拾干净：① 统一规格（wav / 48 kHz / 16 bit，原文件先备份）② 把文件名里 Unreal 不接受的字符换成 _ ③ 清理没挂到任何行的多余文件 ④ 只对 DB 列超差的语音拉响度（达标与未检查的不动）到 −12 LUFS、真峰值 ≤ −3 dBTP。" />
-                        <Button Grid.Column="8" Content="重新加载" Click="ReloadProjectTextToolButton_Click" />
-                        <Button Grid.Column="9" Content="切换章节" Click="SwitchProjectTextToolChapterButton_Click" />
+                        <Button
+                            x:Name="VoiceBatchSelectButton"
+                            Grid.Column="8"
+                            Content="批量选择"
+                            Click="VoiceBatchSelectButton_Click"
+                            ToolTipService.ToolTip="进入批量模式后，点每行的语音文件按钮即可选择/取消；选完再点「选定」批量处理。" />
                     </Grid>
 
                     <Border Grid.Row="1" Style="{StaticResource PanelBorderStyle}">

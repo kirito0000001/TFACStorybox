@@ -204,6 +204,13 @@ namespace GalExcleTools
             _voiceDbCells.Clear();
             _voiceButtons.Clear();
             _voiceProgressBars.Clear();
+            // 重建页面后旧的 Border 引用全失效，必须一起清；
+            // 批量模式也退出（选中的行可能已经不存在了）。
+            _voiceSelectOverlays.Clear();
+            if (_voiceBatchSelectMode)
+            {
+                ExitVoiceBatchMode();
+            }
             _voicePreviewButtons.Clear();
             _voicePlayingRowId = null;
             _voiceDropHoverRowId = null;
@@ -919,14 +926,26 @@ namespace GalExcleTools
             + "loudnorm=I=-12:TP=-3,"
             + "alimiter=limit=0.695:level=false";
 
-        /// <summary>右键「后期处理」的弹窗。目前只有一项，结构留好以后加别的。</summary>
+        /// <summary>右键「后期处理」的入口：单行走这里，转成批量接口。</summary>
         private async Task ShowVoicePostProcessDialogAsync(ProjectTextRow row)
         {
-            if (_currentProject is null ||
-                !_projectVoiceMapState.Voices.TryGetValue(row.Id, out var voicePath) ||
-                !File.Exists(voicePath))
+            if (_projectVoiceMapState.Voices.TryGetValue(row.Id, out var path) && File.Exists(path))
             {
-                ShowChapterStatus(InfoBarSeverity.Warning, "没有可处理的语音", "请先为这一行设置 wav 文件。");
+                await ShowVoicePostProcessDialogAsync([path]);
+                return;
+            }
+
+            ShowChapterStatus(InfoBarSeverity.Warning, "没有可处理的语音", "请先为这一行设置 wav 文件。");
+        }
+
+        /// <summary>
+        /// 后期处理弹窗（支持一次处理多条）。
+        /// 目前只有「影视化（轻度）」一项，结构留好以后加别的。
+        /// </summary>
+        private async Task ShowVoicePostProcessDialogAsync(IReadOnlyList<string> paths)
+        {
+            if (_currentProject is null)
+            {
                 return;
             }
 
@@ -940,7 +959,9 @@ namespace GalExcleTools
             var form = ToolboxDialog.BuildForm(
                 new TextBlock
                 {
-                    Text = Path.GetFileName(voicePath),
+                    Text = paths.Count == 1
+                        ? Path.GetFileName(paths[0])
+                        : $"已选中 {paths.Count} 条语音",
                     TextWrapping = TextWrapping.Wrap,
                     Foreground = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush
                 },
@@ -963,71 +984,105 @@ namespace GalExcleTools
                 return;
             }
 
+            await ApplyCinematicAsync(paths);
+        }
+
+        /// <summary>对一批文件套「影视化（轻度）」，逐条报进度。</summary>
+        private async Task ApplyCinematicAsync(IReadOnlyList<string> paths)
+        {
             var ffmpegPath = await ResolveFfmpegPathAsync();
             if (ffmpegPath is null)
             {
                 return;
             }
 
-            var temp = voicePath + ".post.wav";
+            _voiceProgressWatch.Restart();
+            ShowGlobalProgress("正在应用影视化", $"0 / {paths.Count}");
+            var done = 0;
+            var failed = 0;
+
             try
             {
-                var startInfo = new ProcessStartInfo
+                for (var index = 0; index < paths.Count; index++)
                 {
-                    FileName = ffmpegPath,
-                    RedirectStandardError = true,
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
+                    var voicePath = paths[index];
+                    ReportVoiceStep(
+                        "正在应用影视化",
+                        (double)index / Math.Max(1, paths.Count),
+                        $"{index + 1} / {paths.Count} · {Path.GetFileName(voicePath)}");
 
-                foreach (var argument in new[]
-                {
-                    "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", voicePath,
-                    "-af", CinematicLightFilter, "-ar", "48000", "-c:a", "pcm_s16le", temp
-                })
-                {
-                    startInfo.ArgumentList.Add(argument);
+                    var temp = voicePath + ".post.wav";
+                    try
+                    {
+                        var startInfo = new ProcessStartInfo
+                        {
+                            FileName = ffmpegPath,
+                            RedirectStandardError = true,
+                            RedirectStandardOutput = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+
+                        foreach (var argument in new[]
+                        {
+                            "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", voicePath,
+                            "-af", CinematicLightFilter, "-ar", "48000", "-c:a", "pcm_s16le", temp
+                        })
+                        {
+                            startInfo.ArgumentList.Add(argument);
+                        }
+
+                        using var process = Process.Start(startInfo);
+                        if (process is null)
+                        {
+                            continue;
+                        }
+
+                        await process.StandardError.ReadToEndAsync();
+                        await process.WaitForExitAsync();
+
+                        if (process.ExitCode != 0 || !File.Exists(temp))
+                        {
+                            AtomicFileWriter.TryDelete(temp);
+                            failed++;
+                            AppendLog(LogKind.Warning, $"影视化失败：{Path.GetFileName(voicePath)}");
+                            continue;
+                        }
+
+                        File.Move(temp, voicePath, overwrite: true);
+                        done++;
+
+                        // 换了内容：这文件已经去过噪，别让下次规整因为 mtime 变了又重跑 UVR。
+                        new VoiceDenoiseCacheService().MarkDenoised(
+                            _currentProject, _selectedTextToolChapter!.Code, voicePath);
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                    {
+                        AtomicFileWriter.TryDelete(temp);
+                        failed++;
+                        AppendLog(LogKind.Warning, $"影视化失败：{Path.GetFileName(voicePath)}", error);
+                    }
                 }
 
-                using var process = Process.Start(startInfo);
-                if (process is null)
+                // 全部处理完再统一复量一次，DB 列才对得上。
+                if (done > 0)
                 {
-                    return;
+                    var report = await _voiceBatchProcessor.MeasureAsync(
+                        ffmpegPath, paths, VoiceLoudnessPreset.GameDialogue, null, CancellationToken.None);
+                    ApplyVoiceLoudnessReport(report, GetCurrentChapterVoiceFiles());
                 }
 
-                await process.StandardError.ReadToEndAsync();
-                await process.WaitForExitAsync();
-
-                if (process.ExitCode != 0 || !File.Exists(temp))
-                {
-                    AtomicFileWriter.TryDelete(temp);
-                    ShowChapterStatus(InfoBarSeverity.Error, "后期处理失败", "ffmpeg 返回错误，详见 Log。");
-                    return;
-                }
-
-                File.Move(temp, voicePath, overwrite: true);
-
-                // 内容变了：旧测量作废，重新量一遍再把数字填回 DB 列。
-                var report = await _voiceBatchProcessor.MeasureAsync(
-                    ffmpegPath, [voicePath], VoiceLoudnessPreset.GameDialogue, null,
-                    CancellationToken.None);
-                ApplyVoiceLoudnessReport(report, GetCurrentChapterVoiceFiles());
-
-                // 这文件已经去过噪，换个 mtime 不该让它重跑 UVR。
-                new VoiceDenoiseCacheService().MarkDenoised(_currentProject, _selectedTextToolChapter!.Code, voicePath);
-
-                ShowFloatingTip(
-                    InfoBarSeverity.Success,
-                    "已应用影视化",
-                    Path.GetFileName(voicePath),
-                    logMessage: $"后期处理（影视化 轻度）：{Path.GetFileName(voicePath)}");
+                CompleteGlobalProgress("影视化完成", $"{done} 条成功" + (failed > 0 ? $"，{failed} 条失败" : string.Empty));
             }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            finally
             {
-                AtomicFileWriter.TryDelete(temp);
-                AppendLog(LogKind.Warning, $"后期处理失败：{Path.GetFileName(voicePath)}", error);
+                await HideGlobalProgressAfterDelayAsync();
             }
+
+            ShowFloatingTip(
+                failed > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                "已应用影视化",
+                $"{done} 条" + (failed > 0 ? $"，{failed} 条失败（详见 Log）" : string.Empty));
         }
 
         /// <summary>设置弹窗里那个「清空所有音频处理」是否被点过。</summary>
