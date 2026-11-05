@@ -274,6 +274,13 @@ namespace GalExcleTools
                 OffContent = "只播当前音轨"
             };
 
+            var denoiseSwitch = new ToggleSwitch
+            {
+                IsOn = _voiceTrackSettings.UseUvrDenoise,
+                OnContent = "规整时先去噪",
+                OffContent = "跳过去噪"
+            };
+
             var dropPreviewSwitch = new ToggleSwitch
             {
                 IsOn = _voiceTrackSettings.PlayAfterDropImport,
@@ -290,6 +297,10 @@ namespace GalExcleTools
                     "同步播放",
                     syncPlaybackSwitch,
                     "打开后点试听会把各音轨同时播出来（用于需要叠音的台词）。"),
+                ToolboxDialog.BuildField(
+                    "UVR 降噪",
+                    denoiseSwitch,
+                    "用 PyMSS 的 UVR-DeNoise 去掉底噪。一条要 1~2 分钟，赶时间可以关。"),
                 ToolboxDialog.BuildField(
                     "拖入试听",
                     dropPreviewSwitch,
@@ -323,6 +334,7 @@ namespace GalExcleTools
             _voiceTrackSettings.TrackCount = count;
             _voiceTrackSettings.SyncPlayback = syncPlaybackSwitch.IsOn;
             _voiceTrackSettings.PlayAfterDropImport = dropPreviewSwitch.IsOn;
+            _voiceTrackSettings.UseUvrDenoise = denoiseSwitch.IsOn;
             // 只写**当前章**：别的章的勾选原样留着。
             _voiceTrackSettings.SetSpeakers(
                 _selectedTextToolChapter?.Code ?? string.Empty,

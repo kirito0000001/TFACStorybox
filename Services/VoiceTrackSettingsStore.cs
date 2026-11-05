@@ -39,6 +39,14 @@ internal sealed class VoiceTrackSettings
     public bool PlayAfterDropImport { get; set; } = true;
 
     /// <summary>
+    /// 规整时是否先跑一遍 UVR 降噪。
+    ///
+    /// 默认开：这批素材的底噪不上 UVR 基本去不掉（ffmpeg 与其它模型都试过）。
+    /// 留开关是因为它**很慢**（一条 1~2 分钟），赶时间或素材本来就干净时可以关掉。
+    /// </summary>
+    public bool UseUvrDenoise { get; set; } = true;
+
+    /// <summary>
     /// 每章"有语音"的说话人（角色名，来自 CSV 的 TalkChar）。
     ///
     /// ⚠️ **必须按章节分开**：同一个名字在不同章可能指的不是同一个人，

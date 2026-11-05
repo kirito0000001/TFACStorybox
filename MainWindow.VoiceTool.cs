@@ -1450,6 +1450,11 @@ namespace GalExcleTools
                 return (0, 0);
             }
 
+            if (!_voiceTrackSettings.UseUvrDenoise)
+            {
+                return (0, 0);
+            }
+
             var cliPath = PymssDenoiseService.LocateCli();
             var modelDir = PymssDenoiseService.LocateModelDir();
             if (cliPath is null || modelDir is null)
