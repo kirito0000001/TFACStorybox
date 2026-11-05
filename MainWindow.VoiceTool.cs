@@ -884,7 +884,7 @@ namespace GalExcleTools
         /// 只挑 IsPeakLimited 的：普通超差 ffmpeg 自己就能修，没必要多起一个进程。
         /// 找不到 soundcraft-cli 就整体跳过 —— 这是可选增强，不该让规整因此失败。
         /// </summary>
-        private async Task<List<string>> RescueStillOffWithSoundCraftAsync(VoiceNormalizeResult result)
+        private async Task<List<string>> RescueStillOffWithSoundCraftAsync(VoiceNormalizeResult result, string ffmpegPath)
         {
             var cliPath = SoundCraftRescueService.LocateCli();
             if (cliPath is null || _currentProject is null || _selectedTextToolChapter is null)
@@ -918,7 +918,7 @@ namespace GalExcleTools
                 try
                 {
                     var (succeeded, message) = await service.RescueAsync(
-                        cliPath, path, tempPath, GetGlobalProgressCancellationToken());
+                        cliPath, ffmpegPath, path, tempPath, GetGlobalProgressCancellationToken());
 
                     if (!succeeded)
                     {
@@ -1485,7 +1485,7 @@ namespace GalExcleTools
 
             // ② 第二套：ffmpeg 拉不动的（撞在真峰值天花板上），交给 SoundCraft 的 Maximizer。
             //    它的限幅器有前视与释放曲线，比 ffmpeg 能多压 1~2 dB（2026-11-05 实测 25/26 达标）。
-            var rescuedPaths = await RescueStillOffWithSoundCraftAsync(result);
+            var rescuedPaths = await RescueStillOffWithSoundCraftAsync(result, ffmpegPath);
             if (rescuedPaths.Count > 0)
             {
                 // 换过文件内容 → 必须重新量一遍，否则 DB 列显示的还是旧值。

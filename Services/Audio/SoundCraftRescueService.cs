@@ -53,6 +53,7 @@ internal sealed class SoundCraftRescueService
     /// </summary>
     public async Task<(bool Succeeded, string Message)> RescueAsync(
         string cliPath,
+        string ffmpegPath,
         string sourcePath,
         string targetPath,
         CancellationToken cancellationToken)
@@ -73,7 +74,15 @@ internal sealed class SoundCraftRescueService
                     return (false, "SoundCraft 没有返回结果");
                 }
 
-                var lufs = ReadDouble(last.Value, "lufs");
+                // ⚠️ 不能信 bounce 报的 lufs：实测它和 BS.1770 差 0.7~2 dB，
+                // 照它收敛会超到 -10（2026-11-05 实测，26 条全超）。
+                // 一律用 ffmpeg loudnorm 复量 —— 和检查按钮同一把尺子。
+                var lufs = await MeasureLufsAsync(ffmpegPath, targetPath, cancellationToken).ConfigureAwait(false);
+                if (double.IsNaN(lufs))
+                {
+                    return (false, "复量失败");
+                }
+
                 if (Math.Abs(lufs - TargetLufs) <= 0.4)
                 {
                     break;
@@ -85,7 +94,7 @@ internal sealed class SoundCraftRescueService
             var truePeak = ReadDouble(last!.Value, "true_peak_db");
             if (truePeak <= -2.9)
             {
-                var finalLufs = ReadDouble(last.Value, "lufs");
+                var finalLufs = await MeasureLufsAsync(ffmpegPath, targetPath, cancellationToken).ConfigureAwait(false);
                 return (true, $"{finalLufs:0.0} LUFS / {truePeak:0.0} dBTP");
             }
 
@@ -118,14 +127,19 @@ internal sealed class SoundCraftRescueService
         Add("run");
         Add("--cmd");
         Add($"file.import_audio={{\"path\":\"{Normalize(sourcePath)}\"}}");
+        // 顺序：去齿音 → 增益 → 限幅。
+        // 去齿音必须放在增益**之前**：它的阈值是按自然电平判断的，
+        // 先加 12~27 dB 再去除齿音，触发量会随增益乱跳。
         Add("--cmd");
-        Add("mix.insert={\"track\":2,\"slot\":0,\"plugin\":\"gain\"}");
+        Add("mix.insert={\"track\":2,\"slot\":0,\"plugin\":\"de_esser\"}");
         Add("--cmd");
-        Add($"mix.insert_param={{\"track\":2,\"slot\":0,\"param\":\"gain\",\"value\":{Format(gainDb)}}}");
+        Add("mix.insert={\"track\":2,\"slot\":1,\"plugin\":\"gain\"}");
         Add("--cmd");
-        Add("mix.insert={\"track\":2,\"slot\":1,\"plugin\":\"maximizer\"}");
+        Add($"mix.insert_param={{\"track\":2,\"slot\":1,\"param\":\"gain\",\"value\":{Format(gainDb)}}}");
         Add("--cmd");
-        Add($"mix.insert_param={{\"track\":2,\"slot\":1,\"param\":\"ceiling\",\"value\":{Format(ceilingDb)}}}");
+        Add("mix.insert={\"track\":2,\"slot\":2,\"plugin\":\"maximizer\"}");
+        Add("--cmd");
+        Add($"mix.insert_param={{\"track\":2,\"slot\":2,\"param\":\"ceiling\",\"value\":{Format(ceilingDb)}}}");
         Add("--bounce");
         Add(Normalize(targetPath));
 
@@ -160,6 +174,46 @@ internal sealed class SoundCraftRescueService
         }
 
         return result;
+    }
+
+    /// <summary>用 ffmpeg loudnorm 的 JSON 读积分响度（和检查按钮完全同一套口径）。</summary>
+    private static async Task<double> MeasureLufsAsync(
+        string ffmpegPath,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var argument in new[]
+        {
+            "-hide_banner", "-nostats", "-i", path,
+            "-af", $"loudnorm=I={Format(TargetLufs)}:TP=-3:print_format=json",
+            "-f", "null", "-"
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            return double.NaN;
+        }
+
+        var error = await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+
+        var match = System.Text.RegularExpressions.Regex.Match(error, @"""input_i""\s*:\s*""(-?[\d.]+)""");
+        return match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : double.NaN;
     }
 
     private static double ReadDouble(JsonElement element, string name) =>
