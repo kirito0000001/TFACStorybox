@@ -884,6 +884,144 @@ namespace GalExcleTools
         /// 只挑 IsPeakLimited 的：普通超差 ffmpeg 自己就能修，没必要多起一个进程。
         /// 找不到 soundcraft-cli 就整体跳过 —— 这是可选增强，不该让规整因此失败。
         /// </summary>
+        /// <summary>
+        /// 规整的多阶段进度：「当前阶段占总进度的哪一段」由调用方给。
+        ///
+        /// 为什么按**预估耗时**分配而不是按条目数：去噪一条要 100 秒，
+        /// 格式转换一条不到 0.5 秒 —— 平均分的话进度条会先疯跑再卡死。
+        /// </summary>
+        private double _voiceStepBasePercent;
+
+        private double _voiceStepSpanPercent = 100;
+
+        /// <summary>设置弹窗里那个「清空所有音频处理」是否被点过。</summary>
+        private bool _voiceResetRequested;
+
+        private UIElement BuildVoiceResetField()
+        {
+            _voiceResetRequested = false;
+            var button = new Button { Content = "清空所有音频处理" };
+            button.Click += (_, _) =>
+            {
+                _voiceResetRequested = true;
+                button.Content = "已请求 · 保存后执行";
+            };
+
+            return ToolboxDialog.BuildField(
+                "清空所有音频处理",
+                button,
+                "把本章语音全部还原成导入时的原始版，并清掉去噪与响度记录。不可撤销。");
+        }
+
+        /// <summary>
+        /// 把所有语音还原到最初版，并清空两套缓存。
+        ///
+        /// 只还原**有原始版**的：没有的那几条（手工拷进来的）不能瞎动，
+        /// 报出来让用户自己处理。
+        /// </summary>
+        private async Task ResetAllVoiceProcessingAsync()
+        {
+            if (_currentProject is null || _selectedTextToolChapter is null)
+            {
+                return;
+            }
+
+            var chapter = _selectedTextToolChapter;
+            var archive = new VoiceOriginalArchiveService();
+            var files = GetCurrentChapterVoiceFiles();
+
+            var confirm = ToolboxDialog.BuildForm(
+                new TextBlock
+                {
+                    Text = $"将把「{chapter.Code}」的 {files.Count} 条语音还原成导入时的原始版，"
+                        + "并清空去噪与响度记录。这个操作不可撤销。",
+                    TextWrapping = TextWrapping.Wrap
+                });
+            if (!await ToolboxDialog.ShowAsync(RootGrid.XamlRoot, "清空所有音频处理", confirm, "确定还原", "取消"))
+            {
+                return;
+            }
+
+            var restored = 0;
+            var missing = 0;
+            var failed = 0;
+
+            ShowGlobalProgress("还原语音", $"0 / {files.Count}");
+            try
+            {
+                for (var index = 0; index < files.Count; index++)
+                {
+                    var file = files[index];
+                    UpdateGlobalProgress(
+                        $"正在还原 {index + 1} / {files.Count}",
+                        (double)index / Math.Max(1, files.Count) * 100d,
+                        Path.GetFileName(file));
+
+                    if (!archive.HasOriginal(_currentProject, chapter.Code, file))
+                    {
+                        missing++;
+                        continue;
+                    }
+
+                    try
+                    {
+                        File.Copy(archive.GetOriginalPath(_currentProject, chapter.Code, file), file, overwrite: true);
+                        restored++;
+                    }
+                    catch (Exception error)
+                    {
+                        failed++;
+                        AppendLog(LogKind.Warning, $"还原失败：{Path.GetFileName(file)}", error);
+                    }
+                }
+
+                // 缓存全清：文件内容回到最初，任何旧的测量/去噪结论都不再成立。
+                TryDeleteFile(Path.Combine(
+                    _currentProject.Path, WorkspacePathUtility.ToolsFolderName, "VoiceDenoise", chapter.Code + ".json"));
+                TryDeleteFile(WorkspacePathUtility.GetProjectVoiceLoudnessCachePath(_currentProject, chapter.Code));
+                _chapterVoiceLoudness.Clear();
+
+                CompleteGlobalProgress("还原完成", $"{restored} 条已还原");
+            }
+            finally
+            {
+                await HideGlobalProgressAfterDelayAsync();
+            }
+
+            ShowFloatingTip(
+                failed > 0 || missing > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                "已清空音频处理",
+                $"还原 {restored} 条"
+                + (missing > 0 ? $"，{missing} 条没有原始版（未动）" : string.Empty)
+                + (failed > 0 ? $"，{failed} 条失败（详见 Log）" : string.Empty));
+
+            RefreshProjectTextToolPage();
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                // 删不掉就算了，下次覆盖写会自然失效。
+            }
+        }
+
+        private void ReportVoiceStep(string message, double localFraction, string? detail = null)
+        {
+            var percent = Math.Clamp(
+                _voiceStepBasePercent + Math.Clamp(localFraction, 0d, 1d) * _voiceStepSpanPercent,
+                0d,
+                100d);
+            UpdateGlobalProgress(message, percent, detail);
+        }
+
         private async Task<List<string>> RescueStillOffWithSoundCraftAsync(VoiceNormalizeResult result, string ffmpegPath)
         {
             var cliPath = SoundCraftRescueService.LocateCli();
@@ -1217,8 +1355,18 @@ namespace GalExcleTools
                 + "areverse,apad=pad_dur=0.04";
 
             var trimmedPaths = new List<string>();
-            foreach (var file in GetCurrentChapterVoiceFiles())
+            var trimFiles = GetCurrentChapterVoiceFiles();
+            _voiceStepBasePercent = 0;
+            _voiceStepSpanPercent = 10;
+
+            for (var index = 0; index < trimFiles.Count; index++)
             {
+                var file = trimFiles[index];
+                ReportVoiceStep(
+                    $"正在裁剪静音 {index + 1} / {trimFiles.Count}",
+                    (double)index / Math.Max(1, trimFiles.Count),
+                    Path.GetFileName(file));
+
                 var temp = file + ".trim.wav";
                 try
                 {
@@ -1350,13 +1498,14 @@ namespace GalExcleTools
             var failed = 0;
             var denoisedPaths = new List<string>();
 
-            ShowGlobalProgress("语音去噪", $"0 / {pending.Count}");
+            _voiceStepBasePercent = 10;
+            _voiceStepSpanPercent = 72;
             try
             {
                 for (var index = 0; index < pending.Count; index++)
                 {
                     var file = pending[index];
-                    UpdateGlobalProgress(
+                    ReportVoiceStep(
                         $"正在去噪 {index + 1} / {pending.Count}",
                         (double)index / pending.Count,
                         Path.GetFileName(file));
@@ -1386,11 +1535,6 @@ namespace GalExcleTools
                     ApplyVoiceLoudnessReport(report, GetCurrentChapterVoiceFiles());
                 }
 
-                CompleteGlobalProgress("去噪完成", $"{done} 条成功" + (failed > 0 ? $"，{failed} 条失败" : string.Empty));
-            }
-            finally
-            {
-                await HideGlobalProgressAfterDelayAsync();
             }
 
             return (done, failed);
@@ -1435,6 +1579,9 @@ namespace GalExcleTools
                 "Backups",
                 "VoiceFormat",
                 $"{chapterCode}-{DateTime.Now:yyyyMMdd-HHmmss}");
+
+            _voiceStepBasePercent = 82;
+            _voiceStepSpanPercent = 6;
 
             var converted = 0;
             var failed = 0;
@@ -1515,6 +1662,8 @@ namespace GalExcleTools
             // 放在响度之前：格式一变，原来量到的数字就作废了（重采样改变了波形），
             // 先统一再量，顺序才对。规整自己落盘已经是 48k，所以这里只需要处理
             // "格式不对、但这次又不会被规整到"的那些（合规/未检查的）。
+            ShowGlobalProgress("语音规整", "准备中…");
+
             // ⓪ 裁掉首尾静音。
             //    放在最前面有两个好处：去噪要处理的音频变短（UVR 很慢），
             //    后面的响度也不会被一大段静音拉低。
@@ -1605,6 +1754,7 @@ namespace GalExcleTools
                         InfoBarSeverity.Success,
                         "格式已统一",
                         $"统一了 {formatConverted} 个文件的格式；响度上没有需要规整的条目。");
+                    await HideGlobalProgressAfterDelayAsync();
                     return;
                 }
 
@@ -1617,6 +1767,7 @@ namespace GalExcleTools
                         ? $"，{skippedBlocked} 条已压过一轮仍到不了目标 —— 需要回 DAW 重做素材"
                         : string.Empty)
                     + "）。先点「检查DB规范」再回来。");
+                await HideGlobalProgressAfterDelayAsync();
                 return;
             }
 
@@ -1661,13 +1812,13 @@ namespace GalExcleTools
                     + $"存量语音第一次规整前的兜底，之后一直复用这一份。");
             }
 
+            _voiceStepBasePercent = 90;
+            _voiceStepSpanPercent = 10;
             var progress = new Progress<VoiceBatchProgress>(item =>
-                UpdateGlobalProgress(
+                ReportVoiceStep(
                     $"正在规整 {item.CompletedCount} / {item.TotalCount}",
-                    item.OverallFraction * 100d,
+                    item.OverallFraction,
                     item.FileName));
-
-            ShowGlobalProgress("规整语音", $"正在规整 {targets.Count} 条超差语音…");
             VoiceNormalizeResult result;
             try
             {

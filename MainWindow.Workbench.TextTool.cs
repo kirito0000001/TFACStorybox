@@ -294,7 +294,8 @@ namespace GalExcleTools
                     "拖入试听",
                     dropPreviewSwitch,
                     "拖文件到某一行后自动播一遍。关掉的话，那条线会直接变绿，不发声。"),
-                BuildSpeakerIndicatorField(out var speakerChecks));
+                BuildSpeakerIndicatorField(out var speakerChecks),
+                BuildVoiceResetField());
 
             var confirmed = await ToolboxDialog.ShowAsync(
                 RootGrid.XamlRoot,
@@ -304,6 +305,14 @@ namespace GalExcleTools
                 "取消");
             if (!confirmed)
             {
+                return;
+            }
+
+            // 「清空所有音频处理」是在弹窗里点的，真正执行放到弹窗关掉之后 ——
+            // 弹窗是模态的，在里面跑几十秒的还原用户啥也看不到。
+            if (_voiceResetRequested)
+            {
+                await ResetAllVoiceProcessingAsync();
                 return;
             }
 
