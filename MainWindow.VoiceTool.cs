@@ -1500,7 +1500,6 @@ namespace GalExcleTools
 
             _voiceStepBasePercent = 10;
             _voiceStepSpanPercent = 72;
-            try
             {
                 for (var index = 0; index < pending.Count; index++)
                 {
