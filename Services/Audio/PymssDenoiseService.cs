@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,11 +13,12 @@ namespace GalExcleTools.Services;
 /// <summary>
 /// 用 PyMSS 的 UVR-DeNoise 给语音去噪。
 ///
-/// 【为什么是它】实测五六个模型在同一条素材上，只有它把"滋滋"的底噪真正抽走了，
-/// Apollo / denoise_aufr33 那几个几乎是原样输出（高频能量差 &lt;0.3 dB）。
+/// 【为什么整批跑一次】每次 <c>pymss infer</c> 都是新进程，都要重新加载模型
+/// （十几秒）。一条一进程的话，40 条光加载就白烧 10 分钟。
+/// 所以先把整批做增益、放进暂存目录，再一次调用处理整个目录。
 ///
-/// 【代价】VR 架构很慢：15 秒素材要 104 秒（约 7 倍实时）。一条一条跑，
-/// 26 条就是 45 分钟 —— 所以调用方必须给用户看到预估时间。
+/// 【为什么先做增益】这批素材只有 -20 ~ -25 LUFS，模型按正常电平训练，
+/// 直接喂判断阈值会偏。拉到 -18 只是工位电平，最终响度由后面的规整统一。
 /// </summary>
 internal sealed class PymssDenoiseService
 {
@@ -36,57 +38,214 @@ internal sealed class PymssDenoiseService
 
     public const string ModelName = "UVR-DeNoise";
 
-    /// <summary>输出轨道名。VR 模型给的是 "No Noise"（干净）和 "Noise"（抽走的噪声）。</summary>
+    /// <summary>VR 模型给两条轨：干净的是 "No Noise"，另一条是被抽走的噪声。</summary>
     private const string CleanStemSuffix = "_No Noise.wav";
 
-    public static string? LocateCli()
-    {
-        return CandidateCli.FirstOrDefault(File.Exists);
-    }
+    private const double WorkingLufs = -18.0;
 
-    public static string? LocateModelDir()
-    {
-        return CandidateModelDirs.FirstOrDefault(Directory.Exists);
-    }
+    public static string? LocateCli() => CandidateCli.FirstOrDefault(File.Exists);
 
-    private static void TryKill(Process process)
+    public static string? LocateModelDir() => CandidateModelDirs.FirstOrDefault(Directory.Exists);
+
+    /// <summary>批量结果：成功替换回原位的文件，以及失败的文件与原因。</summary>
+    public sealed record DenoiseBatchResult(
+        IReadOnlyList<string> Succeeded,
+        IReadOnlyList<(string File, string Reason)> Failed);
+
+    /// <summary>
+    /// 一次处理整批。<paramref name="onProgress"/> 给 0~1（本批内部进度），
+    /// <paramref name="onPhase"/> 给阶段名（准备 / 加载模型 / 去噪 / 回写）。
+    /// </summary>
+    public async Task<DenoiseBatchResult> DenoiseBatchAsync(
+        string cliPath,
+        string modelDir,
+        string ffmpegPath,
+        IReadOnlyList<string> files,
+        string workDir,
+        Action<double>? onProgress,
+        Action<string>? onPhase,
+        CancellationToken cancellationToken)
     {
-        try
+        var stagingIn = Path.Combine(workDir, "in");
+        var stagingOut = Path.Combine(workDir, "out");
+        ResetDirectory(stagingIn);
+        ResetDirectory(stagingOut);
+
+        // 文件名加序号前缀：同名文件不会互相覆盖，回写时也能一一对应。
+        var staged = new List<(string Source, string Stem)>();
+        onPhase?.Invoke("正在准备（拉电平）");
+
+        for (var index = 0; index < files.Count; index++)
         {
-            if (!process.HasExited)
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var source = files[index];
+            var stem = $"{index + 1:000}_{Path.GetFileNameWithoutExtension(source)}";
+            var stagedPath = Path.Combine(stagingIn, stem + ".wav");
+
+            var lufs = await MeasureLufsAsync(ffmpegPath, source, cancellationToken).ConfigureAwait(false);
+            var gain = double.IsNaN(lufs) ? 0d : Math.Clamp(WorkingLufs - lufs, -24d, 24d);
+
+            await RunFfmpegAsync(
+                ffmpegPath,
+                ["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", source,
+                 "-af", $"volume={gain.ToString("0.0", CultureInfo.InvariantCulture)}dB",
+                 "-c:a", "pcm_s16le", stagedPath],
+                cancellationToken).ConfigureAwait(false);
+
+            if (File.Exists(stagedPath))
             {
-                process.Kill(entireProcessTree: true);
-                process.WaitForExit(3000);
+                staged.Add((source, stem));
+            }
+
+            // 准备只占一小截：这一步每条 0.2 秒，推理才是大头。
+            onProgress?.Invoke((index + 1) / (double)files.Count * 0.08);
+        }
+
+        if (staged.Count == 0)
+        {
+            return new DenoiseBatchResult([], files.Select(file => (file, "暂存失败")).ToList());
+        }
+
+        onPhase?.Invoke("正在加载模型");
+        var exitCode = await RunInferAsync(
+            cliPath, modelDir, stagingIn, stagingOut, onProgress, onPhase, cancellationToken).ConfigureAwait(false);
+
+        onPhase?.Invoke("正在回写");
+
+        var succeeded = new List<string>();
+        var failed = new List<(string, string)>();
+        foreach (var (source, stem) in staged)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var clean = Path.Combine(stagingOut, stem, stem + CleanStemSuffix);
+            if (!File.Exists(clean))
+            {
+                failed.Add((source, exitCode == 0 ? "没有产出干净轨" : $"pymss 退出码 {exitCode}"));
+                continue;
+            }
+
+            try
+            {
+                var temp = source + ".denoised.wav";
+                File.Copy(clean, temp, overwrite: true);
+                File.Move(temp, source, overwrite: true);
+                succeeded.Add(source);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                failed.Add((source, error.Message));
             }
         }
-        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
+
+        onProgress?.Invoke(1d);
+        return new DenoiseBatchResult(succeeded, failed);
+    }
+
+    private static async Task<int> RunInferAsync(
+        string cliPath,
+        string modelDir,
+        string inputDir,
+        string outputDir,
+        Action<double>? onProgress,
+        Action<string>? onPhase,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
         {
-            // 已经退了就没什么可杀的。
+            FileName = cliPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var argument in new[]
+        {
+            "infer", ModelName,
+            "--model-dir", modelDir,
+            "-i", inputDir,
+            "-o", outputDir,
+            "--save-as-folder",
+            "--device", "cuda"
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
         }
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            return -1;
+        }
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var lastPercent = -1d;
+        var firstLine = true;
+
+        try
+        {
+            while (true)
+            {
+                var line = await process.StandardError.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (line is null)
+                {
+                    break;
+                }
+
+                var percent = ParseProgressPercent(line);
+                if (percent is null)
+                {
+                    continue;
+                }
+
+                if (firstLine)
+                {
+                    firstLine = false;
+                    onPhase?.Invoke("正在去噪");
+                }
+
+                if (Math.Abs(percent.Value - lastPercent) < 0.5)
+                {
+                    continue;
+                }
+
+                lastPercent = percent.Value;
+
+                // 推理占整段 8% ~ 100%：准备只要零点几秒，推理是几十秒到几十分钟。
+                onProgress?.Invoke(0.08 + percent.Value / 100d * 0.92);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 只取消"读"没用：pymss 还在跑。必须把进程树杀掉，界面才真的停下。
+            TryKill(process);
+            throw;
+        }
+
+        await stdoutTask.ConfigureAwait(false);
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        return process.ExitCode;
     }
 
     /// <summary>
     /// 从 tqdm 的一行里抠百分比。形如
     /// <c>Processing VR batches:  45%|████     | 1/3 [00:20&lt;00:35, 30s/it]</c>。
     ///
-    /// 「Total progress」是文件级（1/1），「Processing」才是这一条内部 ——
-    /// 优先取后者，没有就退回前者。
+    /// <c>Total progress</c> 是文件级（1/1），<c>Processing</c> 才是批内 —— 两个都收，
+    /// 取任意一个能拿到的百分比即可（它们单调递增）。
     /// </summary>
     private static double? ParseProgressPercent(string line)
     {
-        if (string.IsNullOrWhiteSpace(line))
+        if (string.IsNullOrWhiteSpace(line) ||
+            (!line.Contains("Processing", StringComparison.OrdinalIgnoreCase) &&
+             !line.Contains("Total progress", StringComparison.OrdinalIgnoreCase)))
         {
             return null;
         }
 
-        var isInner = line.Contains("Processing", StringComparison.OrdinalIgnoreCase);
-        var isTotal = line.Contains("Total progress", StringComparison.OrdinalIgnoreCase);
-        if (!isInner && !isTotal)
-        {
-            return null;
-        }
-
-        var match = System.Text.RegularExpressions.Regex.Match(line, @"(\d{1,3})%");
+        var match = Regex.Match(line, @"(\d{1,3})%");
         return match.Success && double.TryParse(match.Groups[1].Value, out var value) ? value : null;
     }
 
@@ -104,7 +263,7 @@ internal sealed class PymssDenoiseService
 
         foreach (var argument in new[]
         {
-            "-hide_banner", "-nostats", "-i", path,
+            "-hide_banner", "-nostats", "-nostdin", "-i", path,
             "-af", "loudnorm=I=-12:TP=-3:print_format=json",
             "-f", "null", "-"
         })
@@ -121,15 +280,14 @@ internal sealed class PymssDenoiseService
         var error = await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
 
-        var match = System.Text.RegularExpressions.Regex.Match(error, @"""input_i""\s*:\s*""(-?[\d.]+)""");
-        return match.Success && double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var value)
+        var match = Regex.Match(error, @"""input_i""\s*:\s*""(-?[\d.]+)""");
+        return match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Float,
+            CultureInfo.InvariantCulture, out var value)
             ? value
             : double.NaN;
     }
 
-    private static async Task RunFfmpegAsync(
-        string ffmpegPath, string[] arguments, CancellationToken cancellationToken)
+    private static async Task RunFfmpegAsync(string ffmpegPath, string[] arguments, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -155,210 +313,36 @@ internal sealed class PymssDenoiseService
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// 去噪一条。成功后**就地覆盖**原文件，并把"抽走的噪声"留在 workDir 里备查。
-    /// </summary>
-    public async Task<(bool Succeeded, string Message)> DenoiseAsync(
-        string cliPath,
-        string modelDir,
-        string ffmpegPath,
-        string voicePath,
-        string workDir,
-        Action<double>? onProgress,
-        Action<string>? onPhase,
-        CancellationToken cancellationToken)
+    private static void ResetDirectory(string path)
     {
-        Directory.CreateDirectory(workDir);
-
-        // 先把素材拉到"模型熟悉的电平"再喂给它。
-        // 这批语音大多在 -20 ~ -25 LUFS，直接去噪时模型的判断阈值会偏 ——
-        // 拉到 -18 只是临时工位电平，最终响度由后面那一步统一到 -12。
-        onPhase?.Invoke("正在量电平");
-        var workingPath = voicePath;
-        var preGainPath = Path.Combine(workDir, "__denoise_pre.wav");
-        var lufs = await MeasureLufsAsync(ffmpegPath, voicePath, cancellationToken).ConfigureAwait(false);
-        if (!double.IsNaN(lufs))
-        {
-            var gain = Math.Clamp(-18.0 - lufs, -24.0, 24.0);
-            if (Math.Abs(gain) > 0.5)
-            {
-                await RunFfmpegAsync(
-                    ffmpegPath,
-                    ["-hide_banner", "-loglevel", "error", "-y", "-i", voicePath,
-                     "-af", $"volume={gain.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)}dB",
-                     "-c:a", "pcm_s16le", preGainPath],
-                    cancellationToken).ConfigureAwait(false);
-
-                if (File.Exists(preGainPath))
-                {
-                    workingPath = preGainPath;
-                }
-            }
-        }
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = cliPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        foreach (var argument in new[]
-        {
-            "infer", ModelName,
-            "--model-dir", modelDir,
-            "-i", workingPath,
-            "-o", workDir,
-            "--save-as-folder",
-            "--device", "cuda"
-        })
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        // 进程起来到第一条 tqdm 之间要加载模型（CPU 上十几秒），
-        // 这段不单独标出来，用户会以为卡在"量电平"上了。
-        onPhase?.Invoke("正在加载模型");
-
-        using var process = Process.Start(startInfo);
-        if (process is null)
-        {
-            return (false, "无法启动 pymss");
-        }
-
-        // pymss 自己就带 tqdm 进度条（走 stderr）。逐行读出来喂给界面 ——
-        // 一条要 100 秒，只显示"第 3/26 条"的话用户会以为卡死。
-        // 注意必须边读边处理：整段 ReadToEnd 会把进度全攒到最后，
-        // 而且管道写满时进程会阻塞。
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var lastPercent = -1.0;
-        var firstLine = true;
-
         try
         {
-            while (true)
+            if (Directory.Exists(path))
             {
-                var line = await process.StandardError.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-                if (line is null)
-                {
-                    break;
-                }
-
-                var percent = ParseProgressPercent(line);
-                if (percent is null)
-                {
-                    continue;
-                }
-
-                if (firstLine)
-                {
-                    firstLine = false;
-                    onPhase?.Invoke("正在去噪");
-                }
-
-                if (onProgress is null || Math.Abs(percent.Value - lastPercent) < 0.5)
-                {
-                    continue;
-                }
-
-                lastPercent = percent.Value;
-                onProgress(percent.Value / 100d);
+                Directory.Delete(path, recursive: true);
             }
         }
-        catch (OperationCanceledException)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            // 只取消"读"没用：pymss 还在跑，界面就一直卡在"正在取消"。
-            // 必须把整棵进程树杀掉，才算真的停下。
-            TryKill(process);
-            throw;
+            // 删不掉就复用：里面的旧文件会被同名覆盖。
         }
 
-        var stdout = await stdoutTask.ConfigureAwait(false);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-
-        if (process.ExitCode != 0)
-        {
-            return (false, stdout.Trim().Split('\n').LastOrDefault()?.Trim() ?? "pymss 执行失败");
-        }
-
-        var stemDir = Path.Combine(workDir, Path.GetFileNameWithoutExtension(workingPath));
-        var clean = Path.Combine(stemDir, Path.GetFileNameWithoutExtension(workingPath) + CleanStemSuffix);
-        if (!File.Exists(clean))
-        {
-            var actual = Directory.Exists(stemDir)
-                ? string.Join("、", Directory.GetFiles(stemDir).Select(Path.GetFileName))
-                : "（没有输出目录）";
-            return (false, "没找到干净轨，实际输出：" + actual);
-        }
-
-        var temp = voicePath + ".denoised.wav";
-        File.Copy(clean, temp, overwrite: true);
-        File.Move(temp, voicePath, overwrite: true);
-        return (true, "已去噪");
-    }
-}
-
-/// <summary>
-/// 记录"哪些文件已经去噪过"。
-///
-/// 去噪一条要一两分钟，不能每次规整都重跑 —— 靠「文件名 + 大小 + 修改时间」
-/// 认身份，文件被换掉（大小或时间变了）就自然失效，需要重新去噪。
-/// </summary>
-internal sealed class VoiceDenoiseCacheService
-{
-    private sealed record Entry(string FileName, long Length, long Ticks);
-
-    public bool IsDenoised(ProjectInfo project, string chapterCode, string filePath)
-    {
-        var entry = Load(project, chapterCode).FirstOrDefault(item =>
-            string.Equals(item.FileName, Path.GetFileName(filePath), StringComparison.OrdinalIgnoreCase));
-        if (entry is null)
-        {
-            return false;
-        }
-
-        var info = new FileInfo(filePath);
-        return info.Exists && entry.Length == info.Length && entry.Ticks == info.LastWriteTimeUtc.Ticks;
+        Directory.CreateDirectory(path);
     }
 
-    public void MarkDenoised(ProjectInfo project, string chapterCode, string filePath)
+    private static void TryKill(Process process)
     {
-        var info = new FileInfo(filePath);
-        if (!info.Exists)
-        {
-            return;
-        }
-
-        var entries = Load(project, chapterCode)
-            .Where(item => !string.Equals(item.FileName, info.Name, StringComparison.OrdinalIgnoreCase))
-            .Append(new Entry(info.Name, info.Length, info.LastWriteTimeUtc.Ticks))
-            .ToList();
-
-        var path = GetPath(project, chapterCode);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(entries, new JsonSerializerOptions { WriteIndented = true }));
-    }
-
-    private static List<Entry> Load(ProjectInfo project, string chapterCode)
-    {
-        var path = GetPath(project, chapterCode);
-        if (!File.Exists(path))
-        {
-            return [];
-        }
-
         try
         {
-            return JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(path)) ?? [];
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(3000);
+            }
         }
-        catch (Exception error) when (error is IOException or JsonException)
+        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            return [];
+            // 已经退了就没什么可杀的。
         }
     }
-
-    private static string GetPath(ProjectInfo project, string chapterCode) =>
-        Path.Combine(project.Path, WorkspacePathUtility.ToolsFolderName, "VoiceDenoise", chapterCode + ".json");
 }

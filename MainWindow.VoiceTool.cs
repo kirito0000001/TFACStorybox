@@ -1344,57 +1344,49 @@ namespace GalExcleTools
 
             _voiceStepBasePercent = 10;
             _voiceStepSpanPercent = 72;
+
+            // 整批跑一次：pymss 每次启动都要重新加载模型（十几秒），
+            // 一条一进程的话 40 条光加载就白烧 10 分钟。
+            var phaseText = "正在准备";
+            var batchProgress = 0d;
+
+            void ReportDenoise()
             {
-                for (var index = 0; index < pending.Count; index++)
+                ReportVoiceStep(
+                    $"去噪 {pending.Count} 条 · {phaseText} · {batchProgress * 100:0}%",
+                    batchProgress,
+                    "UVR-DeNoise");
+            }
+
+            ReportDenoise();
+            var batch = await service.DenoiseBatchAsync(
+                cliPath, modelDir, ffmpegPath, pending, workDir,
+                value =>
                 {
-                    var file = pending[index];
-                    ReportVoiceStep(
-                        $"正在去噪 {index + 1} / {pending.Count}",
-                        (double)index / pending.Count,
-                        Path.GetFileName(file));
-
-                    // 主标题持续变化：条号 + 阶段 + 这一条内部的百分比。
-                    // 一条要 100 秒，标题不动的话看起来还是"卡住了"。
-                    var fileIndex = index;
-                    var withinFraction = 0d;
-                    var phaseText = "准备中";
-
-                    void ReportDenoise()
-                    {
-                        ReportVoiceStep(
-                            $"正在去噪 {fileIndex + 1} / {pending.Count} · {phaseText} · {withinFraction * 100:0}%",
-                            (fileIndex + Math.Clamp(withinFraction, 0d, 1d)) / pending.Count,
-                            Path.GetFileName(file));
-                    }
-
+                    batchProgress = Math.Clamp(value, 0d, 1d);
                     ReportDenoise();
-                    var (succeeded, message) = await service.DenoiseAsync(
-                        cliPath, modelDir, ffmpegPath, file, workDir,
-                        within =>
-                        {
-                            withinFraction = within;
-                            ReportDenoise();
-                        },
-                        phase =>
-                        {
-                            phaseText = phase;
-                            ReportDenoise();
-                        },
-                        GetGlobalProgressCancellationToken());
+                },
+                phase =>
+                {
+                    phaseText = phase;
+                    ReportDenoise();
+                },
+                GetGlobalProgressCancellationToken());
 
-                    if (succeeded)
-                    {
-                        cache.MarkDenoised(_currentProject, chapterCode, file);
-                        denoisedPaths.Add(file);
-                        done++;
-                    }
-                    else
-                    {
-                        failed++;
-                        AppendLog(LogKind.Warning, $"去噪失败：{Path.GetFileName(file)}（{message}）");
-                    }
-                }
+            foreach (var file in batch.Succeeded)
+            {
+                cache.MarkDenoised(_currentProject, chapterCode, file);
+                denoisedPaths.Add(file);
+                done++;
+            }
 
+            foreach (var (file, reason) in batch.Failed)
+            {
+                failed++;
+                AppendLog(LogKind.Warning, $"去噪失败：{Path.GetFileName(file)}（{reason}）");
+            }
+
+            {
                 if (denoisedPaths.Count > 0)
                 {
                     // 内容变了 → 复量，否则后面的响度规整没有依据（会一条都不选）。
