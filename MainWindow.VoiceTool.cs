@@ -191,6 +191,7 @@ namespace GalExcleTools
             _voiceDbCells.Clear();
             _voiceButtons.Clear();
             _voiceProgressBars.Clear();
+            _voiceDropHighlights.Clear();
             _voicePreviewButtons.Clear();
             _voicePlayingRowId = null;
             _chapterVoiceLoudness.Clear();
@@ -1601,6 +1602,166 @@ namespace GalExcleTools
         /// 用缩放而不是改 Width：不必等布局算出行宽，也不会每帧触发一次布局 ——
         /// 一屏几百行时，后者会把滚动搞卡。
         /// </summary>
+        /// <summary>拖放高亮（行底部一条主题色线），key = 行 Id。</summary>
+        private readonly Dictionary<string, Border> _voiceDropHighlights =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        private void ShowVoiceDropHighlight(string rowId)
+        {
+            if (_voiceDropHighlights.TryGetValue(rowId, out var highlight))
+            {
+                highlight.Visibility = Visibility.Visible;
+            }
+        }
+
+        private void HideVoiceDropHighlight(string rowId)
+        {
+            if (_voiceDropHighlights.TryGetValue(rowId, out var highlight))
+            {
+                highlight.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        /// <summary>
+        /// 把一份音频设成某一行的语音 —— **点击选择与拖放共用这一条路径**。
+        ///
+        /// 两边各写一遍的后果很具体：格式转换、原始版归档、映射落盘、按钮刷新，
+        /// 迟早有一处只在其中一条路上被改过，然后"拖进来和点进来行为不一样"。
+        /// </summary>
+        private async Task<bool> ImportVoiceIntoRowAsync(ProjectTextRow row, int rowCount, string sourcePath)
+        {
+            if (_currentProject is null)
+            {
+                return false;
+            }
+
+            var isReplacing = _projectVoiceMapState.Voices.TryGetValue(row.Id, out var existingPath) &&
+                !string.IsNullOrWhiteSpace(existingPath);
+
+            try
+            {
+                // 已是统一规格的 wav 直接拷；其余格式先转 48k/16bit。
+                // 只有需要转码时才去找 ffmpeg，纯 wav 用户不会被弹"没有找到 ffmpeg"。
+                string? importFfmpegPath = null;
+                if (!VoiceAudioFormat.IsCanonicalWav(sourcePath))
+                {
+                    importFfmpegPath = await ResolveFfmpegPathAsync();
+                    if (importFfmpegPath is null)
+                    {
+                        return false;
+                    }
+                }
+
+                var importedPath = _projectVoiceAssetService.ImportVoice(
+                    _currentProject, row, rowCount, sourcePath, _projectVoiceMapState, importFfmpegPath);
+                _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
+                TouchProjectLastEditedAt(_currentProject);
+
+                if (_voiceButtons.TryGetValue(row.Id, out var button))
+                {
+                    UpdateProjectVoiceButton(button, importedPath);
+                }
+
+                if (_voicePreviewButtons.TryGetValue(row.Id, out var previewButton))
+                {
+                    UpdateProjectVoicePreviewButton(previewButton, importedPath);
+                }
+
+                PlaySelectionSound();
+                AppendLog(
+                    LogKind.Info,
+                    $"{(isReplacing ? "更换" : "设置")}语音文件：{row.Id} <- {Path.GetFileName(sourcePath)}");
+                return true;
+            }
+            catch (Exception error)
+            {
+                ShowFloatingTip(
+                    InfoBarSeverity.Error,
+                    isReplacing ? "语音文件更换失败" : "语音文件设置失败",
+                    "错误详情已复制到剪贴板，并写入 Log。",
+                    error,
+                    $"{(isReplacing ? "更换" : "设置")}语音文件失败：{row.Id}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 拖进来的文件落地：1 个 → 直接设给拖到的那一行；多个 → **按文件名里的行号**批量落位。
+        ///
+        /// 批量只认文件名开头的数字（`Vo-012-…` / `012-…` / `12…`），不猜内容 ——
+        /// 猜错行等于把语音装到别人嘴里，比不做更糟。
+        /// </summary>
+        private async Task HandleVoiceFilesDroppedAsync(
+            ProjectTextRow row,
+            int rowCount,
+            IReadOnlyList<string> files)
+        {
+            if (files.Count == 1)
+            {
+                if (await ImportVoiceIntoRowAsync(row, rowCount, files[0]))
+                {
+                    ShowFloatingTip(InfoBarSeverity.Success, "语音已设置", Path.GetFileName(files[0]));
+                }
+
+                return;
+            }
+
+            var chapterRows = _projectTextRows
+                .Where(item => _selectedTextToolChapter is not null &&
+                    string.Equals(item.ChapterCode, _selectedTextToolChapter.Code, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var rowsByNumber = new Dictionary<int, ProjectTextRow>();
+            foreach (var item in chapterRows)
+            {
+                if (int.TryParse(item.RowName, out var number))
+                {
+                    rowsByNumber[number] = item;
+                }
+            }
+
+            var count = chapterRows.Count > 0 ? chapterRows.Count : rowCount;
+            var matched = 0;
+            var unmatched = new List<string>();
+            foreach (var file in files)
+            {
+                var number = ExtractVoiceRowNumber(Path.GetFileNameWithoutExtension(file));
+                if (number is null || !rowsByNumber.TryGetValue(number.Value, out var target))
+                {
+                    unmatched.Add(Path.GetFileName(file));
+                    continue;
+                }
+
+                if (await ImportVoiceIntoRowAsync(target, count, file))
+                {
+                    matched++;
+                }
+            }
+
+            var message = $"按文件名匹配并设置 {matched} 条";
+            if (unmatched.Count > 0)
+            {
+                message += $"；{unmatched.Count} 个没匹配到行号（{string.Join("、", unmatched.Take(3))}"
+                    + (unmatched.Count > 3 ? "…" : string.Empty) + "）";
+            }
+
+            ShowFloatingTip(
+                unmatched.Count > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                unmatched.Count > 0 ? "部分文件没落位" : "批量导入完成",
+                message);
+            AppendLog(LogKind.Info, $"拖放导入（{_selectedTextToolChapter?.Code}）：{message}");
+        }
+
+        /// <summary>从文件名取行号：`Vo-012-不要` / `012-不要` / `12不要` 都认，认不出返回 null。</summary>
+        private static int? ExtractVoiceRowNumber(string fileNameWithoutExtension)
+        {
+            var match = Regex.Match(
+                fileNameWithoutExtension,
+                @"^(?:Vo[-_]?)?(\d{1,4})",
+                RegexOptions.IgnoreCase);
+            return match.Success && int.TryParse(match.Groups[1].Value, out var number) ? number : null;
+        }
+
         private void UpdateVoicePlaybackProgress()
         {
             if (_voicePlayingRowId is null ||

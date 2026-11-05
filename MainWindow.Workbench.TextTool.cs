@@ -1001,65 +1001,76 @@ namespace GalExcleTools
                 GridViewItemFactory.CreateMenuItem("移除", async (_, _) => await RemoveProjectVoiceAsync(row, button, previewButton)));
             button.Click += async (_, _) =>
             {
-                var selectedPath = await PickReplacementFileAsync(ProjectVoiceAssetService.Extensions, PickerLocationId.MusicLibrary);
+                var selectedPath = await PickReplacementFileAsync(
+                    ProjectVoiceAssetService.Extensions, PickerLocationId.MusicLibrary);
                 if (string.IsNullOrWhiteSpace(selectedPath))
-                {
-                    return;
-                }
-
-                if (_currentProject is null)
                 {
                     return;
                 }
 
                 var isReplacing = _projectVoiceMapState.Voices.TryGetValue(row.Id, out var existingPath) &&
                     !string.IsNullOrWhiteSpace(existingPath);
-                try
+
+                if (await ImportVoiceIntoRowAsync(row, rowCount, selectedPath))
                 {
-                    var sourceFileName = Path.GetFileName(selectedPath);
-
-                    // 已经是统一规格的 wav 直接拷；其余格式（mp3/flac/44.1k 的 wav…）
-                    // 要先用 ffmpeg 转成 48k/16bit —— 只有这种时候才去找 ffmpeg，
-                    // 不然纯 wav 用户会被无缘无故弹一次"没有找到 ffmpeg"。
-                    string? importFfmpegPath = null;
-                    if (!VoiceAudioFormat.IsCanonicalWav(selectedPath))
-                    {
-                        importFfmpegPath = await ResolveFfmpegPathAsync();
-                        if (importFfmpegPath is null)
-                        {
-                            return;
-                        }
-                    }
-
-                    var importedPath = _projectVoiceAssetService.ImportVoice(
-                        _currentProject,
-                        row,
-                        rowCount,
-                        selectedPath,
-                        _projectVoiceMapState,
-                        importFfmpegPath);
-                    _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
-                    TouchProjectLastEditedAt(_currentProject);
-
-                    UpdateProjectVoiceButton(button, importedPath);
-                    UpdateProjectVoicePreviewButton(previewButton, importedPath);
-                    PlaySelectionSound();
                     ShowFloatingTip(
                         InfoBarSeverity.Success,
                         isReplacing ? "语音文件已更换" : "语音文件已设置",
-                        Path.GetFileName(importedPath),
-                        logMessage: $"{(isReplacing ? "更换" : "设置")}语音文件：{row.Id} <- {sourceFileName}");
-                }
-                catch (Exception ex)
-                {
-                    ShowFloatingTip(
-                        InfoBarSeverity.Error,
-                        isReplacing ? "语音文件更换失败" : "语音文件设置失败",
-                        "错误详情已复制到剪贴板，并写入 Log。",
-                        ex,
-                        $"{(isReplacing ? "更换" : "设置")}语音文件失败：{row.Id}");
+                        Path.GetFileName(selectedPath));
                 }
             };
+
+            // 整行都能接文件：拖放目标是这一行的 Grid，不是那个小按钮。
+            // 按钮只有 240px 宽，而拖文件时视线落在整行上。
+            //
+            // 必须给透明背景：Grid 默认没有背景就不参与命中测试，
+            // 空白处根本收不到 DragOver，只有字和按钮那一小块能接。
+            grid.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+            grid.AllowDrop = true;
+            grid.Tag = row.Id;
+            grid.DragOver += (_, args) =>
+            {
+                if (!args.DataView.Contains(StandardDataFormats.StorageItems))
+                {
+                    args.AcceptedOperation = DataPackageOperation.None;
+                    return;
+                }
+
+                args.AcceptedOperation = DataPackageOperation.Copy;
+                args.DragUIOverride.Caption = "设为这一行的语音";
+                args.DragUIOverride.IsCaptionVisible = true;
+                ShowVoiceDropHighlight(row.Id);
+            };
+            grid.DragLeave += (_, _) => HideVoiceDropHighlight(row.Id);
+            grid.Drop += async (_, args) =>
+            {
+                HideVoiceDropHighlight(row.Id);
+
+                // DragOver 里没法 await（拿不到文件列表），所以"是不是音频"只能在落地时判。
+                if (!args.DataView.Contains(StandardDataFormats.StorageItems))
+                {
+                    return;
+                }
+
+                var items = await args.DataView.GetStorageItemsAsync();
+                var files = items
+                    .OfType<StorageFile>()
+                    .Select(item => item.Path)
+                    .Where(path => ProjectVoiceAssetService.IsValidVoicePath(path))
+                    .ToList();
+
+                if (files.Count == 0)
+                {
+                    ShowFloatingTip(
+                        InfoBarSeverity.Warning,
+                        "不是支持的音频格式",
+                        "支持：" + string.Join(" / ", ProjectVoiceAssetService.Extensions));
+                    return;
+                }
+
+                await HandleVoiceFilesDroppedAsync(row, rowCount, files);
+            };
+
             grid.Children.Add(CreateProjectTextScrollableCell(button, 1, hasRightBorder: true));
             // 时长列（DB 前面）+ DB 列：两格都是「测量后才知道」的信息，
             // 一起登记、一起回填，见 MainWindow.VoiceTool.cs。
@@ -1084,6 +1095,20 @@ namespace GalExcleTools
                     IsHitTestVisible = false
                 });
             }
+
+            // 拖放高亮：拖动文件经过时点亮这一行的底边。
+            // 单独一层而不是复用进度条 —— 进度条有"正在播放"的状态，借来当高亮会互相打架。
+            var dropHighlight = new Border
+            {
+                Height = 2,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Background = Application.Current.Resources["AccentFillColorDefaultBrush"] as Brush,
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed
+            };
+            Grid.SetColumnSpan(dropHighlight, grid.ColumnDefinitions.Count);
+            grid.Children.Add(dropHighlight);
+            _voiceDropHighlights[row.Id] = dropHighlight;
 
             // 播放进度条：一条 2px 的轨道（白）+ 一条从左侧生长的绿线。
             //
