@@ -656,7 +656,7 @@ namespace GalExcleTools
 
             var baseText = $"当前章节：{_selectedTextToolChapter?.Code}，{filterText}，显示 {shownCount} / 共 {totalCount} 行。";
             return _voiceRowFilter == VoiceRowFilter.All
-                ? baseText + "右侧点击选择语音文件，仅支持 wav。"
+                ? baseText + "右侧点击选择语音文件；导入时统一转成 wav / 48 kHz / 16 bit。"
                 : baseText;
         }
 
@@ -992,7 +992,7 @@ namespace GalExcleTools
                 GridViewItemFactory.CreateMenuItem("移除", async (_, _) => await RemoveProjectVoiceAsync(row, button, previewButton)));
             button.Click += async (_, _) =>
             {
-                var selectedPath = await PickReplacementFileAsync([".wav"], PickerLocationId.MusicLibrary);
+                var selectedPath = await PickReplacementFileAsync(ProjectVoiceAssetService.Extensions, PickerLocationId.MusicLibrary);
                 if (string.IsNullOrWhiteSpace(selectedPath))
                 {
                     return;
@@ -1008,12 +1008,27 @@ namespace GalExcleTools
                 try
                 {
                     var sourceFileName = Path.GetFileName(selectedPath);
+
+                    // 已经是统一规格的 wav 直接拷；其余格式（mp3/flac/44.1k 的 wav…）
+                    // 要先用 ffmpeg 转成 48k/16bit —— 只有这种时候才去找 ffmpeg，
+                    // 不然纯 wav 用户会被无缘无故弹一次"没有找到 ffmpeg"。
+                    string? importFfmpegPath = null;
+                    if (!VoiceAudioFormat.IsCanonicalWav(selectedPath))
+                    {
+                        importFfmpegPath = await ResolveFfmpegPathAsync();
+                        if (importFfmpegPath is null)
+                        {
+                            return;
+                        }
+                    }
+
                     var importedPath = _projectVoiceAssetService.ImportVoice(
                         _currentProject,
                         row,
                         rowCount,
                         selectedPath,
-                        _projectVoiceMapState);
+                        _projectVoiceMapState,
+                        importFfmpegPath);
                     _projectTextDataService.WriteVoiceMap(_currentProject, _projectVoiceMapState);
                     TouchProjectLastEditedAt(_currentProject);
 
@@ -1223,7 +1238,7 @@ namespace GalExcleTools
         private static void UpdateProjectVoiceButton(Button button, string voicePath)
         {
             var hasVoice = !string.IsNullOrWhiteSpace(voicePath);
-            button.Content = hasVoice ? Path.GetFileName(voicePath) : "点击选择语音文件（仅支持 wav）";
+            button.Content = hasVoice ? Path.GetFileName(voicePath) : "点击选择语音文件";
             button.Foreground = Application.Current.Resources[
                 hasVoice ? "TextFillColorPrimaryBrush" : "TextFillColorTertiaryBrush"] as Brush;
             button.FontWeight = hasVoice

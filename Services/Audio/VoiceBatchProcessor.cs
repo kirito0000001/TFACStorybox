@@ -236,13 +236,10 @@ internal sealed class VoiceBatchProcessor
                 return Failure(filePath, null, "没有量出响度，已跳过（原文件未改动）", TailLines(probe.Output, 3));
             }
 
-            var sampleRate = ParseSampleRate(probe.Output);
-            if (sampleRate <= 0)
-            {
-                sampleRate = FallbackSampleRate;
-                ToolboxLog.Warn(
-                    $"「{Path.GetFileName(filePath)}」没读出采样率，按 {FallbackSampleRate} Hz 落盘（避免 loudnorm 把成品升到 192 kHz）。");
-            }
+            // 落盘一律 48 kHz / 16 bit —— 规整本身就是"把素材弄成统一规格"的那一步，
+            // 顺着源采样率走会让 44.1k 的素材规整完还是 44.1k，引擎那边照样要转一遍。
+            // （loudnorm 内部会升到 192 kHz 测真峰值，所以 -ar 必须显式给，这里是唯一出口。）
+            var sampleRate = VoiceAudioFormat.SampleRate;
 
             // ② 落盘到临时件
             //    compressFirst：被峰值卡住的素材先压动态，否则套多少增益都会撞回上限。

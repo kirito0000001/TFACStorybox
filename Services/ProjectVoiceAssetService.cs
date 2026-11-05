@@ -8,7 +8,11 @@ namespace GalExcleTools.Services;
 
 internal sealed class ProjectVoiceAssetService
 {
-    public static readonly string[] Extensions = [".wav"];
+    /// <summary>
+    /// 可选进来的源格式。**最终一律转成 wav/48k/16bit**（见 <see cref="VoiceAudioFormat"/>）——
+    /// 用户手上有什么格式就丢什么，统一规格是导入这一层的事，不该让用户先自己转。
+    /// </summary>
+    public static readonly string[] Extensions = VoiceAudioFormat.ImportableExtensions;
 
     /// <summary>语音的「原始版」档案（见 <see cref="VoiceOriginalArchiveService"/>）。</summary>
     private readonly VoiceOriginalArchiveService _originalArchive = new();
@@ -39,15 +43,18 @@ internal sealed class ProjectVoiceAssetService
             ProjectTextRow row,
             int rowCount,
             string sourcePath,
-            ProjectVoiceMapState state)
+            ProjectVoiceMapState state,
+            string? ffmpegPath = null)
         {
             if (!IsValidVoicePath(sourcePath))
             {
-                throw new InvalidOperationException("只支持 wav 语音文件。");
+                throw new InvalidOperationException(
+                    "不支持的音频格式：" + Path.GetExtension(sourcePath) + "。");
             }
 
             var remark = GetDefaultRemark(sourcePath);
-            var targetPath = WriteVoice(project, row, rowCount, sourcePath, remark, state, copySource: true);
+            var targetPath = WriteVoice(
+                project, row, rowCount, sourcePath, remark, state, copySource: true, ffmpegPath: ffmpegPath);
 
             // 导入/更换即**刷新**原始版（覆盖旧的）：这是用户有意换的一份素材，
             // 旧原始版留着只会让人「还原」到一个已经不想要的版本。
@@ -128,7 +135,8 @@ internal sealed class ProjectVoiceAssetService
         string sourcePath,
         string remark,
         ProjectVoiceMapState state,
-        bool copySource)
+        bool copySource,
+        string? ffmpegPath = null)
     {
         var folderPath = WorkspacePathUtility.GetProjectChapterVoiceFolderPath(project, row.ChapterCode);
         Directory.CreateDirectory(folderPath);
@@ -145,7 +153,34 @@ internal sealed class ProjectVoiceAssetService
             if (copySource)
             {
                 var tempPath = Path.Combine(folderPath, $"__voice_import_{Guid.NewGuid():N}.wav");
-                File.Copy(sourcePath, tempPath, overwrite: true);
+
+                // 源已经是统一规格就直接拷（不重编码，省时间也不引入任何损失）；
+                // 否则交给 ffmpeg 转 —— mp3/flac 这类**不能原样塞进 .wav 文件名**，
+                // 那样文件头是 mp3、扩展名是 wav，ffmpeg 读得出来、UE 却会当成坏文件。
+                if (VoiceAudioFormat.IsCanonicalWav(sourcePath))
+                {
+                    File.Copy(sourcePath, tempPath, overwrite: true);
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(ffmpegPath))
+                    {
+                        throw new InvalidOperationException(
+                            "这份素材需要转成 wav/48k/16bit，但没找到 ffmpeg。请在设置里指定 ffmpeg 路径。");
+                    }
+
+                    try
+                    {
+                        VoiceAudioFormat.Convert(ffmpegPath, sourcePath, tempPath, out _);
+                    }
+                    catch (Exception)
+                    {
+                        // 半截临时文件必须清掉，否则下次导入会被它干扰（同名不会撞，但会留垃圾）。
+                        AtomicFileWriter.TryDelete(tempPath);
+                        throw;
+                    }
+                }
+
                 File.Move(tempPath, targetPath, overwrite: true);
             }
             else
