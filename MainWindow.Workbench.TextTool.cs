@@ -132,6 +132,8 @@ namespace GalExcleTools
         private enum VoiceRowFilter
         {
             All,
+            /// <summary>只显示"说话人勾了有语音"的台词（含还没录音的，就看人）。</summary>
+            AnyVoicedSpeaker,
             Configured,
             Missing,
             Unchecked,
@@ -208,6 +210,7 @@ namespace GalExcleTools
             }
 
             AddItem("全部行", "All");
+            AddItem("说话人语音", "AnyVoicedSpeaker");
             AddItem("已设置语音", "Configured");
             AddItem("未设置语音", "Missing");
 
@@ -602,6 +605,11 @@ namespace GalExcleTools
 
                 switch (_voiceRowFilter)
                 {
+                    // 「说话人语音」：这个角色的所有台词，不管录没录 ——
+                    // 用来按角色过一遍"该配的都在不在"，是最常用的看法。
+                    case VoiceRowFilter.AnyVoicedSpeaker:
+                        return IsSpeakerVoiced(speakerKey);
+
                     case VoiceRowFilter.Configured:
                         return hasVoice;
 
@@ -645,6 +653,7 @@ namespace GalExcleTools
         {
             var filterText = _voiceRowFilter switch
             {
+                VoiceRowFilter.AnyVoicedSpeaker => "说话人语音",
                 VoiceRowFilter.Configured => "已设置语音",
                 VoiceRowFilter.Missing => "未设置语音",
                 VoiceRowFilter.Unchecked => "未检查",
