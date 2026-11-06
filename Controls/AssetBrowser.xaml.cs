@@ -56,10 +56,4 @@ public sealed partial class AssetBrowser : UserControl
         }
     }
 
-    /// <summary>能不能往上退（根分类时置 false，让"上一层"按钮变灰）。</summary>
-    public void SetUpEnabled(bool enabled)
-    {
-        PathBarHost.SetUpEnabled(enabled);
-    }
-
 }

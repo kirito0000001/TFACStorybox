@@ -851,6 +851,28 @@ namespace GalExcleTools
             HideCharacterDetailPanel();
         }
 
+        private int _characterDetailAnimToken;
+
+        /// <summary>详情入场：和"分类 → 素材"那一层共用同一套滑入（28px / 220ms）。</summary>
+        private void PlayCharacterDetailEntrance()
+        {
+            PlayLayerSlide(CharacterDetailPage, forward: true);
+        }
+
+        /// <summary>退场：淡出 140ms 后再折叠，否则会"啪"地消失。</summary>
+        private void PlayCharacterDetailExit()
+        {
+            var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(CharacterDetailPage);
+            var compositor = visual.Compositor;
+
+            var fade = compositor.CreateScalarKeyFrameAnimation();
+            fade.InsertKeyFrame(1f, 0f, compositor.CreateCubicBezierEasingFunction(
+                new System.Numerics.Vector2(0.4f, 0f),
+                new System.Numerics.Vector2(1f, 1f)));
+            fade.Duration = TimeSpan.FromMilliseconds(140);
+            visual.StartAnimation("Opacity", fade);
+        }
+
         /// <summary>
         /// 收起角色详情子面板：卡片区回来，路径栏恢复成分类目录。
         /// **不重铺整个素材库页** —— 重铺会闪一下，正好破坏"还在同一页"的感觉。

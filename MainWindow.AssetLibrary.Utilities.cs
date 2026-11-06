@@ -118,8 +118,8 @@ namespace GalExcleTools
             // 这行日志原来在旧网格的填充方法里（那个方法已退休），挪过来免得用户熟悉的日志消失。
             AppendLog(LogKind.Info, $"已加载背景图：{orderedPaths.Count} 个文件。");
             // 不设大标题：零境那页只有路径栏（页名/库名在外层已经有了，再来一遍是重复）。
-            browser.SetPath(folderPath);
-            browser.SetUpEnabled(true);
+            SetAssetLibraryPath(folderPath);
+            SetAssetLibraryUpEnabled(true);
 
             var cards = new System.Collections.Generic.List<object>();
             foreach (var path in orderedPaths)

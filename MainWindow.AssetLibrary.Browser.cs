@@ -580,7 +580,7 @@ public sealed partial class MainWindow
     /// 只是重铺卡片；只用页面级动画的话，中间这层永远是"啪"地换掉（用户 2026-11-06）。
     /// 参数与页面入场对齐：28px、220ms、EaseOut。
     /// </summary>
-    private void PlayLayerSlide(FrameworkElement element, bool forward)
+    private void PlayLayerSlide(FrameworkElement? element, bool forward)
     {
         if (element is null || element.Visibility != Visibility.Visible)
         {

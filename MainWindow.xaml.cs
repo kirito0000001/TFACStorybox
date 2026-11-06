@@ -718,7 +718,6 @@ namespace GalExcleTools
             var showWorkspacePath = Settings.ShowWorkspacePath ? Visibility.Visible : Visibility.Collapsed;
             WorkspaceStatusBorder.Visibility = showWorkspacePath;
             AssetLibraryStatusBorder.Visibility = showWorkspacePath;
-            AssetLibraryDetailStatusBorder.Visibility = showWorkspacePath;
             LogPanelBorder.Visibility = Settings.LogEnabled || _autoLogPanelVisible
                 ? Visibility.Visible
                 : Visibility.Collapsed;
