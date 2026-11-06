@@ -43,7 +43,7 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private void OpenProjectTextTool(ProjectTextToolMode mode, ChapterInfo chapter)
+        private async void OpenProjectTextTool(ProjectTextToolMode mode, ChapterInfo chapter)
         {
             if (_currentProject is null)
             {
@@ -66,7 +66,22 @@ namespace GalExcleTools
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
-            RefreshProjectTextToolPage();
+
+            // 铺这一页要造几百个控件，实测会顿一下。先让进度条画出来再开工 ——
+            // Task.Yield() 把控制权交回消息循环，否则进度条要到铺完才第一次刷新。
+            ShowGlobalProgress("正在打开文本语音", "加载台词与语音…");
+            await Task.Yield();
+            try
+            {
+                RefreshProjectTextToolPage();
+            }
+            catch (Exception error)
+            {
+                AppendLog(LogKind.Warning, "打开文本语音失败", error);
+            }
+
+            CompleteGlobalProgress("已就绪", $"{_projectTextRows.Count} 行");
+            await HideGlobalProgressAfterDelayAsync();
             PlayPageEntrance(ProjectTextToolPage);
         }
 

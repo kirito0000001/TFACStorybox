@@ -2407,6 +2407,10 @@
 
         <!--
             语音处理期间的遮罩：只盖 Row 1（标题栏留着，还能拖窗口/最小化）。
+
+            **常驻在视觉树里**（不是 Collapsed）：Collapsed 的元素没有布局尺寸，
+            第一次显示时容器宽度是 0，动画和流光都建不出来 —— 这就是
+            "第一次要预热、第二次才正常"的根因。现在靠 Opacity + IsHitTestVisible 控制。
             ZIndex 90 —— 进度浮条是 100，必须压在它上面，否则取消按钮被挡，
             那就成了"进来了就出不去"。
 
@@ -2415,138 +2419,14 @@
             · 中心：7 根声波柱，从左往右依次起伏（像播放），**不代表进度** ——
               所以它不均匀、不收敛，永远循环。
         -->
-        <Grid
+        <!--
+            全屏忙碌遮罩：控件内含紫底 + 极光 + 声波柱，自己管可见性。
+            ZIndex 90 —— 进度浮条是 100，压在上面，取消按钮不会被挡。
+        -->
+        <controls:BusyOverlay
             x:Name="VoiceBusyOverlay"
             Grid.Row="1"
-            Canvas.ZIndex="90"
-            Visibility="Collapsed">
-            <!-- 紫底用 #4B2A85（Ultraviolet 那套的 Indigo 一脉），65% 不透明 ——
-                 原来的 #1B1140 太深又偏蓝，看着像蓝色玻璃。 -->
-            <Rectangle Fill="#A64B2A85" />
-
-            <!--
-                流光用 Composition 画，不用 Storyboard：
-                渐变画笔 + 位移动画都跑在合成器线程上，主线程再忙也不会掉帧。
-                Storyboard 版看着"一顿一顿"，就是因为它跟 UI 线程抢时间。
-            -->
-            <Grid
-                x:Name="VoiceBusySheenHost"
-                IsHitTestVisible="False" />
-
-            <StackPanel
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Spacing="18">
-                <StackPanel
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Center"
-                    Spacing="6"
-                    Height="30">
-                        <Rectangle
-                            x:Name="VoiceBusyBar0"
-                            Width="5"
-                            Height="30"
-                            RadiusX="2.5"
-                            RadiusY="2.5"
-                            Fill="White"
-                            VerticalAlignment="Bottom"
-                            RenderTransformOrigin="0.5,1">
-                            <Rectangle.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
-                            </Rectangle.RenderTransform>
-                        </Rectangle>
-                        <Rectangle
-                            x:Name="VoiceBusyBar1"
-                            Width="5"
-                            Height="30"
-                            RadiusX="2.5"
-                            RadiusY="2.5"
-                            Fill="White"
-                            VerticalAlignment="Bottom"
-                            RenderTransformOrigin="0.5,1">
-                            <Rectangle.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
-                            </Rectangle.RenderTransform>
-                        </Rectangle>
-                        <Rectangle
-                            x:Name="VoiceBusyBar2"
-                            Width="5"
-                            Height="30"
-                            RadiusX="2.5"
-                            RadiusY="2.5"
-                            Fill="White"
-                            VerticalAlignment="Bottom"
-                            RenderTransformOrigin="0.5,1">
-                            <Rectangle.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
-                            </Rectangle.RenderTransform>
-                        </Rectangle>
-                        <Rectangle
-                            x:Name="VoiceBusyBar3"
-                            Width="5"
-                            Height="30"
-                            RadiusX="2.5"
-                            RadiusY="2.5"
-                            Fill="White"
-                            VerticalAlignment="Bottom"
-                            RenderTransformOrigin="0.5,1">
-                            <Rectangle.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
-                            </Rectangle.RenderTransform>
-                        </Rectangle>
-                        <Rectangle
-                            x:Name="VoiceBusyBar4"
-                            Width="5"
-                            Height="30"
-                            RadiusX="2.5"
-                            RadiusY="2.5"
-                            Fill="White"
-                            VerticalAlignment="Bottom"
-                            RenderTransformOrigin="0.5,1">
-                            <Rectangle.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
-                            </Rectangle.RenderTransform>
-                        </Rectangle>
-                        <Rectangle
-                            x:Name="VoiceBusyBar5"
-                            Width="5"
-                            Height="30"
-                            RadiusX="2.5"
-                            RadiusY="2.5"
-                            Fill="White"
-                            VerticalAlignment="Bottom"
-                            RenderTransformOrigin="0.5,1">
-                            <Rectangle.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
-                            </Rectangle.RenderTransform>
-                        </Rectangle>
-                        <Rectangle
-                            x:Name="VoiceBusyBar6"
-                            Width="5"
-                            Height="30"
-                            RadiusX="2.5"
-                            RadiusY="2.5"
-                            Fill="White"
-                            VerticalAlignment="Bottom"
-                            RenderTransformOrigin="0.5,1">
-                            <Rectangle.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
-                            </Rectangle.RenderTransform>
-                        </Rectangle>
-                </StackPanel>
-                <TextBlock
-                    x:Name="VoiceBusyOverlayText"
-                    Text="正在处理语音…"
-                    FontSize="15"
-                    Foreground="White"
-                    HorizontalAlignment="Center" />
-                <TextBlock
-                    FontSize="12"
-                    Foreground="#A6FFFFFF"
-                    HorizontalAlignment="Center"
-                    Text="可随时点下方进度条上的「取消」" />
-            </StackPanel>
-        </Grid>
+            Canvas.ZIndex="90" />
 
         <Border
             x:Name="GlobalProgressHost"
