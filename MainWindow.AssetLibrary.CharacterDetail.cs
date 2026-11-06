@@ -140,7 +140,8 @@ namespace GalExcleTools
         {
             _currentCharacter = character;
             var cancellationToken = ResetCharacterDetailLoadCancellation();
-            CharacterDetailTabTitleText.Text = $"{character.Name} / {character.Code}";
+            // 路径栏统一成 Controls/PathBar：层级写法与素材浏览器一致（分类 / 名字 / 代号）。
+            CharacterDetailPathBar.SetPath($"角色立绘 / {character.Name} / {character.Code}");
             CharacterNameTextBox.Text = character.Name;
             CharacterCodeTextBox.Text = character.Code;
             CharacterColorTextBox.Text = character.ColorHex;
@@ -156,7 +157,7 @@ namespace GalExcleTools
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
-            CharacterDetailCloseButton.Focus(FocusState.Programmatic);
+            CharacterDetailPathBar.Focus(FocusState.Programmatic);
             AppendLog(LogKind.User, $"打开角色详情：{character.Name}");
         }
 
@@ -777,6 +778,31 @@ namespace GalExcleTools
             image.Visibility = Visibility.Visible;
             await ThumbnailFactory.LoadThumbnailFromFileAsync(image, imagePath);
             return true;
+        }
+
+        /// <summary>在资源管理器里定位到当前角色的文件夹。</summary>
+        private void RevealCurrentCharacterFolder()
+        {
+            var path = _currentCharacter?.Path;
+            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+            {
+                ShowFloatingTip(InfoBarSeverity.Warning, "找不到角色文件夹", path ?? string.Empty);
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"\"{path}\"",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception error)
+            {
+                ShowFloatingTip(InfoBarSeverity.Error, "打开资源管理器失败", path, error);
+            }
         }
 
         private void CloseCharacterDetailButton_Click(object sender, RoutedEventArgs e)

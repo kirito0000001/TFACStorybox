@@ -21,6 +21,11 @@ public sealed partial class AssetBrowser : UserControl
     public AssetBrowser()
     {
         InitializeComponent();
+
+        // 路径栏的行为在这里转发出去，页面照旧只认 AssetBrowser 的事件。
+        PathBarHost.BackRequested += (_, _) => BackRequested?.Invoke(this, EventArgs.Empty);
+        PathBarHost.UpRequested += (_, _) => UpRequested?.Invoke(this, EventArgs.Empty);
+        PathBarHost.OpenFolderRequested += (_, _) => OpenFolderRequested?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>拖拽重排的接线处（CanDragItems / DragItemsStarting / DragItemsCompleted 都挂它）。</summary>
@@ -38,7 +43,7 @@ public sealed partial class AssetBrowser : UserControl
     /// <summary>路径栏上那行字（当前目录的完整路径）。</summary>
     public void SetPath(string path)
     {
-        PathText.Text = path;
+        PathBarHost.SetPath(path);
     }
 
     public void SetCards(IEnumerable<object> cards)
@@ -53,21 +58,7 @@ public sealed partial class AssetBrowser : UserControl
     /// <summary>能不能往上退（根分类时置 false，让"上一层"按钮变灰）。</summary>
     public void SetUpEnabled(bool enabled)
     {
-        UpButton.IsEnabled = enabled;
+        PathBarHost.SetUpEnabled(enabled);
     }
 
-    private void BackButton_Click(object sender, RoutedEventArgs e)
-    {
-        BackRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void UpButton_Click(object sender, RoutedEventArgs e)
-    {
-        UpRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void OpenFolderButton_Click(object sender, RoutedEventArgs e)
-    {
-        OpenFolderRequested?.Invoke(this, EventArgs.Empty);
-    }
 }

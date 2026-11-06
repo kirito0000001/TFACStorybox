@@ -436,6 +436,13 @@ namespace GalExcleTools
             // 异步流程随时可能弹第一条。
             TipToast.Attach(RootGrid);
 
+            // 角色详情页的路径栏（Controls/PathBar）：只接一次，避免每次开页面重复挂。
+            // 角色没有层级，"上一层"直接藏掉。
+            CharacterDetailPathBar.SetUpVisible(false);
+            CharacterDetailPathBar.BackRequested += (_, _) =>
+                CloseCharacterDetailButton_Click(this, new RoutedEventArgs());
+            CharacterDetailPathBar.OpenFolderRequested += (_, _) => RevealCurrentCharacterFolder();
+
             StorySpeakerTextBox.RegisterPropertyChangedCallback(
                 AutoSuggestBox.IsSuggestionListOpenProperty,
                 StorySpeakerTextBox_SuggestionListOpenChanged);
