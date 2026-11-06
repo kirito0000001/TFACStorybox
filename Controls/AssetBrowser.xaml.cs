@@ -41,9 +41,13 @@ public sealed partial class AssetBrowser : UserControl
     public event EventHandler? OpenFolderRequested;
 
     /// <summary>路径栏上那行字（当前目录的完整路径）。</summary>
+    /// <summary>路径栏当前的路径（"在资源管理器打开"要用它）。</summary>
+    public string CurrentPath { get; private set; } = string.Empty;
+
     public void SetPath(string path)
     {
-        PathBarHost.SetPath(path);
+        CurrentPath = path ?? string.Empty;
+        PathBarHost.SetPath(CurrentPath);
     }
 
     public void SetCards(IEnumerable<object> cards)
@@ -52,6 +56,18 @@ public sealed partial class AssetBrowser : UserControl
         foreach (var card in cards)
         {
             CardGrid.Items.Add(card);
+        }
+    }
+
+    /// <summary>
+    /// 卡片网格的显隐。角色详情这类"子面板"要盖在卡片区上，
+    /// 但**路径栏必须留着** —— 所以不能整个控件藏掉，只藏网格。
+    /// </summary>
+    public void SetCardsVisible(bool visible)
+    {
+        if (CardGrid is not null)
+        {
+            CardGrid.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 

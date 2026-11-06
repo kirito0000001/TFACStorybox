@@ -136,28 +136,26 @@ namespace GalExcleTools
             return input;
         }
 
+        /// <summary>打开详情前的分类目录，收起时用它还原路径栏。</summary>
+        private string _characterDetailReturnPath = string.Empty;
+
         private void ShowCharacterDetailPage(CharacterInfo character)
         {
             _currentCharacter = character;
             var cancellationToken = ResetCharacterDetailLoadCancellation();
-            // 路径栏统一成 Controls/PathBar：层级写法与素材浏览器一致（分类 / 名字 / 代号）。
-            CharacterDetailPathBar.SetPath($"角色立绘 / {character.Name} / {character.Code}");
             CharacterNameTextBox.Text = character.Name;
             CharacterCodeTextBox.Text = character.Code;
             CharacterColorTextBox.Text = character.ColorHex;
             RunCharacterDetailLoad(LoadCharacterDetailLayersAsync(character, cancellationToken));
-            WorkbenchPage.Visibility = Visibility.Collapsed;
-            ProjectDetailPage.Visibility = Visibility.Collapsed;
-            AssetLibraryPage.Visibility = Visibility.Collapsed;
-            AssetLibraryDetailPage.Visibility = Visibility.Collapsed;
+
+            // 不再切页面：详情作为子面板盖在卡片区上，外层（元数据条 / 路径栏 / 状态栏）不动。
+            // 这样从分类 → 立绘 → 角色 一路点下去是连续的，不会像换了个软件。
+            _characterDetailReturnPath = _currentAssetLibrary is null
+                ? string.Empty
+                : GetCharacterFolderPath(_currentAssetLibrary);
+            AssetBrowserHost?.SetCardsVisible(false);
+            AssetBrowserHost?.SetPath($"{_characterDetailReturnPath}\\{character.Name}（{character.Code}）");
             CharacterDetailPage.Visibility = Visibility.Visible;
-            BackgroundImageViewerPage.Visibility = Visibility.Collapsed;
-            MusicPlayerPage.Visibility = Visibility.Collapsed;
-            CreateProjectPage.Visibility = Visibility.Collapsed;
-            CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
-            SyncPanel.Visibility = Visibility.Collapsed;
-            SettingsPage.Visibility = Visibility.Collapsed;
-            CharacterDetailPathBar.Focus(FocusState.Programmatic);
             AppendLog(LogKind.User, $"打开角色详情：{character.Name}");
         }
 
@@ -780,38 +778,48 @@ namespace GalExcleTools
             return true;
         }
 
-        /// <summary>在资源管理器里定位到当前角色的文件夹。</summary>
-        private void RevealCurrentCharacterFolder()
+        private void CloseCharacterDetailButton_Click(object sender, RoutedEventArgs e)
         {
-            var path = _currentCharacter?.Path;
-            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+            if (_currentAssetLibrary is null)
             {
-                ShowFloatingTip(InfoBarSeverity.Warning, "找不到角色文件夹", path ?? string.Empty);
                 return;
             }
 
-            try
+            PlayNegativeSound();
+            HideCharacterDetailPanel();
+        }
+
+        /// <summary>
+        /// 收起角色详情子面板：卡片区回来，路径栏恢复成分类目录。
+        /// **不重铺整个素材库页** —— 重铺会闪一下，正好破坏"还在同一页"的感觉。
+        /// </summary>
+        private void HideCharacterDetailPanel()
+        {
+            CharacterDetailPage.Visibility = Visibility.Collapsed;
+            ResetCharacterDetailLoadCancellation();
+
+            if (AssetBrowserHost is null)
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = $"\"{path}\"",
-                    UseShellExecute = true
-                });
+                return;
             }
-            catch (Exception error)
+
+            AssetBrowserHost.SetCardsVisible(true);
+            if (!string.IsNullOrEmpty(_characterDetailReturnPath))
             {
-                ShowFloatingTip(InfoBarSeverity.Error, "打开资源管理器失败", path, error);
+                AssetBrowserHost.SetPath(_characterDetailReturnPath);
             }
         }
 
-        private void CloseCharacterDetailButton_Click(object sender, RoutedEventArgs e)
+        /// <summary>角色详情打开时，路径栏的"返回"先退详情，而不是直接退回库列表。</summary>
+        private bool TryCloseCharacterDetailOnBack()
         {
-            if (_currentAssetLibrary is not null)
+            if (CharacterDetailPage.Visibility != Visibility.Visible)
             {
-                PlayNegativeSound();
-                ShowAssetLibraryDetailPage(_currentAssetLibrary);
+                return false;
             }
+
+            CloseCharacterDetailButton_Click(this, new RoutedEventArgs());
+            return true;
         }
 
         private async void CharacterDetailRenameButton_Click(object sender, RoutedEventArgs e)

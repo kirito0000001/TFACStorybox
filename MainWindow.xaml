@@ -1150,9 +1150,213 @@
                         路径栏文字跟着变、路径栏的「上一层」退回分类层。
                         （原来这里还有一块「分类网格 + 大标题」，用户 2026-10-17 指出那是重复，已删。）
                     -->
-                    <controls:AssetBrowser
-                        x:Name="AssetBrowserHost"
-                        Grid.Row="1" />
+                    <!--
+                        角色详情不再是独立页面：它作为同一页里的**子面板**盖在卡片区上。
+                        外层（元数据条 / 路径栏 / 状态栏）不动，所以从分类 → 立绘 → 角色
+                        一路点过去是连续的，不会像切换了软件（用户 2026-11-06）。
+                    -->
+                    <Grid Grid.Row="1">
+                        <controls:AssetBrowser
+                            x:Name="AssetBrowserHost" />
+
+                    <Grid
+                        x:Name="CharacterDetailPage"
+                        Visibility="Collapsed"
+                        RowSpacing="14">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!--
+                            顶部路径栏统一成 Controls/PathBar：和素材浏览器同一套（40×40 图标按钮 +
+                            圆角 6 的路径框）。原来这里是 36×36 的返回键 + 一个描边胶囊，
+                            切页面时两套风格并排出现（用户 2026-11-06）。
+                            角色详情没有"上一层"，按钮在代码里隐藏。
+                        -->
+                        <InfoBar
+                            x:Name="CharacterDetailInfoBar"
+                            IsOpen="False"
+                            IsClosable="True" />
+
+                        <ScrollViewer
+                            x:Name="CharacterDetailScrollViewer"
+                            Grid.Row="1"
+                            VerticalScrollBarVisibility="Auto">
+                            <StackPanel Spacing="10">
+                                <Border Style="{StaticResource PanelBorderStyle}">
+                                    <Grid Padding="20">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="分层预览：DN_Cloth → FC_Face → AD_Adorn → VFX" Style="{StaticResource SubtleTextStyle}" />
+                                        <Grid Grid.Row="1" Margin="0,18,0,0" MinHeight="600" Background="Transparent">
+                                            <Border
+                                                x:Name="CharacterPreviewSurface"
+                                                Width="660"
+                                                Height="560"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                IsTabStop="True"
+                                                Tapped="CharacterPreviewSurface_Tapped"
+                                                PointerPressed="CharacterPreviewSurface_PointerPressed"
+                                                PointerEntered="CharacterPreviewSurface_PointerEntered"
+                                                PointerExited="CharacterPreviewSurface_PointerExited"
+                                                RightTapped="CharacterPreviewSurface_RightTapped"
+                                                KeyDown="CharacterPreviewSurface_KeyDown"
+                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="8"
+                                                Background="{ThemeResource LayerFillColorDefaultBrush}">
+                                                <Grid>
+                                                    <TextBlock x:Name="CharacterPreviewEmptyText" Text="选择下方图层后在这里叠加预览" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                    <Image x:Name="CharacterPreviewClothImage" Stretch="Uniform" />
+                                                    <Image x:Name="CharacterPreviewFaceImage" Stretch="Uniform" />
+                                                    <Image x:Name="CharacterPreviewAdornImage" Stretch="Uniform" />
+                                                    <Image x:Name="CharacterPreviewVfxImage" Stretch="Uniform" />
+                                                </Grid>
+                                            </Border>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+
+                                <Expander x:Name="CharacterClothExpander" Header="服装 DN_Cloth">
+                                    <StackPanel
+                                        x:Name="CharacterClothDropZone"
+                                        Spacing="8"
+                                        AllowDrop="True"
+                                        Background="Transparent"
+                                        DragEnter="CharacterClothDropZone_DragEnter"
+                                        DragOver="CharacterClothDropZone_DragOver"
+                                        Drop="CharacterClothDropZone_Drop">
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="服装是最底层。表情和装饰需要声明适用的服装范围，例如 DN00-02。" Style="{StaticResource SubtleTextStyle}" />
+                                            <Button Grid.Column="1" Content="导入服装" Click="AddCharacterClothesButton_Click" />
+                                        </Grid>
+                                        <GridView
+                                            x:Name="CharacterClothGridView"
+                                            AllowDrop="True"
+                                            CanDragItems="True"
+                                            CanReorderItems="True"
+                                            IsItemClickEnabled="True"
+                                            ReorderMode="Enabled"
+                                            DragItemsStarting="CharacterClothGridView_DragItemsStarting"
+                                            DragOver="CharacterClothGridView_DragOver"
+                                            DragItemsCompleted="CharacterClothGridView_DragItemsCompleted"
+                                            ItemClick="CharacterLayerGridView_ItemClick"
+                                            Padding="14,8,24,16"
+                                            HorizontalAlignment="Stretch"
+                                            SelectionMode="None" />
+                                    </StackPanel>
+                                </Expander>
+                                <Expander x:Name="CharacterFaceExpander" Header="表情 FC_Face">
+                                    <StackPanel
+                                        x:Name="CharacterFaceDropZone"
+                                        Spacing="8"
+                                        AllowDrop="True"
+                                        Background="Transparent"
+                                        DragEnter="CharacterFaceDropZone_DragEnter"
+                                        DragOver="CharacterFaceDropZone_DragOver"
+                                        Drop="CharacterFaceDropZone_Drop">
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="表情命名为 FC00_备注；适用服装范围写入元数据，不再塞进文件名。" Style="{StaticResource SubtleTextStyle}" />
+                                            <Button Grid.Column="1" Content="导入表情" Click="AddCharacterFacesButton_Click" />
+                                        </Grid>
+                                        <GridView
+                                            x:Name="CharacterFaceGridView"
+                                            AllowDrop="True"
+                                            CanDragItems="True"
+                                            CanReorderItems="True"
+                                            IsItemClickEnabled="True"
+                                            ReorderMode="Enabled"
+                                            DragItemsStarting="CharacterFaceGridView_DragItemsStarting"
+                                            DragOver="CharacterFaceGridView_DragOver"
+                                            DragItemsCompleted="CharacterFaceGridView_DragItemsCompleted"
+                                            ItemClick="CharacterLayerGridView_ItemClick"
+                                            Padding="14,8,24,16"
+                                            HorizontalAlignment="Stretch"
+                                            SelectionMode="None" />
+                                    </StackPanel>
+                                </Expander>
+                                <Expander x:Name="CharacterAdornExpander" Header="装饰 AD_Adorn">
+                                    <StackPanel
+                                        x:Name="CharacterAdornDropZone"
+                                        Spacing="8"
+                                        AllowDrop="True"
+                                        Background="Transparent"
+                                        DragEnter="CharacterAdornDropZone_DragEnter"
+                                        DragOver="CharacterAdornDropZone_DragOver"
+                                        Drop="CharacterAdornDropZone_Drop">
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="装饰命名为 AD00_备注；适用服装范围写入元数据，不再塞进文件名。" Style="{StaticResource SubtleTextStyle}" />
+                                            <Button Grid.Column="1" Content="导入装饰" Click="AddCharacterAdornsButton_Click" />
+                                        </Grid>
+                                        <GridView
+                                            x:Name="CharacterAdornGridView"
+                                            AllowDrop="True"
+                                            CanDragItems="True"
+                                            CanReorderItems="True"
+                                            IsItemClickEnabled="True"
+                                            ReorderMode="Enabled"
+                                            DragItemsStarting="CharacterAdornGridView_DragItemsStarting"
+                                            DragOver="CharacterAdornGridView_DragOver"
+                                            DragItemsCompleted="CharacterAdornGridView_DragItemsCompleted"
+                                            ItemClick="CharacterLayerGridView_ItemClick"
+                                            Padding="14,8,24,16"
+                                            HorizontalAlignment="Stretch"
+                                            SelectionMode="None" />
+                                    </StackPanel>
+                                </Expander>
+                                <Expander x:Name="CharacterVfxExpander" Header="VFX 滤镜">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="滤镜默认全服装可用。这里作为索引显示，不打开详情页。" Style="{StaticResource SubtleTextStyle}" />
+                                        <GridView x:Name="CharacterVfxGridView" Padding="14,8,24,16" HorizontalAlignment="Stretch" SelectionMode="None" />
+                                    </StackPanel>
+                                </Expander>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
+                            <ScrollViewer
+                                HorizontalScrollBarVisibility="Auto"
+                                HorizontalScrollMode="Auto"
+                                VerticalScrollBarVisibility="Disabled"
+                                VerticalScrollMode="Disabled">
+                                <StackPanel Padding="12" Orientation="Horizontal" Spacing="14">
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <TextBlock Text="名称" VerticalAlignment="Center" />
+                                        <TextBox x:Name="CharacterNameTextBox" Width="150" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <TextBlock Text="英文代号" VerticalAlignment="Center" />
+                                        <TextBox x:Name="CharacterCodeTextBox" Width="150" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <TextBlock Text="代表色" VerticalAlignment="Center" />
+                                        <TextBox x:Name="CharacterColorTextBox" Width="110" PlaceholderText="#RRGGBB" />
+                                    </StackPanel>
+                                    <Button Content="保存设置" Click="SaveCharacterInlineSettingsButton_Click" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+
+
+                    </Grid>
 
                     <ScrollViewer
                         x:Name="AssetLibraryDetailScrollViewer"
@@ -1177,206 +1381,6 @@
 
                     <Border x:Name="AssetLibraryDetailStatusBorder" Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
                         <TextBlock x:Name="AssetLibraryDetailStatusText" Padding="14,10" Style="{StaticResource SubtleTextStyle}" />
-                    </Border>
-                </Grid>
-
-                <Grid
-                    x:Name="CharacterDetailPage"
-                    Visibility="Collapsed"
-                    RowSpacing="14">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <!--
-                        顶部路径栏统一成 Controls/PathBar：和素材浏览器同一套（40×40 图标按钮 +
-                        圆角 6 的路径框）。原来这里是 36×36 的返回键 + 一个描边胶囊，
-                        切页面时两套风格并排出现（用户 2026-11-06）。
-                        角色详情没有"上一层"，按钮在代码里隐藏。
-                    -->
-                    <StackPanel Spacing="8">
-                        <controls:PathBar x:Name="CharacterDetailPathBar" />
-
-                        <InfoBar
-                            x:Name="CharacterDetailInfoBar"
-                            IsOpen="False"
-                            IsClosable="True" />
-                    </StackPanel>
-
-                    <ScrollViewer
-                        x:Name="CharacterDetailScrollViewer"
-                        Grid.Row="1"
-                        VerticalScrollBarVisibility="Auto">
-                        <StackPanel Spacing="10">
-                            <Border Style="{StaticResource PanelBorderStyle}">
-                                <Grid Padding="20">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="*" />
-                                    </Grid.RowDefinitions>
-                                    <TextBlock Text="分层预览：DN_Cloth → FC_Face → AD_Adorn → VFX" Style="{StaticResource SubtleTextStyle}" />
-                                    <Grid Grid.Row="1" Margin="0,18,0,0" MinHeight="600" Background="Transparent">
-                                        <Border
-                                            x:Name="CharacterPreviewSurface"
-                                            Width="660"
-                                            Height="560"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            IsTabStop="True"
-                                            Tapped="CharacterPreviewSurface_Tapped"
-                                            PointerPressed="CharacterPreviewSurface_PointerPressed"
-                                            PointerEntered="CharacterPreviewSurface_PointerEntered"
-                                            PointerExited="CharacterPreviewSurface_PointerExited"
-                                            RightTapped="CharacterPreviewSurface_RightTapped"
-                                            KeyDown="CharacterPreviewSurface_KeyDown"
-                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="8"
-                                            Background="{ThemeResource LayerFillColorDefaultBrush}">
-                                            <Grid>
-                                                <TextBlock x:Name="CharacterPreviewEmptyText" Text="选择下方图层后在这里叠加预览" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                <Image x:Name="CharacterPreviewClothImage" Stretch="Uniform" />
-                                                <Image x:Name="CharacterPreviewFaceImage" Stretch="Uniform" />
-                                                <Image x:Name="CharacterPreviewAdornImage" Stretch="Uniform" />
-                                                <Image x:Name="CharacterPreviewVfxImage" Stretch="Uniform" />
-                                            </Grid>
-                                        </Border>
-                                    </Grid>
-                                </Grid>
-                            </Border>
-
-                            <Expander x:Name="CharacterClothExpander" Header="服装 DN_Cloth">
-                                <StackPanel
-                                    x:Name="CharacterClothDropZone"
-                                    Spacing="8"
-                                    AllowDrop="True"
-                                    Background="Transparent"
-                                    DragEnter="CharacterClothDropZone_DragEnter"
-                                    DragOver="CharacterClothDropZone_DragOver"
-                                    Drop="CharacterClothDropZone_Drop">
-                                    <Grid ColumnSpacing="10">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="服装是最底层。表情和装饰需要声明适用的服装范围，例如 DN00-02。" Style="{StaticResource SubtleTextStyle}" />
-                                        <Button Grid.Column="1" Content="导入服装" Click="AddCharacterClothesButton_Click" />
-                                    </Grid>
-                                    <GridView
-                                        x:Name="CharacterClothGridView"
-                                        AllowDrop="True"
-                                        CanDragItems="True"
-                                        CanReorderItems="True"
-                                        IsItemClickEnabled="True"
-                                        ReorderMode="Enabled"
-                                        DragItemsStarting="CharacterClothGridView_DragItemsStarting"
-                                        DragOver="CharacterClothGridView_DragOver"
-                                        DragItemsCompleted="CharacterClothGridView_DragItemsCompleted"
-                                        ItemClick="CharacterLayerGridView_ItemClick"
-                                        Padding="14,8,24,16"
-                                        HorizontalAlignment="Stretch"
-                                        SelectionMode="None" />
-                                </StackPanel>
-                            </Expander>
-                            <Expander x:Name="CharacterFaceExpander" Header="表情 FC_Face">
-                                <StackPanel
-                                    x:Name="CharacterFaceDropZone"
-                                    Spacing="8"
-                                    AllowDrop="True"
-                                    Background="Transparent"
-                                    DragEnter="CharacterFaceDropZone_DragEnter"
-                                    DragOver="CharacterFaceDropZone_DragOver"
-                                    Drop="CharacterFaceDropZone_Drop">
-                                    <Grid ColumnSpacing="10">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="表情命名为 FC00_备注；适用服装范围写入元数据，不再塞进文件名。" Style="{StaticResource SubtleTextStyle}" />
-                                        <Button Grid.Column="1" Content="导入表情" Click="AddCharacterFacesButton_Click" />
-                                    </Grid>
-                                    <GridView
-                                        x:Name="CharacterFaceGridView"
-                                        AllowDrop="True"
-                                        CanDragItems="True"
-                                        CanReorderItems="True"
-                                        IsItemClickEnabled="True"
-                                        ReorderMode="Enabled"
-                                        DragItemsStarting="CharacterFaceGridView_DragItemsStarting"
-                                        DragOver="CharacterFaceGridView_DragOver"
-                                        DragItemsCompleted="CharacterFaceGridView_DragItemsCompleted"
-                                        ItemClick="CharacterLayerGridView_ItemClick"
-                                        Padding="14,8,24,16"
-                                        HorizontalAlignment="Stretch"
-                                        SelectionMode="None" />
-                                </StackPanel>
-                            </Expander>
-                            <Expander x:Name="CharacterAdornExpander" Header="装饰 AD_Adorn">
-                                <StackPanel
-                                    x:Name="CharacterAdornDropZone"
-                                    Spacing="8"
-                                    AllowDrop="True"
-                                    Background="Transparent"
-                                    DragEnter="CharacterAdornDropZone_DragEnter"
-                                    DragOver="CharacterAdornDropZone_DragOver"
-                                    Drop="CharacterAdornDropZone_Drop">
-                                    <Grid ColumnSpacing="10">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="装饰命名为 AD00_备注；适用服装范围写入元数据，不再塞进文件名。" Style="{StaticResource SubtleTextStyle}" />
-                                        <Button Grid.Column="1" Content="导入装饰" Click="AddCharacterAdornsButton_Click" />
-                                    </Grid>
-                                    <GridView
-                                        x:Name="CharacterAdornGridView"
-                                        AllowDrop="True"
-                                        CanDragItems="True"
-                                        CanReorderItems="True"
-                                        IsItemClickEnabled="True"
-                                        ReorderMode="Enabled"
-                                        DragItemsStarting="CharacterAdornGridView_DragItemsStarting"
-                                        DragOver="CharacterAdornGridView_DragOver"
-                                        DragItemsCompleted="CharacterAdornGridView_DragItemsCompleted"
-                                        ItemClick="CharacterLayerGridView_ItemClick"
-                                        Padding="14,8,24,16"
-                                        HorizontalAlignment="Stretch"
-                                        SelectionMode="None" />
-                                </StackPanel>
-                            </Expander>
-                            <Expander x:Name="CharacterVfxExpander" Header="VFX 滤镜">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="滤镜默认全服装可用。这里作为索引显示，不打开详情页。" Style="{StaticResource SubtleTextStyle}" />
-                                    <GridView x:Name="CharacterVfxGridView" Padding="14,8,24,16" HorizontalAlignment="Stretch" SelectionMode="None" />
-                                </StackPanel>
-                            </Expander>
-                        </StackPanel>
-                    </ScrollViewer>
-
-                    <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
-                        <ScrollViewer
-                            HorizontalScrollBarVisibility="Auto"
-                            HorizontalScrollMode="Auto"
-                            VerticalScrollBarVisibility="Disabled"
-                            VerticalScrollMode="Disabled">
-                            <StackPanel Padding="12" Orientation="Horizontal" Spacing="14">
-                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                    <TextBlock Text="名称" VerticalAlignment="Center" />
-                                    <TextBox x:Name="CharacterNameTextBox" Width="150" />
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                    <TextBlock Text="英文代号" VerticalAlignment="Center" />
-                                    <TextBox x:Name="CharacterCodeTextBox" Width="150" />
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                    <TextBlock Text="代表色" VerticalAlignment="Center" />
-                                    <TextBox x:Name="CharacterColorTextBox" Width="110" PlaceholderText="#RRGGBB" />
-                                </StackPanel>
-                                <Button Content="保存设置" Click="SaveCharacterInlineSettingsButton_Click" />
-                            </StackPanel>
-                        </ScrollViewer>
                     </Border>
                 </Grid>
 

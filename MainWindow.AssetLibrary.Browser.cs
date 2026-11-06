@@ -240,6 +240,8 @@ public sealed partial class MainWindow
         var folderPath = GetCharacterFolderPath(assetLibrary);
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
+        // 从角色详情退回来时要重新露出卡片区（详情是盖在它上面的）。
+        browser.SetCardsVisible(true);
 
         // ⚠️ 顺序要和旧界面一致：旧立绘网格用的是 GetCharactersByName
         // （我一开始写成 GetCharactersByFolderName，两者顺序可能不同 → 用户会看到"立绘顺序变了"）。
@@ -576,11 +578,48 @@ public sealed partial class MainWindow
         AssetBrowserHost.BackRequested += AssetBrowser_BackRequested;
         AssetBrowserHost.UpRequested -= AssetBrowser_UpRequested;
         AssetBrowserHost.UpRequested += AssetBrowser_UpRequested;
+        // 这个按钮原来**没接线**，点了没反应 —— 顺手补上。
+        AssetBrowserHost.OpenFolderRequested -= AssetBrowser_OpenFolderRequested;
+        AssetBrowserHost.OpenFolderRequested += AssetBrowser_OpenFolderRequested;
     }
 
     private void AssetBrowser_BackRequested(object? sender, EventArgs e)
     {
+        // 详情开着的时候，"返回"只退详情 —— 否则一次退两层，用户会懵。
+        if (TryCloseCharacterDetailOnBack())
+        {
+            return;
+        }
+
         ReturnToAssetCategoryLayer();
+    }
+
+    /// <summary>
+    /// 在资源管理器里打开路径栏当前指向的目录。
+    /// 详情打开时路径指向角色文件夹，所以同一个按钮也顺带能开角色的目录。
+    /// </summary>
+    private void AssetBrowser_OpenFolderRequested(object? sender, EventArgs e)
+    {
+        var path = AssetBrowserHost?.CurrentPath;
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            ShowFloatingTip(InfoBarSeverity.Warning, "目录不存在", path ?? string.Empty);
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{path}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception error)
+        {
+            ShowFloatingTip(InfoBarSeverity.Error, "打开资源管理器失败", path, error);
+        }
     }
 
     private void AssetBrowser_UpRequested(object? sender, EventArgs e)
