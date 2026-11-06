@@ -1186,42 +1186,40 @@
                                 <ColumnDefinition Width="420" />
                             </Grid.ColumnDefinitions>
 
-                            <!-- 左：立绘展示。固定占左半边，右边列表再长也不影响它 -->
-                            <Border Grid.Column="0" Style="{StaticResource PanelBorderStyle}">
-                                    <Grid Padding="20">
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="*" />
-                                        </Grid.RowDefinitions>
-                                        <TextBlock Text="分层预览：DN_Cloth → FC_Face → AD_Adorn → VFX" Style="{StaticResource SubtleTextStyle}" />
-                                        <Grid Grid.Row="1" Margin="0,18,0,0" MinHeight="600" Background="Transparent">
-                                            <Border
-                                                x:Name="CharacterPreviewSurface"
-                                                MaxWidth="660"
-                                                MaxHeight="560"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                IsTabStop="True"
-                                                Tapped="CharacterPreviewSurface_Tapped"
-                                                PointerPressed="CharacterPreviewSurface_PointerPressed"
-                                                PointerEntered="CharacterPreviewSurface_PointerEntered"
-                                                PointerExited="CharacterPreviewSurface_PointerExited"
-                                                RightTapped="CharacterPreviewSurface_RightTapped"
-                                                KeyDown="CharacterPreviewSurface_KeyDown"
-                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="8"
-                                                Background="{ThemeResource LayerFillColorDefaultBrush}">
-                                                <Grid>
-                                                    <TextBlock x:Name="CharacterPreviewEmptyText" Text="选择下方图层后在这里叠加预览" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                    <Image x:Name="CharacterPreviewClothImage" Stretch="Uniform" />
-                                                    <Image x:Name="CharacterPreviewFaceImage" Stretch="Uniform" />
-                                                    <Image x:Name="CharacterPreviewAdornImage" Stretch="Uniform" />
-                                                    <Image x:Name="CharacterPreviewVfxImage" Stretch="Uniform" />
-                                                </Grid>
-                                            </Border>
-                                        </Grid>
-                                    </Grid>
+                            <!--
+                                左：立绘直接铺满左半边。
+                                原来外面还套了一层 PanelBorderStyle 面板 + 20 内边距，
+                                再加一行"分层预览"，纯属为了放那行字 —— 结果是立绘被挤到
+                                只有一半大小（用户 2026-11-06）。现在这些全部去掉。
+                            -->
+                            <Border
+                                x:Name="CharacterPreviewSurface"
+                                Grid.Column="0"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Stretch"
+                                IsTabStop="True"
+                                Tapped="CharacterPreviewSurface_Tapped"
+                                PointerPressed="CharacterPreviewSurface_PointerPressed"
+                                PointerEntered="CharacterPreviewSurface_PointerEntered"
+                                PointerExited="CharacterPreviewSurface_PointerExited"
+                                RightTapped="CharacterPreviewSurface_RightTapped"
+                                KeyDown="CharacterPreviewSurface_KeyDown"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Background="{ThemeResource LayerFillColorDefaultBrush}">
+                                <Grid>
+                                    <TextBlock
+                                        x:Name="CharacterPreviewEmptyText"
+                                        Text="选择右侧图层后在这里叠加预览"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <Image x:Name="CharacterPreviewClothImage" Stretch="Uniform" />
+                                    <Image x:Name="CharacterPreviewFaceImage" Stretch="Uniform" />
+                                    <Image x:Name="CharacterPreviewAdornImage" Stretch="Uniform" />
+                                    <Image x:Name="CharacterPreviewVfxImage" Stretch="Uniform" />
+                                </Grid>
                             </Border>
 
                             <!-- 右：设置 + 图层列表 -->
