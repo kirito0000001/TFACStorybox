@@ -1180,12 +1180,14 @@
                             IsOpen="False"
                             IsClosable="True" />
 
-                        <ScrollViewer
-                            x:Name="CharacterDetailScrollViewer"
-                            Grid.Row="1"
-                            VerticalScrollBarVisibility="Auto">
-                            <StackPanel Spacing="10">
-                                <Border Style="{StaticResource PanelBorderStyle}">
+                        <Grid Grid.Row="1" ColumnSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="420" />
+                            </Grid.ColumnDefinitions>
+
+                            <!-- 左：立绘展示。固定占左半边，右边列表再长也不影响它 -->
+                            <Border Grid.Column="0" Style="{StaticResource PanelBorderStyle}">
                                     <Grid Padding="20">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
@@ -1195,8 +1197,8 @@
                                         <Grid Grid.Row="1" Margin="0,18,0,0" MinHeight="600" Background="Transparent">
                                             <Border
                                                 x:Name="CharacterPreviewSurface"
-                                                Width="660"
-                                                Height="560"
+                                                MaxWidth="660"
+                                                MaxHeight="560"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
                                                 IsTabStop="True"
@@ -1220,7 +1222,35 @@
                                             </Border>
                                         </Grid>
                                     </Grid>
-                                </Border>
+                            </Border>
+
+                            <!-- 右：设置 + 图层列表 -->
+                            <ScrollViewer
+                                x:Name="CharacterDetailScrollViewer"
+                                Grid.Column="1"
+                                VerticalScrollBarVisibility="Auto">
+                                <StackPanel Spacing="10">
+                                    <!--
+                                        名称 / 英文代号 / 代表色做成**只读按钮行**：
+                                        点开弹窗才能改，确认即保存 —— 省掉"保存设置"按钮，
+                                        也不会"改了一半忘保存"或误触改坏（用户 2026-11-06）。
+                                    -->
+                                    <Border Style="{StaticResource PanelBorderStyle}">
+                                        <StackPanel Padding="12" Spacing="8">
+                                            <Button
+                                                x:Name="CharacterNameButton"
+                                                Style="{StaticResource CharacterSettingButtonStyle}"
+                                                Click="EditCharacterNameButton_Click" />
+                                            <Button
+                                                x:Name="CharacterCodeButton"
+                                                Style="{StaticResource CharacterSettingButtonStyle}"
+                                                Click="EditCharacterCodeButton_Click" />
+                                            <Button
+                                                x:Name="CharacterColorButton"
+                                                Style="{StaticResource CharacterSettingButtonStyle}"
+                                                Click="EditCharacterColorButton_Click" />
+                                        </StackPanel>
+                                    </Border>
 
                                 <Expander x:Name="CharacterClothExpander" Header="服装 DN_Cloth">
                                     <StackPanel
@@ -1327,32 +1357,10 @@
                                         <GridView x:Name="CharacterVfxGridView" Padding="14,8,24,16" HorizontalAlignment="Stretch" SelectionMode="None" />
                                     </StackPanel>
                                 </Expander>
-                            </StackPanel>
-                        </ScrollViewer>
-
-                        <Border Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
-                            <ScrollViewer
-                                HorizontalScrollBarVisibility="Auto"
-                                HorizontalScrollMode="Auto"
-                                VerticalScrollBarVisibility="Disabled"
-                                VerticalScrollMode="Disabled">
-                                <StackPanel Padding="12" Orientation="Horizontal" Spacing="14">
-                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                        <TextBlock Text="名称" VerticalAlignment="Center" />
-                                        <TextBox x:Name="CharacterNameTextBox" Width="150" />
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                        <TextBlock Text="英文代号" VerticalAlignment="Center" />
-                                        <TextBox x:Name="CharacterCodeTextBox" Width="150" />
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                        <TextBlock Text="代表色" VerticalAlignment="Center" />
-                                        <TextBox x:Name="CharacterColorTextBox" Width="110" PlaceholderText="#RRGGBB" />
-                                    </StackPanel>
-                                    <Button Content="保存设置" Click="SaveCharacterInlineSettingsButton_Click" />
+                            
                                 </StackPanel>
                             </ScrollViewer>
-                        </Border>
+                        </Grid>
                     </Grid>
 
 

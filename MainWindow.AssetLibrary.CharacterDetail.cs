@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using GalExcleTools.Controls;
 using GalExcleTools.Services;
 using GalExcleTools.ViewModels;
 using GalExcleTools.Views;
@@ -143,9 +144,7 @@ namespace GalExcleTools
         {
             _currentCharacter = character;
             var cancellationToken = ResetCharacterDetailLoadCancellation();
-            CharacterNameTextBox.Text = character.Name;
-            CharacterCodeTextBox.Text = character.Code;
-            CharacterColorTextBox.Text = character.ColorHex;
+            RefreshCharacterSettingButtons(character.Name, character.Code, character.ColorHex);
             RunCharacterDetailLoad(LoadCharacterDetailLayersAsync(character, cancellationToken));
 
             // 不再切页面：详情作为子面板盖在卡片区上，外层（元数据条 / 路径栏 / 状态栏）不动。
@@ -830,7 +829,105 @@ namespace GalExcleTools
             }
         }
 
-        private async void SaveCharacterInlineSettingsButton_Click(object sender, RoutedEventArgs e)
+        /// <summary>把三项当前值刷到右侧的只读按钮上。</summary>
+        private void RefreshCharacterSettingButtons(string name, string code, string colorHex)
+        {
+            SetCharacterSettingButton(CharacterNameButton, "名称", name);
+            SetCharacterSettingButton(CharacterCodeButton, "英文代号", code);
+            SetCharacterSettingButton(CharacterColorButton, "代表色", colorHex);
+        }
+
+        /// <summary>
+        /// 一行"标签 + 值"的只读按钮内容：标签常驻左侧（次要色），值靠右。
+        /// 不用 TextBox —— 编辑要走弹窗，避免误触改坏和"改了忘保存"。
+        /// </summary>
+        private static void SetCharacterSettingButton(Button button, string label, string value)
+        {
+            if (button is null)
+            {
+                return;
+            }
+
+            var grid = new Grid { ColumnSpacing = 12 };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var labelText = new TextBlock
+            {
+                Text = label,
+                FontSize = 12,
+                Opacity = 0.72,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var valueText = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(value) ? "（未设置）" : value,
+                FontSize = 15,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(valueText, 1);
+
+            grid.Children.Add(labelText);
+            grid.Children.Add(valueText);
+            button.Content = grid;
+        }
+
+        private async void EditCharacterNameButton_Click(object sender, RoutedEventArgs e)
+        {
+            await EditCharacterFieldAsync("修改名称", "名称", _currentCharacter?.Name, value => (value, null, null));
+        }
+
+        private async void EditCharacterCodeButton_Click(object sender, RoutedEventArgs e)
+        {
+            await EditCharacterFieldAsync("修改英文代号", "英文代号", _currentCharacter?.Code, value => (null, value, null));
+        }
+
+        private async void EditCharacterColorButton_Click(object sender, RoutedEventArgs e)
+        {
+            // 代表色下一轮改成 HSV 取色器；先用十六进制输入把弹窗这条路跑通。
+            await EditCharacterFieldAsync(
+                "修改代表色",
+                "代表色（#RRGGBB）",
+                _currentCharacter?.ColorHex,
+                value => (null, null, NormalizeColorHex(value.Trim())));
+        }
+
+        /// <summary>弹一个小输入框，确认后立即保存（不再有"保存设置"这一步）。</summary>
+        private async Task EditCharacterFieldAsync(
+            string title,
+            string label,
+            string? current,
+            Func<string, (string? Name, string? Code, string? Color)> pick)
+        {
+            if (_currentCharacter is null)
+            {
+                return;
+            }
+
+            var box = new TextBox
+            {
+                Text = current ?? string.Empty,
+                MinWidth = 280
+            };
+
+            var form = ToolboxDialog.BuildForm(
+                ToolboxDialog.BuildField(label, box, "改完点「保存」，立即生效。"));
+
+            if (!await ToolboxDialog.ShowAsync(RootGrid.XamlRoot, title, form, "保存", "取消"))
+            {
+                return;
+            }
+
+            var (name, code, color) = pick(box.Text);
+            await SaveCharacterSettingsAsync(name, code, color);
+        }
+
+        /// <summary>把三项合并成一次重命名（只传改动的那个，其余取当前值）。</summary>
+        private async Task SaveCharacterSettingsAsync(string? name, string? code, string? color)
         {
             if (_currentCharacter is null)
             {
@@ -838,13 +935,13 @@ namespace GalExcleTools
             }
 
             var input = new CharacterEditorInput(
-                CharacterNameTextBox.Text.Trim(),
-                CharacterCodeTextBox.Text.Trim(),
-                NormalizeColorHex(CharacterColorTextBox.Text.Trim()));
+                (name ?? _currentCharacter.Name).Trim(),
+                (code ?? _currentCharacter.Code).Trim(),
+                color ?? _currentCharacter.ColorHex);
 
             if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Code))
             {
-                AppendLog(LogKind.Warning, "角色名称和英文代号不能为空。");
+                ShowFloatingTip(InfoBarSeverity.Warning, "不能为空", "角色名称和英文代号都必须有值。");
                 return;
             }
 

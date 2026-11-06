@@ -95,6 +95,19 @@
                     <Setter Property="HorizontalContentAlignment" Value="Left" />
                     <Setter Property="VerticalContentAlignment" Value="Center" />
                 </Style>
+                <!--
+                    角色详情右侧的"只读设置行"：整行可点、内容左右分布，
+                    点开才弹窗改（省掉保存按钮）。**不设 Background** ——
+                    设了会把悬停/按下的系统状态色盖掉。
+                -->
+                <Style x:Key="CharacterSettingButtonStyle" TargetType="Button">
+                    <Setter Property="HorizontalAlignment" Value="Stretch" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="12,9" />
+                    <Setter Property="CornerRadius" Value="6" />
+                    <Setter Property="BorderThickness" Value="1" />
+                    <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                </Style>
                 <Style x:Key="PageTitleStyle" TargetType="TextBlock">
                     <Setter Property="FontSize" Value="28" />
                     <Setter Property="FontWeight" Value="SemiBold" />
