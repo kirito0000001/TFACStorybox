@@ -1091,6 +1091,99 @@ namespace GalExcleTools
                 $"{done} 条" + (failed > 0 ? $"，{failed} 条失败（详见 Log）" : string.Empty));
         }
 
+        // ---------- 处理期间的整页遮罩 ----------
+
+        private Storyboard? _voiceBusyStoryboard;
+
+        /// <summary>
+        /// 整页遮罩：规整 / 检查这类长任务期间打开，吃掉所有点击。
+        ///
+        /// 不敢用 IsEnabled=false：那会把进度浮条上的「取消」一起禁掉，
+        /// 变成"进来了就出不去"。遮罩只挡下层，浮条 ZIndex 更高，照常可点。
+        /// </summary>
+        private void SetVoiceBusyOverlay(bool busy, string message = "正在处理语音…")
+        {
+            if (VoiceBusyOverlay is null)
+            {
+                return;
+            }
+
+            VoiceBusyOverlayText.Text = message;
+            if (busy)
+            {
+                VoiceBusyOverlay.Visibility = Visibility.Visible;
+                StartVoiceBusyAnimation();
+            }
+            else
+            {
+                StopVoiceBusyAnimation();
+                VoiceBusyOverlay.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        /// <summary>
+        /// 两套动画，节奏刻意不同：
+        /// · 背景斜光 4.5 秒一趟 —— 越慢越安静；
+        /// · 声波柱 300ms 起伏、相邻错开 85ms —— 像从左往右播放。
+        ///
+        /// 都不代表进度：不收敛、不停，纯粹表示"还活着"。
+        /// </summary>
+        private void StartVoiceBusyAnimation()
+        {
+            if (_voiceBusyStoryboard is not null)
+            {
+                return;
+            }
+
+            var storyboard = new Storyboard();
+
+            var sheen = new DoubleAnimation
+            {
+                From = -900,
+                To = 1400,
+                Duration = TimeSpan.FromSeconds(4.5),
+                RepeatBehavior = RepeatBehavior.Forever,
+                EnableDependentAnimation = true
+            };
+            Storyboard.SetTarget(sheen, VoiceBusySheenTransform);
+            Storyboard.SetTargetProperty(sheen, "X");
+            storyboard.Children.Add(sheen);
+
+            var bars = new[]
+            {
+                VoiceBusyBar0, VoiceBusyBar1, VoiceBusyBar2, VoiceBusyBar3,
+                VoiceBusyBar4, VoiceBusyBar5, VoiceBusyBar6
+            };
+
+            for (var index = 0; index < bars.Length; index++)
+            {
+                var rise = new DoubleAnimation
+                {
+                    From = 0.25,
+                    To = 1.0,
+                    Duration = TimeSpan.FromMilliseconds(300),
+                    AutoReverse = true,
+                    RepeatBehavior = RepeatBehavior.Forever,
+                    BeginTime = TimeSpan.FromMilliseconds(index * 85),
+                    EnableDependentAnimation = true,
+                    EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+                };
+
+                Storyboard.SetTarget(rise, bars[index].RenderTransform);
+                Storyboard.SetTargetProperty(rise, "ScaleY");
+                storyboard.Children.Add(rise);
+            }
+
+            _voiceBusyStoryboard = storyboard;
+            storyboard.Begin();
+        }
+
+        private void StopVoiceBusyAnimation()
+        {
+            _voiceBusyStoryboard?.Stop();
+            _voiceBusyStoryboard = null;
+        }
+
         // ---------- 批量选择 ----------
 
         private bool _voiceBatchSelectMode;
@@ -1627,12 +1720,14 @@ namespace GalExcleTools
             }
 
             _isVoiceLoudnessBusy = true;
+            SetVoiceBusyOverlay(true, "正在检查 DB 规范…");
             try
             {
                 await RunVoiceLoudnessCheckAsync();
             }
             finally
             {
+                SetVoiceBusyOverlay(false);
                 _isVoiceLoudnessBusy = false;
             }
         }
@@ -1963,6 +2058,7 @@ namespace GalExcleTools
             }
 
             _isVoiceLoudnessBusy = true;
+            SetVoiceBusyOverlay(true, "正在规整语音…");
             try
             {
                 await RunVoiceLoudnessNormalizeAsync();
@@ -1976,6 +2072,7 @@ namespace GalExcleTools
             }
             finally
             {
+                SetVoiceBusyOverlay(false);
                 _isVoiceLoudnessBusy = false;
             }
         }

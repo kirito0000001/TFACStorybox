@@ -2405,6 +2405,162 @@
             剧情编辑器那个持久条仍然走 StoryFloatingTipsPanel（InfoBar）。
         -->
 
+        <!--
+            语音处理期间的遮罩：只盖 Row 1（标题栏留着，还能拖窗口/最小化）。
+            ZIndex 90 —— 进度浮条是 100，必须压在它上面，否则取消按钮被挡，
+            那就成了"进来了就出不去"。
+
+            视觉两层：
+            · 背景：深紫底 + 一道蓝色斜光缓缓扫过（纯氛围，越慢越好）；
+            · 中心：7 根声波柱，从左往右依次起伏（像播放），**不代表进度** ——
+              所以它不均匀、不收敛，永远循环。
+        -->
+        <Grid
+            x:Name="VoiceBusyOverlay"
+            Grid.Row="1"
+            Canvas.ZIndex="90"
+            Visibility="Collapsed">
+            <Rectangle Fill="#C21B1140" />
+
+            <Rectangle
+                x:Name="VoiceBusySheen"
+                Width="700"
+                Height="1600"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                Opacity="0.8">
+                <Rectangle.Fill>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Color="#002E6BFF" Offset="0.0" />
+                        <GradientStop Color="#2A2E6BFF" Offset="0.42" />
+                        <GradientStop Color="#5C3B82F6" Offset="0.50" />
+                        <GradientStop Color="#2A2E6BFF" Offset="0.58" />
+                        <GradientStop Color="#002E6BFF" Offset="1.0" />
+                    </LinearGradientBrush>
+                </Rectangle.Fill>
+                <Rectangle.RenderTransform>
+                    <TransformGroup>
+                        <RotateTransform Angle="18" />
+                        <TranslateTransform x:Name="VoiceBusySheenTransform" X="-900" />
+                    </TransformGroup>
+                </Rectangle.RenderTransform>
+            </Rectangle>
+
+            <StackPanel
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="18">
+                <StackPanel
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    Spacing="6"
+                    Height="30">
+                        <Rectangle
+                            x:Name="VoiceBusyBar0"
+                            Width="5"
+                            Height="30"
+                            RadiusX="2.5"
+                            RadiusY="2.5"
+                            Fill="White"
+                            VerticalAlignment="Bottom"
+                            RenderTransformOrigin="0.5,1">
+                            <Rectangle.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
+                            </Rectangle.RenderTransform>
+                        </Rectangle>
+                        <Rectangle
+                            x:Name="VoiceBusyBar1"
+                            Width="5"
+                            Height="30"
+                            RadiusX="2.5"
+                            RadiusY="2.5"
+                            Fill="White"
+                            VerticalAlignment="Bottom"
+                            RenderTransformOrigin="0.5,1">
+                            <Rectangle.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
+                            </Rectangle.RenderTransform>
+                        </Rectangle>
+                        <Rectangle
+                            x:Name="VoiceBusyBar2"
+                            Width="5"
+                            Height="30"
+                            RadiusX="2.5"
+                            RadiusY="2.5"
+                            Fill="White"
+                            VerticalAlignment="Bottom"
+                            RenderTransformOrigin="0.5,1">
+                            <Rectangle.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
+                            </Rectangle.RenderTransform>
+                        </Rectangle>
+                        <Rectangle
+                            x:Name="VoiceBusyBar3"
+                            Width="5"
+                            Height="30"
+                            RadiusX="2.5"
+                            RadiusY="2.5"
+                            Fill="White"
+                            VerticalAlignment="Bottom"
+                            RenderTransformOrigin="0.5,1">
+                            <Rectangle.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
+                            </Rectangle.RenderTransform>
+                        </Rectangle>
+                        <Rectangle
+                            x:Name="VoiceBusyBar4"
+                            Width="5"
+                            Height="30"
+                            RadiusX="2.5"
+                            RadiusY="2.5"
+                            Fill="White"
+                            VerticalAlignment="Bottom"
+                            RenderTransformOrigin="0.5,1">
+                            <Rectangle.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
+                            </Rectangle.RenderTransform>
+                        </Rectangle>
+                        <Rectangle
+                            x:Name="VoiceBusyBar5"
+                            Width="5"
+                            Height="30"
+                            RadiusX="2.5"
+                            RadiusY="2.5"
+                            Fill="White"
+                            VerticalAlignment="Bottom"
+                            RenderTransformOrigin="0.5,1">
+                            <Rectangle.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
+                            </Rectangle.RenderTransform>
+                        </Rectangle>
+                        <Rectangle
+                            x:Name="VoiceBusyBar6"
+                            Width="5"
+                            Height="30"
+                            RadiusX="2.5"
+                            RadiusY="2.5"
+                            Fill="White"
+                            VerticalAlignment="Bottom"
+                            RenderTransformOrigin="0.5,1">
+                            <Rectangle.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="0.3" />
+                            </Rectangle.RenderTransform>
+                        </Rectangle>
+                </StackPanel>
+                <TextBlock
+                    x:Name="VoiceBusyOverlayText"
+                    Text="正在处理语音…"
+                    FontSize="15"
+                    Foreground="White"
+                    HorizontalAlignment="Center" />
+                <TextBlock
+                    FontSize="12"
+                    Foreground="#A6FFFFFF"
+                    HorizontalAlignment="Center"
+                    Text="可随时点下方进度条上的「取消」" />
+            </StackPanel>
+        </Grid>
+
         <Border
             x:Name="GlobalProgressHost"
             Grid.RowSpan="2"
