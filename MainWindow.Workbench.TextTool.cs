@@ -1168,6 +1168,11 @@ namespace GalExcleTools
             // 批量选择标记：叠在角色色竖线上的一层炫彩条。
             // 用渐变而不是纯色，是为了和"角色颜色"一眼分得开 ——
             // 用户看的是"我选了谁"，不是"这行是谁说的"。
+            // 紫→蓝（violet-600 #7C3AED → indigo-500 #6366F1 → blue-500 #3B82F6）。
+            // 选这三档是因为它们在深色/浅色背景上都够亮，且和角色色（暖色系）不撞。
+            //
+            // 初始 ScaleY = 0、Opacity = 0：选中时「从中间向两边长开 + 淡入」，
+            // 和底部那条播放线同一套语言（用户要的就是这个手势）。
             var selectOverlay = new Border
             {
                 Width = 4,
@@ -1176,17 +1181,18 @@ namespace GalExcleTools
                 CornerRadius = new CornerRadius(2),
                 Visibility = Visibility.Collapsed,
                 IsHitTestVisible = false,
+                Opacity = 0,
+                RenderTransform = new ScaleTransform { ScaleX = 1, ScaleY = 0 },
+                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
                 Background = new LinearGradientBrush
                 {
                     StartPoint = new Windows.Foundation.Point(0, 0),
                     EndPoint = new Windows.Foundation.Point(0, 1),
                     GradientStops =
                     {
-                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0xFF, 0x3B, 0x6E), Offset = 0.0 },
-                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xB1, 0x3B), Offset = 0.25 },
-                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x63, 0xE6, 0x4D), Offset = 0.5 },
-                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x3B, 0xD6, 0xFF), Offset = 0.75 },
-                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x9B, 0x5B, 0xFF), Offset = 1.0 }
+                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x7C, 0x3A, 0xED), Offset = 0.0 },
+                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x63, 0x66, 0xF1), Offset = 0.5 },
+                        new GradientStop { Color = Windows.UI.Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6), Offset = 1.0 }
                     }
                 }
             };

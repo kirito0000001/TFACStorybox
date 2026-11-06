@@ -1125,6 +1125,11 @@ namespace GalExcleTools
                 VoiceBatchSelectButton.Content = "选定";
             }
 
+            if (VoiceBatchCancelButton is not null)
+            {
+                VoiceBatchCancelButton.Visibility = Visibility.Visible;
+            }
+
             ShowFloatingTip(
                 InfoBarSeverity.Informational,
                 "批量选择",
@@ -1144,21 +1149,95 @@ namespace GalExcleTools
             {
                 VoiceBatchSelectButton.Content = "批量选择";
             }
+
+            if (VoiceBatchCancelButton is not null)
+            {
+                VoiceBatchCancelButton.Visibility = Visibility.Collapsed;
+            }
         }
 
         private void ToggleVoiceBatchSelection(string rowId)
         {
-            if (!_voiceBatchSelection.Remove(rowId))
+            var nowSelected = !_voiceBatchSelection.Remove(rowId);
+            if (nowSelected)
             {
                 _voiceBatchSelection.Add(rowId);
             }
 
             if (_voiceSelectOverlays.TryGetValue(rowId, out var overlay))
             {
-                overlay.Visibility = _voiceBatchSelection.Contains(rowId)
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
+                PlayVoiceSelectAnimation(overlay, nowSelected);
             }
+        }
+
+        /// <summary>
+        /// 选择条的手势：从中间向两边长开（ScaleY 0→1）+ 淡入。
+        /// 和底部播放线同一套语言 —— 都是"从中心生长"，用户不用学第二遍。
+        ///
+        /// 动画必须开 EnableDependentAnimation：ScaleY 和 Opacity 都不是合成器属性，
+        /// 不开的话 Storyboard 静默不动（这个坑很常见）。
+        /// </summary>
+        private void PlayVoiceSelectAnimation(Border overlay, bool selected)
+        {
+            if (selected)
+            {
+                overlay.Visibility = Visibility.Visible;
+            }
+
+            var duration = TimeSpan.FromMilliseconds(selected ? 220 : 150);
+            var storyboard = new Storyboard();
+
+            var fade = new DoubleAnimation
+            {
+                To = selected ? 1 : 0,
+                Duration = duration,
+                EnableDependentAnimation = true,
+                EasingFunction = new CubicEase
+                {
+                    EasingMode = selected ? EasingMode.EaseOut : EasingMode.EaseIn
+                }
+            };
+            Storyboard.SetTarget(fade, overlay);
+            Storyboard.SetTargetProperty(fade, "Opacity");
+
+            var grow = new DoubleAnimation
+            {
+                To = selected ? 1 : 0,
+                Duration = duration,
+                EnableDependentAnimation = true,
+                EasingFunction = new CubicEase
+                {
+                    EasingMode = selected ? EasingMode.EaseOut : EasingMode.EaseIn
+                }
+            };
+            Storyboard.SetTarget(grow, overlay.RenderTransform);
+            Storyboard.SetTargetProperty(grow, "ScaleY");
+
+            if (!selected)
+            {
+                // 收完再隐藏，否则动画看不到就被 Collapsed 掉了。
+                storyboard.Completed += (_, _) => overlay.Visibility = Visibility.Collapsed;
+            }
+
+            storyboard.Children.Add(fade);
+            storyboard.Children.Add(grow);
+            storyboard.Begin();
+        }
+
+        /// <summary>「取消批量」：逐个播收拢动画，再退出批量模式。</summary>
+        private async void VoiceBatchCancelButton_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (var id in _voiceBatchSelection.ToList())
+            {
+                if (_voiceSelectOverlays.TryGetValue(id, out var overlay))
+                {
+                    PlayVoiceSelectAnimation(overlay, false);
+                }
+            }
+
+            // 等动画走完再收按钮；150ms 是动画时长，多给 50ms 余量。
+            await Task.Delay(200);
+            ExitVoiceBatchMode();
         }
 
         /// <summary>点「选定」之后的处理入口：选动作 → 逐个执行。</summary>
@@ -2947,7 +3026,7 @@ namespace GalExcleTools
         /// <summary>
         /// 外部音频编辑器。**路径写死**：换位置就改这一行（将来要成设置项也很容易）。
         /// </summary>
-        private const string VoiceAudioEditorPath = @"E:\Pymss Studio\Pymss Studio.exe";
+        private const string VoiceAudioEditorPath = @"E:\ARTcraft\SoundCraft\soundcraft.exe";
 
         private void EditProjectVoiceAudio(ProjectTextRow row)
         {
