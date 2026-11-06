@@ -1099,6 +1099,10 @@ namespace GalExcleTools
         /// <summary>流光那一层的合成视觉（Composition 画，不是 XAML 图形）。</summary>
         private Microsoft.UI.Composition.SpriteVisual? _voiceBusySheenVisual;
 
+        private bool _voiceBusyOverlayActive;
+
+        private int _voiceBusyFadeToken;
+
         /// <summary>
         /// 整页遮罩：规整 / 检查这类长任务期间打开，吃掉所有点击。
         ///
@@ -1115,14 +1119,56 @@ namespace GalExcleTools
             VoiceBusyOverlayText.Text = message;
             if (busy)
             {
+                _voiceBusyOverlayActive = true;
                 VoiceBusyOverlay.Visibility = Visibility.Visible;
                 StartVoiceBusyAnimation();
+                FadeVoiceBusyOverlay(1f, 220, collapseAfter: false);
+                return;
             }
-            else
+
+            _voiceBusyOverlayActive = false;
+            StopVoiceBusyAnimation();
+            FadeVoiceBusyOverlay(0f, 180, collapseAfter: true);
+        }
+
+        /// <summary>
+        /// 遮罩淡入淡出。走合成器的 visual.Opacity ——
+        /// Storyboard 的 Opacity 是主线程逐帧算的，处理正忙时会"蹦出来"。
+        /// </summary>
+        private void FadeVoiceBusyOverlay(float to, int milliseconds, bool collapseAfter)
+        {
+            if (VoiceBusyOverlay is null)
             {
-                StopVoiceBusyAnimation();
-                VoiceBusyOverlay.Visibility = Visibility.Collapsed;
+                return;
             }
+
+            var compositor = Compositor;
+            var visual = ElementCompositionPreview.GetElementVisual(VoiceBusyOverlay);
+
+            var fade = compositor.CreateScalarKeyFrameAnimation();
+            fade.InsertKeyFrame(1f, to, compositor.CreateCubicBezierEasingFunction(
+                new System.Numerics.Vector2(0.2f, 0f),
+                new System.Numerics.Vector2(0f, 1f)));
+            fade.Duration = TimeSpan.FromMilliseconds(milliseconds);
+            visual.StartAnimation("Opacity", fade);
+
+            if (!collapseAfter)
+            {
+                return;
+            }
+
+            // 淡出走完再收起来，否则看不到过程。
+            var token = ++_voiceBusyFadeToken;
+            _ = Task.Delay(milliseconds + 60).ContinueWith(_ =>
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (token == _voiceBusyFadeToken && !_voiceBusyOverlayActive)
+                    {
+                        VoiceBusyOverlay.Visibility = Visibility.Collapsed;
+                    }
+                });
+            });
         }
 
         /// <summary>
@@ -1201,13 +1247,19 @@ namespace GalExcleTools
             }
 
             var compositor = Compositor;
-            var width = (float)Math.Max(VoiceBusySheenHost.ActualWidth, 800);
-            var height = (float)Math.Max(VoiceBusySheenHost.ActualHeight, 400) * 2f;
+
+            // 视觉 = 容器尺寸，**一点不放大**。上一版放大到 2.2 倍，
+            // 于是整个屏幕都落在渐变的斜坡上，扫过去就是一片带硬边的斜墙。
+            var width = (float)Math.Max(VoiceBusySheenHost.ActualWidth, 1);
+            var height = (float)Math.Max(VoiceBusySheenHost.ActualHeight, 1);
 
             var brush = compositor.CreateLinearGradientBrush();
             brush.MappingMode = Microsoft.UI.Composition.CompositionMappingMode.Relative;
-            brush.StartPoint = new System.Numerics.Vector2(0f, 0f);
-            brush.EndPoint = new System.Numerics.Vector2(1f, 0f);
+
+            // 斜轴：X 跨 2 个单位、Y 跨 1.1 个单位 ≈ CSS 的 120deg。
+            // 相对映射，容器多大都不会变形。
+            brush.StartPoint = new System.Numerics.Vector2(-3f, -0.55f);
+            brush.EndPoint = new System.Numerics.Vector2(-1f, 0.55f);
 
             void AddStop(float offset, byte alpha)
             {
@@ -1218,37 +1270,38 @@ namespace GalExcleTools
                 brush.ColorStops.Add(stop);
             }
 
+            // 光带 = 0.30 ~ 0.70，占渐变跨度 40%（对齐 CSS 的 30% / 50% / 70%）。
+            // 峰值 alpha 只有 0x1C（约 11%）—— Fluent 的 Shimmer 更低（3~6%），
+            // 我们压在深紫底上，取中间值。
             AddStop(0.00f, 0x00);
-            AddStop(0.40f, 0x1A);
-            AddStop(0.47f, 0x4D);
-            AddStop(0.50f, 0x8C);
-            AddStop(0.53f, 0x4D);
-            AddStop(0.60f, 0x1A);
+            AddStop(0.30f, 0x00);
+            AddStop(0.40f, 0x0A);
+            AddStop(0.50f, 0x1C);
+            AddStop(0.60f, 0x0A);
+            AddStop(0.70f, 0x00);
             AddStop(1.00f, 0x00);
-
-            var travel = width * 2.2f + 900f;
-            var centerY = (float)Math.Max(VoiceBusySheenHost.ActualHeight, 400) / 2f;
 
             var visual = compositor.CreateSpriteVisual();
             visual.Brush = brush;
-            visual.Size = new System.Numerics.Vector2(travel, height);
-
-            // 绕自身中心旋转，否则 18° 斜光会绕左上角转，扫出来的方向不对。
-            visual.AnchorPoint = new System.Numerics.Vector2(0.5f, 0.5f);
-            visual.RotationAngleInDegrees = 18f;
-
-            // AnchorPoint 改成 0.5 之后，Offset 表示"中心点的位置"：
-            // 从容器左外侧走到右外侧，扫完一整趟。
-            visual.Offset = new System.Numerics.Vector3(-travel * 0.5f, centerY, 0f);
-
+            visual.Size = new System.Numerics.Vector2(width, height);
             ElementCompositionPreview.SetElementChildVisual(VoiceBusySheenHost, visual);
 
-            var move = compositor.CreateVector3KeyFrameAnimation();
-            move.InsertKeyFrame(1f, new System.Numerics.Vector3(travel * 1.5f, centerY, 0f),
+            // 两个端点**同步平移** +4 单位 X：光带从容器左外侧走到右外侧，6 秒一趟。
+            // 跨度不变 → 带宽恒定；端点始终在屏幕外 → 永远看不到矩形的边。
+            // 这也是 Fluent Shimmer 的做法：动渐变端点，不动视觉。
+            var startMove = compositor.CreateVector2KeyFrameAnimation();
+            startMove.InsertKeyFrame(1f, new System.Numerics.Vector2(1f, -0.55f),
                 compositor.CreateLinearEasingFunction());
-            move.Duration = TimeSpan.FromSeconds(7);
-            move.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
-            visual.StartAnimation("Offset", move);
+            startMove.Duration = TimeSpan.FromSeconds(6);
+            startMove.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
+            brush.StartAnimation("StartPoint", startMove);
+
+            var endMove = compositor.CreateVector2KeyFrameAnimation();
+            endMove.InsertKeyFrame(1f, new System.Numerics.Vector2(3f, 0.55f),
+                compositor.CreateLinearEasingFunction());
+            endMove.Duration = TimeSpan.FromSeconds(6);
+            endMove.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
+            brush.StartAnimation("EndPoint", endMove);
 
             _voiceBusySheenVisual = visual;
         }
