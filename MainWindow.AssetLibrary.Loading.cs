@@ -376,18 +376,29 @@ namespace GalExcleTools
 
         /// <summary>
         /// 旧的"底部状态条"已删除（用户要求底部不再有任何固定 UI）。
-        /// 代码里还有十几处直接赋 Text 的地方，这里把赋值转成一条轻提示，
+        /// 代码里还有十几处直接赋 Text 的地方，这里用**属性回调**把赋值转成轻提示，
         /// 保证信息不丢、又不用改所有调用点。
+        ///
+        /// 注意：TextBlock 没有 TextChanged 事件（那是 TextBox 的），
+        /// 只能走 RegisterPropertyChangedCallback —— 之前写在 XAML 里直接编译不过。
         /// </summary>
-        private void AssetLibraryDetailStatusText_TextChanged(object sender, TextChangedEventArgs e)
+        private void HookAssetLibraryStatusShim()
         {
-            var text = AssetLibraryDetailStatusText.Text;
-            if (string.IsNullOrWhiteSpace(text))
+            if (AssetLibraryDetailStatusText is null)
             {
                 return;
             }
 
-            ShowFloatingTip(InfoBarSeverity.Informational, "素材库", text);
+            AssetLibraryDetailStatusText.RegisterPropertyChangedCallback(
+                TextBlock.TextProperty,
+                (_, _) =>
+                {
+                    var text = AssetLibraryDetailStatusText.Text;
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        ShowFloatingTip(InfoBarSeverity.Informational, "素材库", text);
+                    }
+                });
         }
 
         private void AssetLibraryPortraitPreviewEnabledCheckBox_Changed(object sender, RoutedEventArgs e)

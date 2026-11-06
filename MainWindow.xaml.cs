@@ -436,6 +436,9 @@ namespace GalExcleTools
             // 异步流程随时可能弹第一条。
             TipToast.Attach(RootGrid);
 
+            // 状态条垫片：把旧代码里的 .Text 赋值转成轻提示（TextBlock 没有 TextChanged 事件）。
+            HookAssetLibraryStatusShim();
+
             // 角色详情面板**不重挂**：UIElement 换父节点在 WinUI 里会抛 0x800F1000，
             // 而构造期抛异常 = 启动即退出。改成"给它让出路径栏的高度"，见
             // ShowCharacterDetailPage 里的 ApplyCharacterDetailInset。

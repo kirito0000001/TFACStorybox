@@ -1157,8 +1157,7 @@
                         -->
                         <TextBlock
                             x:Name="AssetLibraryDetailStatusText"
-                            Visibility="Collapsed"
-                            TextChanged="AssetLibraryDetailStatusText_TextChanged" />
+                            Visibility="Collapsed" />
 
                         <Button
                             x:Name="AssetLibraryMetadataButton"
@@ -1169,7 +1168,6 @@
                             CornerRadius="6"
                             VerticalAlignment="Center"
                             ToolTipService.ToolTip="素材库设置">
-                            <FontIcon FontSize="16" Glyph="&#xE713;" />
                             <Button.Flyout>
                                 <!--
                                     原来这块是页面顶部一条常驻的折叠条，白占一行高度。
@@ -1191,6 +1189,7 @@
                                     </StackPanel>
                                 </Flyout>
                             </Button.Flyout>
+                            <FontIcon FontSize="16" Glyph="&#xE713;" />
                         </Button>
                     </Grid>
 
