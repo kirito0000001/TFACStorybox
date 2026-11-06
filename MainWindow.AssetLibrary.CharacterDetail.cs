@@ -25,6 +25,7 @@ using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -176,8 +177,12 @@ namespace GalExcleTools
                 page.RowSpacing = 0;
             }
 
+            // 递增令牌：万一下一帧还有"退场后折叠"的任务在排队，它会被作废，
+            // 否则快速来回点时面板会被自己上一次的退场逻辑收起。
+            _characterDetailAnimToken++;
             ApplyCharacterDetailInset();
             CharacterDetailPage.Visibility = Visibility.Visible;
+            PlayCharacterDetailEntrance();
             AppendLog(LogKind.User, $"打开角色详情：{character.Name}");
         }
 
@@ -878,6 +883,50 @@ namespace GalExcleTools
         /// 现在面板仍是原来的兄弟节点，只靠 Margin 让位 —— 高度从控件实际尺寸读，
         /// 路径栏改高也不用改这里。
         /// </summary>
+        private int _characterDetailAnimToken;
+
+        /// <summary>
+        /// 详情面板的入场：淡入 + 从右边推进来 18px。
+        ///
+        /// 详情从"独立页面"改成"子面板"之后，原来那套 PlayPageEntrance 就轮不到它了
+        /// —— 页面根本没切换。但完全无动画会显得生硬（用户 2026-11-06 指出"动画没了"），
+        /// 所以单独补一段，参数与 PlayPageEntrance 保持一致（220ms、EaseOut）。
+        /// </summary>
+        private void PlayCharacterDetailEntrance()
+        {
+            var compositor = ElementCompositionPreview.GetElementVisual(CharacterDetailPage).Compositor;
+            var visual = ElementCompositionPreview.GetElementVisual(CharacterDetailPage);
+
+            var easing = compositor.CreateCubicBezierEasingFunction(
+                new System.Numerics.Vector2(0.1f, 0.9f),
+                new System.Numerics.Vector2(0.2f, 1f));
+
+            var fade = compositor.CreateScalarKeyFrameAnimation();
+            fade.InsertKeyFrame(1f, 1f, easing);
+            fade.Duration = TimeSpan.FromMilliseconds(220);
+            visual.Opacity = 0;
+            visual.StartAnimation("Opacity", fade);
+
+            var slide = compositor.CreateVector3KeyFrameAnimation();
+            slide.InsertKeyFrame(1f, System.Numerics.Vector3.Zero, easing);
+            slide.Duration = TimeSpan.FromMilliseconds(220);
+            visual.Offset = new System.Numerics.Vector3(18f, 0f, 0f);
+            visual.StartAnimation("Offset", slide);
+        }
+
+        /// <summary>退场：淡出 140ms 后再真正折叠，否则会"啪"地消失。</summary>
+        private void PlayCharacterDetailExit()
+        {
+            var visual = ElementCompositionPreview.GetElementVisual(CharacterDetailPage);
+            var compositor = visual.Compositor;
+
+            var fade = compositor.CreateScalarKeyFrameAnimation();
+            fade.InsertKeyFrame(1f, 0f, compositor.CreateCubicBezierEasingFunction(
+                new System.Numerics.Vector2(0.4f, 0f), new System.Numerics.Vector2(1f, 1f)));
+            fade.Duration = TimeSpan.FromMilliseconds(140);
+            visual.StartAnimation("Opacity", fade);
+        }
+
         private bool _characterDetailInsetHooked;
 
         private void ApplyCharacterDetailInset()
@@ -900,7 +949,18 @@ namespace GalExcleTools
         /// </summary>
         private void HideCharacterDetailPanel()
         {
-            CharacterDetailPage.Visibility = Visibility.Collapsed;
+            PlayCharacterDetailExit();
+
+            // 140ms 后再折叠：立即 Collapsed 会看不到淡出。
+            var token = ++_characterDetailAnimToken;
+            _ = Task.Delay(160).ContinueWith(_ => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (token == _characterDetailAnimToken && CharacterDetailPage.Visibility == Visibility.Visible)
+                {
+                    CharacterDetailPage.Visibility = Visibility.Collapsed;
+                }
+            }));
+
             // 没有文字就别恢复：空 Border 会显示成一条灰条（用户看到的"底下多出一块 UI"）。
             AssetLibraryDetailStatusBorder.Visibility =
                 string.IsNullOrWhiteSpace(AssetLibraryDetailStatusText.Text)
@@ -1004,12 +1064,36 @@ namespace GalExcleTools
 
         private async void EditCharacterColorButton_Click(object sender, RoutedEventArgs e)
         {
-            // 代表色下一轮改成 HSV 取色器；先用十六进制输入把弹窗这条路跑通。
-            await EditCharacterFieldAsync(
-                "修改代表色",
-                "代表色（#RRGGBB）",
-                _currentCharacter?.ColorHex,
-                value => (null, null, NormalizeColorHex(value.Trim())));
+            if (_currentCharacter is null)
+            {
+                return;
+            }
+
+            // WinUI 自带的 ColorPicker：色环 + 明度/饱和度滑块 + HEX 输入，
+            // 正好是"标准 HSV 那种"，不用自己画色轮。
+            var picker = new ColorPicker
+            {
+                Color = ParseColor(_currentCharacter.ColorHex, Windows.UI.Color.FromArgb(255, 0, 0x8F, 0x8D)),
+                IsAlphaEnabled = false,
+                IsAlphaSliderVisible = false,
+                IsAlphaTextInputVisible = false,
+                IsMoreButtonVisible = false,
+                IsColorChannelTextInputVisible = true,
+                IsHexInputVisible = true,
+                MinWidth = 340
+            };
+
+            var form = ToolboxDialog.BuildForm(
+                ToolboxDialog.BuildField("代表色", picker, "拖色环取色，或直接输入十六进制。"));
+
+            if (!await ToolboxDialog.ShowAsync(RootGrid.XamlRoot, "修改代表色", form, "保存", "取消"))
+            {
+                return;
+            }
+
+            var picked = picker.Color;
+            var hex = $"#{picked.R:X2}{picked.G:X2}{picked.B:X2}";
+            await SaveCharacterSettingsAsync(null, null, NormalizeColorHex(hex));
         }
 
         /// <summary>弹一个小输入框，确认后立即保存（不再有"保存设置"这一步）。</summary>
