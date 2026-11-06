@@ -125,7 +125,7 @@ public sealed partial class BusyOverlay : UserControl
                 Height = 30,
                 RadiusX = 2.5,
                 RadiusY = 2.5,
-                Fill = new SolidColorBrush(Colors.White),
+                Fill = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)),
                 VerticalAlignment = VerticalAlignment.Bottom,
                 RenderTransformOrigin = new Windows.Foundation.Point(0.5, 1),
                 RenderTransform = new ScaleTransform { ScaleX = 1, ScaleY = 0.3 }
