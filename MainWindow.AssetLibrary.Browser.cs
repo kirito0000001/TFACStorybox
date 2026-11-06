@@ -242,6 +242,7 @@ public sealed partial class MainWindow
         var folderPath = GetCharacterFolderPath(assetLibrary);
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
+        browser.SetCardsVisible(true);
         // 从角色详情退回来时要重新露出卡片区（详情是盖在它上面的）。
         browser.SetCardsVisible(true);
 
@@ -300,6 +301,7 @@ public sealed partial class MainWindow
         var folderPath = GetCharacterFilterFolderPath(assetLibrary);
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
+        browser.SetCardsVisible(true);
         // 「移动素材」的两个零件：滤镜的条目身份就是 CharacterFilterEntry（卡片 Tag 也是它），
         // 落地走 ApplyCharacterFilterOrderAsync（写清单 + 同步所有章节的 VFX 索引）。
         ConfigureMoveAsset(
@@ -354,6 +356,7 @@ public sealed partial class MainWindow
         var folderPath = GetFunctionFolderPath(assetLibrary);
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
+        browser.SetCardsVisible(true);
 
         // ⚠️ 函数的来源是**素材库自己的函数目录**（StoryFunctionService.ReadFunctions），
         // 不是剧情侧那份（GetStoryFunctions 读的是 _currentStoryAssetLibrary）——
@@ -434,6 +437,7 @@ public sealed partial class MainWindow
         AppendLog(LogKind.Info, $"已加载道具图片：{orderedPaths.Count} 个文件。");
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
+        browser.SetCardsVisible(true);
         // 「移动素材」的两个零件：取道具图片列表 + 只重排编号（无 CSV 同步）。
         ConfigureMoveAsset(
             () => ImageSetService.GetFilePaths(GetPropImageFolderPath(assetLibrary)).Cast<object>().ToList(),
@@ -487,6 +491,7 @@ public sealed partial class MainWindow
         AppendLog(LogKind.Info, $"已加载{AudioAssetService.GetDisplayName(kind)}：{orderedPaths.Count} 个文件。");
         browser.SetPath(folderPath);
         browser.SetUpEnabled(true);
+        browser.SetCardsVisible(true);
         // 「移动素材」的两个零件：取这一类的路径列表 + 用 ApplyAudioOrderAsync 落地
         //（音乐 BGM、环境音 Scene、特殊音效 Scene_n —— 落地方自己按 kind 分）。
         ConfigureMoveAsset(
@@ -546,6 +551,7 @@ public sealed partial class MainWindow
         }
 
         AssetBrowserHost.SetPath(assetLibrary.Path);
+        AssetBrowserHost.SetCardsVisible(true);
         AssetBrowserHost.SetUpEnabled(false);
         AssetBrowserHost.SetCards(BuildAssetCategoryCards(assetLibrary));
         // 回到分类层：只翻层标志，**不清 key**（清了会让功能路径的重铺变成 no-op）。

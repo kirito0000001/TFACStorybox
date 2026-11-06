@@ -29,11 +29,18 @@
             x:Name="PathBarHost"
             Grid.Row="0" />
 
-        <!-- 卡片网格（拖拽接线由外面挂：CanDragItems / DragItemsCompleted） -->
-        <GridView
-            x:Name="CardGrid"
-            Grid.Row="1"
-            Style="{StaticResource AssetGridViewStyle}"
-            Padding="2,4,16,16" />
+        <!--
+            卡片网格 + 详情宿主。
+            详情宿主和卡片区**同一个格子**：外面的"角色详情"这类子面板挂进来，
+            物理上就位于路径栏下面，不会再盖住路径栏（2026-11-06 用户报的重叠）。
+        -->
+        <Grid Grid.Row="1">
+            <GridView
+                x:Name="CardGrid"
+                Style="{StaticResource AssetGridViewStyle}"
+                Padding="2,4,16,16" />
+
+            <Grid x:Name="DetailHost" />
+        </Grid>
     </Grid>
 </UserControl>

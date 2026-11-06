@@ -28,6 +28,12 @@ public sealed partial class AssetBrowser : UserControl
         PathBarHost.OpenFolderRequested += (_, _) => OpenFolderRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// 详情宿主：路径栏下方那一片，和卡片区重叠。
+    /// 页面把"角色详情"这类子面板塞进来，就不用自己算"路径栏多高"。
+    /// </summary>
+    public Grid DetailHost => DetailHostGrid;
+
     /// <summary>拖拽重排的接线处（CanDragItems / DragItemsStarting / DragItemsCompleted 都挂它）。</summary>
     public GridView CardsHost => CardGrid;
 

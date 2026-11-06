@@ -436,6 +436,13 @@ namespace GalExcleTools
             // 异步流程随时可能弹第一条。
             TipToast.Attach(RootGrid);
 
+            // 角色详情面板挂进浏览器的详情宿主：和卡片区同一格、位于路径栏之下。
+            // 放在 XAML 里做不到（它在 UserControl 内部），所以运行期搬一次。
+            if (AssetBrowserHost?.DetailHost is { } detailHost)
+            {
+                detailHost.Children.Add(CharacterDetailPage);
+            }
+
 
             StorySpeakerTextBox.RegisterPropertyChangedCallback(
                 AutoSuggestBox.IsSuggestionListOpenProperty,
