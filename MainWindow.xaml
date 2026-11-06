@@ -2422,29 +2422,14 @@
             Visibility="Collapsed">
             <Rectangle Fill="#C21B1140" />
 
-            <Rectangle
-                x:Name="VoiceBusySheen"
-                Width="700"
-                Height="1600"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Center"
-                Opacity="0.8">
-                <Rectangle.Fill>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                        <GradientStop Color="#002E6BFF" Offset="0.0" />
-                        <GradientStop Color="#2A2E6BFF" Offset="0.42" />
-                        <GradientStop Color="#5C3B82F6" Offset="0.50" />
-                        <GradientStop Color="#2A2E6BFF" Offset="0.58" />
-                        <GradientStop Color="#002E6BFF" Offset="1.0" />
-                    </LinearGradientBrush>
-                </Rectangle.Fill>
-                <Rectangle.RenderTransform>
-                    <TransformGroup>
-                        <RotateTransform Angle="18" />
-                        <TranslateTransform x:Name="VoiceBusySheenTransform" X="-900" />
-                    </TransformGroup>
-                </Rectangle.RenderTransform>
-            </Rectangle>
+            <!--
+                流光用 Composition 画，不用 Storyboard：
+                渐变画笔 + 位移动画都跑在合成器线程上，主线程再忙也不会掉帧。
+                Storyboard 版看着"一顿一顿"，就是因为它跟 UI 线程抢时间。
+            -->
+            <Grid
+                x:Name="VoiceBusySheenHost"
+                IsHitTestVisible="False" />
 
             <StackPanel
                 HorizontalAlignment="Center"

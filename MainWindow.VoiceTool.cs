@@ -12,6 +12,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media.Animation;
 // PickerLocationId 在这个命名空间里。本项目其它 partial 都是逐个文件自己 using，
 // 没有 global using —— 漏了就是 CS0103（2026-11-02 编译时就是这么撞的）。
@@ -1095,6 +1096,9 @@ namespace GalExcleTools
 
         private Storyboard? _voiceBusyStoryboard;
 
+        /// <summary>流光那一层的合成视觉（Composition 画，不是 XAML 图形）。</summary>
+        private Microsoft.UI.Composition.SpriteVisual? _voiceBusySheenVisual;
+
         /// <summary>
         /// 整页遮罩：规整 / 检查这类长任务期间打开，吃掉所有点击。
         ///
@@ -1135,19 +1139,8 @@ namespace GalExcleTools
                 return;
             }
 
+            StartVoiceBusySheen();
             var storyboard = new Storyboard();
-
-            var sheen = new DoubleAnimation
-            {
-                From = -900,
-                To = 1400,
-                Duration = TimeSpan.FromSeconds(4.5),
-                RepeatBehavior = RepeatBehavior.Forever,
-                EnableDependentAnimation = true
-            };
-            Storyboard.SetTarget(sheen, VoiceBusySheenTransform);
-            Storyboard.SetTargetProperty(sheen, "X");
-            storyboard.Children.Add(sheen);
 
             var bars = new[]
             {
@@ -1182,6 +1175,82 @@ namespace GalExcleTools
         {
             _voiceBusyStoryboard?.Stop();
             _voiceBusyStoryboard = null;
+
+            _voiceBusySheenVisual?.StopAnimation("Offset");
+            _voiceBusySheenVisual = null;
+        }
+
+        /// <summary>
+        /// 背景流光：一道窄的蓝色高光，斜着从左上扫到右下，7 秒一趟。
+        ///
+        /// 关键在"用 Composition 而不是 Storyboard"：
+        /// · 渐变画笔是 CompositionLinearGradientBrush，位移是 Vector3KeyFrameAnimation，
+        ///   两者都在合成器线程跑 —— 主线程被 fft/rff 拖住时也不掉帧；
+        /// · Storyboard 版的 Opacity/TranslateTransform 是"依赖动画"，
+        ///   必须 EnableDependentAnimation，实际是主线程逐帧算的，看起来就一顿一顿。
+        ///
+        /// 形状上做了两件事让光更"贵"：
+        /// · 高光核很窄（0.5 处 ±2%），两侧留长而软的过渡，不是一块灰板；
+        /// · 视觉本身比容器大很多并旋转 18°，扫过时看不到矩形的边。
+        /// </summary>
+        private void StartVoiceBusySheen()
+        {
+            if (VoiceBusySheenHost is null)
+            {
+                return;
+            }
+
+            var compositor = Compositor;
+            var width = (float)Math.Max(VoiceBusySheenHost.ActualWidth, 800);
+            var height = (float)Math.Max(VoiceBusySheenHost.ActualHeight, 400) * 2f;
+
+            var brush = compositor.CreateLinearGradientBrush();
+            brush.MappingMode = Microsoft.UI.Composition.CompositionMappingMode.Relative;
+            brush.StartPoint = new System.Numerics.Vector2(0f, 0f);
+            brush.EndPoint = new System.Numerics.Vector2(1f, 0f);
+
+            void AddStop(float offset, byte alpha)
+            {
+                var stop = compositor.CreateColorGradientStop();
+                stop.Offset = offset;
+                // #4C8DFF：偏冷的蓝，压在紫底上会显青，不会发灰。
+                stop.Color = Windows.UI.Color.FromArgb(alpha, 0x4C, 0x8D, 0xFF);
+                brush.ColorStops.Add(stop);
+            }
+
+            AddStop(0.00f, 0x00);
+            AddStop(0.40f, 0x1A);
+            AddStop(0.47f, 0x4D);
+            AddStop(0.50f, 0x8C);
+            AddStop(0.53f, 0x4D);
+            AddStop(0.60f, 0x1A);
+            AddStop(1.00f, 0x00);
+
+            var travel = width * 2.2f + 900f;
+            var centerY = (float)Math.Max(VoiceBusySheenHost.ActualHeight, 400) / 2f;
+
+            var visual = compositor.CreateSpriteVisual();
+            visual.Brush = brush;
+            visual.Size = new System.Numerics.Vector2(travel, height);
+
+            // 绕自身中心旋转，否则 18° 斜光会绕左上角转，扫出来的方向不对。
+            visual.AnchorPoint = new System.Numerics.Vector2(0.5f, 0.5f);
+            visual.RotationAngleInDegrees = 18f;
+
+            // AnchorPoint 改成 0.5 之后，Offset 表示"中心点的位置"：
+            // 从容器左外侧走到右外侧，扫完一整趟。
+            visual.Offset = new System.Numerics.Vector3(-travel * 0.5f, centerY, 0f);
+
+            ElementCompositionPreview.SetElementChildVisual(VoiceBusySheenHost, visual);
+
+            var move = compositor.CreateVector3KeyFrameAnimation();
+            move.InsertKeyFrame(1f, new System.Numerics.Vector3(travel * 1.5f, centerY, 0f),
+                compositor.CreateLinearEasingFunction());
+            move.Duration = TimeSpan.FromSeconds(7);
+            move.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
+            visual.StartAnimation("Offset", move);
+
+            _voiceBusySheenVisual = visual;
         }
 
         // ---------- 批量选择 ----------
