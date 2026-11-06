@@ -159,7 +159,6 @@ namespace GalExcleTools
             _browsingCharacterLayer = null;
 
             // 顶部那行是页面级的固定路径栏，详情只占下面的内容区 —— 不需要让位了。
-            _characterDetailAnimToken++;
             CharacterDetailPage.Visibility = Visibility.Visible;
             PlayCharacterDetailEntrance();
             AppendLog(LogKind.User, $"打开角色详情：{character.Name}");
@@ -914,46 +913,24 @@ namespace GalExcleTools
             HideCharacterDetailPanel();
         }
 
-        private int _characterDetailAnimToken;
-
         /// <summary>详情入场：和"分类 → 素材"那一层共用同一套滑入（28px / 220ms）。</summary>
         private void PlayCharacterDetailEntrance()
         {
             PlayLayerSlide(CharacterDetailPage, forward: true);
         }
 
-        /// <summary>退场：淡出 140ms 后再折叠，否则会"啪"地消失。</summary>
-        private void PlayCharacterDetailExit()
-        {
-            var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(CharacterDetailPage);
-            var compositor = visual.Compositor;
-
-            var fade = compositor.CreateScalarKeyFrameAnimation();
-            fade.InsertKeyFrame(1f, 0f, compositor.CreateCubicBezierEasingFunction(
-                new System.Numerics.Vector2(0.4f, 0f),
-                new System.Numerics.Vector2(1f, 1f)));
-            fade.Duration = TimeSpan.FromMilliseconds(140);
-            visual.StartAnimation("Opacity", fade);
-        }
-
         /// <summary>
-        /// 收起角色详情子面板：卡片区回来，路径栏恢复成分类目录。
-        /// **不重铺整个素材库页** —— 重铺会闪一下，正好破坏"还在同一页"的感觉。
+        /// 收起角色详情：卡片区回来，并**按当前分类重新铺卡**。
+        ///
+        /// 之前只是把 SetCardsVisible(true)，卡片内容还停在上一层（例如服装图层的十张图），
+        /// 于是"返回后看到的是服装卡、路径却写着立绘"（用户 2026-11-06 报的错位）。
+        /// 动画也统一成滑入，不再用淡出 —— 层级切换应该同一种手感。
         /// </summary>
         private void HideCharacterDetailPanel()
         {
-            PlayCharacterDetailExit();
+            _browsingCharacterLayer = null;
 
-            // 140ms 后再折叠：立即 Collapsed 会看不到淡出。
-            var token = ++_characterDetailAnimToken;
-            _ = Task.Delay(160).ContinueWith(_ => DispatcherQueue.TryEnqueue(() =>
-            {
-                if (token == _characterDetailAnimToken && CharacterDetailPage.Visibility == Visibility.Visible)
-                {
-                    CharacterDetailPage.Visibility = Visibility.Collapsed;
-                }
-            }));
-
+            CharacterDetailPage.Visibility = Visibility.Collapsed;
             ResetCharacterDetailLoadCancellation();
 
             if (AssetBrowserHost is null)
@@ -966,6 +943,10 @@ namespace GalExcleTools
             {
                 SetAssetLibraryPath(_characterDetailReturnPath);
             }
+
+            // 重新铺当前分类的卡片：不然卡片还停留在上一个图层的内容上。
+            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
+            PlayLayerSlide(AssetBrowserHost, forward: false);
         }
 
         /// <summary>角色详情打开时，路径栏的"返回"先退详情，而不是直接退回库列表。</summary>
