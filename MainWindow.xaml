@@ -1192,23 +1192,36 @@
                                 再加一行"分层预览"，纯属为了放那行字 —— 结果是立绘被挤到
                                 只有一半大小（用户 2026-11-06）。现在这些全部去掉。
                             -->
+                            <!--
+                                左：立绘。**不是按钮**，也没有描边/悬停态（用户 2026-11-06）：
+                                滚轮缩放、左键拖动、双击复原，就这三件事。
+                                内容套一层带变换的 Grid —— 变换要作用在图层上，
+                                不能作用在 Border 本身，否则背景也会跟着缩放。
+                            -->
                             <Border
                                 x:Name="CharacterPreviewSurface"
                                 Grid.Column="0"
                                 HorizontalAlignment="Stretch"
                                 VerticalAlignment="Stretch"
                                 IsTabStop="True"
-                                Tapped="CharacterPreviewSurface_Tapped"
+                                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                CornerRadius="6"
                                 PointerPressed="CharacterPreviewSurface_PointerPressed"
-                                PointerEntered="CharacterPreviewSurface_PointerEntered"
-                                PointerExited="CharacterPreviewSurface_PointerExited"
+                                PointerMoved="CharacterPreviewSurface_PointerMoved"
+                                PointerReleased="CharacterPreviewSurface_PointerReleased"
+                                PointerCaptureLost="CharacterPreviewSurface_PointerCaptureLost"
+                                PointerWheelChanged="CharacterPreviewSurface_PointerWheelChanged"
+                                DoubleTapped="CharacterPreviewSurface_DoubleTapped"
                                 RightTapped="CharacterPreviewSurface_RightTapped"
-                                KeyDown="CharacterPreviewSurface_KeyDown"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                BorderThickness="1"
-                                CornerRadius="8"
-                                Background="{ThemeResource LayerFillColorDefaultBrush}">
-                                <Grid>
+                                KeyDown="CharacterPreviewSurface_KeyDown">
+                                <Grid x:Name="CharacterPreviewContent" RenderTransformOrigin="0.5,0.5">
+                                    <Grid.RenderTransform>
+                                        <TransformGroup>
+                                            <ScaleTransform x:Name="CharacterPreviewScale" ScaleX="1" ScaleY="1" />
+                                            <TranslateTransform x:Name="CharacterPreviewTranslate" X="0" Y="0" />
+                                        </TransformGroup>
+                                    </Grid.RenderTransform>
+
                                     <TextBlock
                                         x:Name="CharacterPreviewEmptyText"
                                         Text="选择右侧图层后在这里叠加预览"

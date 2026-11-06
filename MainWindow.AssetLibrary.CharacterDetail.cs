@@ -522,19 +522,6 @@ namespace GalExcleTools
             CharacterPreviewEmptyText.Visibility = hasAnyLayer ? Visibility.Collapsed : Visibility.Visible;
         }
 
-        private void CharacterPreviewSurface_PointerEntered(object sender, PointerRoutedEventArgs e)
-        {
-            CharacterPreviewSurface.BorderBrush = Application.Current.Resources["AccentFillColorDefaultBrush"] as Brush;
-            CharacterPreviewSurface.BorderThickness = new Thickness(2);
-            CharacterPreviewSurface.Focus(FocusState.Programmatic);
-        }
-
-        private void CharacterPreviewSurface_PointerExited(object sender, PointerRoutedEventArgs e)
-        {
-            CharacterPreviewSurface.BorderBrush = Application.Current.Resources["CardStrokeColorDefaultBrush"] as Brush;
-            CharacterPreviewSurface.BorderThickness = new Thickness(1);
-        }
-
         private void CharacterPreviewSurface_RightTapped(object sender, RightTappedRoutedEventArgs e)
         {
             GridViewItemFactory.CreateMenu(
@@ -545,10 +532,15 @@ namespace GalExcleTools
             e.Handled = true;
         }
 
-        private void CharacterPreviewSurface_Tapped(object sender, TappedRoutedEventArgs e)
-        {
-            e.Handled = true;
-        }
+        // ---------- 预览区：滚轮缩放 / 左键拖动 / 双击复原 ----------
+
+        private bool _previewDragging;
+        private Windows.Foundation.Point _previewDragOrigin;
+        private double _previewTranslateOriginX;
+        private double _previewTranslateOriginY;
+
+        private const double PreviewMinScale = 0.3;
+        private const double PreviewMaxScale = 6.0;
 
         private void CharacterPreviewSurface_PointerPressed(object sender, PointerRoutedEventArgs e)
         {
@@ -558,9 +550,76 @@ namespace GalExcleTools
                 return;
             }
 
-            PlaySelectionSound();
-            ShowCharacterCompositeViewerPage();
+            // 按住即拖动：这个区域不再有"点一下打开大图"的语义（左栏本身就是大图）。
+            _previewDragging = true;
+            _previewDragOrigin = point.Position;
+            _previewTranslateOriginX = CharacterPreviewTranslate.X;
+            _previewTranslateOriginY = CharacterPreviewTranslate.Y;
+
+            CharacterPreviewSurface.CapturePointer(e.Pointer);
+            CharacterPreviewSurface.Focus(FocusState.Programmatic);
             e.Handled = true;
+        }
+
+        private void CharacterPreviewSurface_PointerMoved(object sender, PointerRoutedEventArgs e)
+        {
+            if (!_previewDragging)
+            {
+                return;
+            }
+
+            var position = e.GetCurrentPoint(CharacterPreviewSurface).Position;
+            CharacterPreviewTranslate.X = _previewTranslateOriginX + (position.X - _previewDragOrigin.X);
+            CharacterPreviewTranslate.Y = _previewTranslateOriginY + (position.Y - _previewDragOrigin.Y);
+            e.Handled = true;
+        }
+
+        private void CharacterPreviewSurface_PointerReleased(object sender, PointerRoutedEventArgs e)
+        {
+            if (!_previewDragging)
+            {
+                return;
+            }
+
+            _previewDragging = false;
+            CharacterPreviewSurface.ReleasePointerCapture(e.Pointer);
+            e.Handled = true;
+        }
+
+        private void CharacterPreviewSurface_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+        {
+            // 拖到窗口外松手时收不到 Released，靠这个兜底，否则会一直"粘"在鼠标上。
+            _previewDragging = false;
+        }
+
+        private void CharacterPreviewSurface_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
+        {
+            var delta = e.GetCurrentPoint(CharacterPreviewSurface).Properties.MouseWheelDelta;
+            if (delta == 0)
+            {
+                return;
+            }
+
+            // 每格 10%：一次滚动一格滚轮，手感比"每格 1.2 倍"细腻。
+            var factor = delta > 0 ? 1.1 : 1 / 1.1;
+            var next = Math.Clamp(CharacterPreviewScale.ScaleX * factor, PreviewMinScale, PreviewMaxScale);
+            CharacterPreviewScale.ScaleX = next;
+            CharacterPreviewScale.ScaleY = next;
+            e.Handled = true;
+        }
+
+        private void CharacterPreviewSurface_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+        {
+            ResetCharacterPreviewTransform();
+            e.Handled = true;
+        }
+
+        private void ResetCharacterPreviewTransform()
+        {
+            CharacterPreviewScale.ScaleX = 1;
+            CharacterPreviewScale.ScaleY = 1;
+            CharacterPreviewTranslate.X = 0;
+            CharacterPreviewTranslate.Y = 0;
         }
 
         private async void CharacterPreviewSurface_KeyDown(object sender, KeyRoutedEventArgs e)
