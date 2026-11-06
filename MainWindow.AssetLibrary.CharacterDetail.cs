@@ -154,33 +154,9 @@ namespace GalExcleTools
                 ? string.Empty
                 : GetCharacterFolderPath(_currentAssetLibrary);
             AssetBrowserHost?.SetCardsVisible(false);
-            AssetBrowserHost?.SetPath($"{_characterDetailReturnPath}\\{character.Name}（{character.Code}）");
-            if (!_characterDetailInsetHooked && AssetBrowserHost is not null)
-            {
-                // 窗口尺寸变了，路径栏高度会变（字换行/内边距），让位量得跟着走。
-                _characterDetailInsetHooked = true;
-                AssetBrowserHost.SizeChanged += (_, _) =>
-                {
-                    if (CharacterDetailPage.Visibility == Visibility.Visible)
-                    {
-                        ApplyCharacterDetailInset();
-                    }
-                };
-            }
-
-            // 底部状态条这一段在详情打开时用不上（它显示的是分类层的信息），
-            // 收掉它，预览就能一直落到窗口底部，不会留一条黑边。
-            AssetLibraryDetailStatusBorder.Visibility = Visibility.Collapsed;
-            // 行距也收掉：状态条隐藏后它还留着 16px 的空档，预览会在底部凭空断开。
-            if (AssetLibraryDetailPage is { } page)
-            {
-                page.RowSpacing = 0;
-            }
-
-            // 递增令牌：万一下一帧还有"退场后折叠"的任务在排队，它会被作废，
-            // 否则快速来回点时面板会被自己上一次的退场逻辑收起。
+            SetAssetLibraryPath($"{_characterDetailReturnPath}\\{character.Name}（{character.Code}）");
+            // 顶部那行是页面级的固定路径栏，详情只占下面的内容区 —— 不需要让位了。
             _characterDetailAnimToken++;
-            ApplyCharacterDetailInset();
             CharacterDetailPage.Visibility = Visibility.Visible;
             PlayCharacterDetailEntrance();
             AppendLog(LogKind.User, $"打开角色详情：{character.Name}");
@@ -876,59 +852,6 @@ namespace GalExcleTools
         }
 
         /// <summary>
-        /// 给详情面板留出路径栏那一整条的高度。
-        ///
-        /// 为什么不把面板重挂进浏览器的 DetailHost：UIElement 换父节点会抛
-        /// COMException 0x800F1000，而构造期抛异常就是"启动即退出"（2026-11-06 连崩两次）。
-        /// 现在面板仍是原来的兄弟节点，只靠 Margin 让位 —— 高度从控件实际尺寸读，
-        /// 路径栏改高也不用改这里。
-        /// </summary>
-        private int _characterDetailAnimToken;
-
-        /// <summary>
-        /// 详情面板的入场：淡入 + 从右边推进来 18px。
-        ///
-        /// 详情从"独立页面"改成"子面板"之后，原来那套 PlayPageEntrance 就轮不到它了
-        /// —— 页面根本没切换。但完全无动画会显得生硬（用户 2026-11-06 指出"动画没了"），
-        /// 所以单独补一段，参数与 PlayPageEntrance 保持一致（220ms、EaseOut）。
-        /// </summary>
-        private void PlayCharacterDetailEntrance()
-        {
-            // 和"分类 → 素材"那一层用同一套滑入（28px / 220ms），
-            // 这样从库列表一路点到角色详情，每一层的位移手感是连贯的。
-            PlayLayerSlide(CharacterDetailPage, forward: true);
-        }
-
-        /// <summary>退场：淡出 140ms 后再真正折叠，否则会"啪"地消失。</summary>
-        private void PlayCharacterDetailExit()
-        {
-            var visual = ElementCompositionPreview.GetElementVisual(CharacterDetailPage);
-            var compositor = visual.Compositor;
-
-            var fade = compositor.CreateScalarKeyFrameAnimation();
-            fade.InsertKeyFrame(1f, 0f, compositor.CreateCubicBezierEasingFunction(
-                new System.Numerics.Vector2(0.4f, 0f), new System.Numerics.Vector2(1f, 1f)));
-            fade.Duration = TimeSpan.FromMilliseconds(140);
-            visual.StartAnimation("Opacity", fade);
-        }
-
-        private bool _characterDetailInsetHooked;
-
-        private void ApplyCharacterDetailInset()
-        {
-            if (AssetBrowserHost is null)
-            {
-                return;
-            }
-
-            // 让出路径栏高度，再留 4px 呼吸缝。
-            // 底部再往外探 12：状态条虽已折叠，容器自身还留着一点内边距，
-            // 实测那道空隙还有约 18px（用户要求"再少 2/3"）。
-            var inset = AssetBrowserHost.ChromeHeight + 4;
-            CharacterDetailPage.Margin = new Thickness(0, inset, 0, -12);
-        }
-
-        /// <summary>
         /// 收起角色详情子面板：卡片区回来，路径栏恢复成分类目录。
         /// **不重铺整个素材库页** —— 重铺会闪一下，正好破坏"还在同一页"的感觉。
         /// </summary>
@@ -946,16 +869,6 @@ namespace GalExcleTools
                 }
             }));
 
-            // 没有文字就别恢复：空 Border 会显示成一条灰条（用户看到的"底下多出一块 UI"）。
-            AssetLibraryDetailStatusBorder.Visibility =
-                string.IsNullOrWhiteSpace(AssetLibraryDetailStatusText.Text)
-                    ? Visibility.Collapsed
-                    : Visibility.Visible;
-            if (AssetLibraryDetailPage is { } page)
-            {
-                page.RowSpacing = 16;
-            }
-
             ResetCharacterDetailLoadCancellation();
 
             if (AssetBrowserHost is null)
@@ -966,7 +879,7 @@ namespace GalExcleTools
             AssetBrowserHost.SetCardsVisible(true);
             if (!string.IsNullOrEmpty(_characterDetailReturnPath))
             {
-                AssetBrowserHost.SetPath(_characterDetailReturnPath);
+                SetAssetLibraryPath(_characterDetailReturnPath);
             }
         }
 
@@ -1146,23 +1059,6 @@ namespace GalExcleTools
             MusicPlayPauseButton.Content = "播放";
         }
 
-        private void AssetLibraryDetailScrollViewer_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
-        {
-            var delta = e.GetCurrentPoint(AssetLibraryDetailScrollViewer).Properties.MouseWheelDelta;
-            if (delta == 0)
-            {
-                return;
-            }
-
-            var direction = delta > 0 ? -1 : 1;
-            var scrollDelta = 48 * _appSettings.AssetLibraryScrollSpeedMultiplier * direction;
-            var targetOffset = Math.Clamp(
-                AssetLibraryDetailScrollViewer.VerticalOffset + scrollDelta,
-                0,
-                AssetLibraryDetailScrollViewer.ScrollableHeight);
-            AssetLibraryDetailScrollViewer.ChangeView(null, targetOffset, null, true);
-            e.Handled = true;
-        }
 
     }
 }

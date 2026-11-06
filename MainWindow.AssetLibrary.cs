@@ -297,7 +297,7 @@ namespace GalExcleTools
             }
             catch (Exception ex)
             {
-                AssetLibraryDetailStatusText.Text = $"导入背景图失败：{ex.Message}";
+                ShowFloatingTip(InfoBarSeverity.Error, "导入背景图失败", ex.Message);
                 ShowFloatingTip(
                     InfoBarSeverity.Error,
                     "背景图导入失败",

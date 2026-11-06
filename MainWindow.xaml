@@ -1130,34 +1130,73 @@
                     </Border>
                 </Grid>
 
-                <Grid x:Name="AssetLibraryDetailPage" Visibility="Collapsed" RowSpacing="16">
+                <Grid x:Name="AssetLibraryDetailPage" Visibility="Collapsed" RowSpacing="12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <!--
-                        这里原来有一块页头（返回素材库 + 库名 + 说明）。
-                        用户 2026-10-17：最外面的素材库列表已经是第一层，进来再放一遍库名与返回键是重复 ——
-                        整块去掉：库名看外层，返回看左侧导航与浏览器自己的路径栏。
-                        行 0 因此空着（RowDefinitions 保持三行不动，少改一处是一处）。
+                        全页唯一固定的一行：路径栏 + 素材库设置（⚙）。
+                        原则（用户 2026-11-06）：顶部永远不动，底下所有内容在这行下面切换，
+                        两者互不影响 —— 之前的做法是把元数据条也钉在上面，再靠 Margin 给子面板
+                        让位，补来补去都是错位。
                     -->
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
 
-                    <!--
-                        新骨架：**详情页只剩这一层浏览器**（照零境那页：一条路径栏 + 一片卡片网格）。
-                        打开素材库时铺的是**分类文件夹卡**；点进某个分类换成该分类的素材卡，
-                        路径栏文字跟着变、路径栏的「上一层」退回分类层。
-                        （原来这里还有一块「分类网格 + 大标题」，用户 2026-10-17 指出那是重复，已删。）
-                    -->
-                    <!--
-                        角色详情不再是独立页面：它作为同一页里的**子面板**盖在卡片区上。
-                        外层（元数据条 / 路径栏 / 状态栏）不动，所以从分类 → 立绘 → 角色
-                        一路点过去是连续的，不会像切换了软件（用户 2026-11-06）。
-                    -->
+                        <controls:PathBar x:Name="AssetLibraryPathBar" Grid.Column="0" />
+
+                        <!--
+                            兼容垫片：原来页面底部有一条常驻状态条，现在按用户要求去掉了。
+                            但代码里有十几处 `AssetLibraryDetailStatusText.Text = ...`，
+                            与其全部改签名，不如留一个**隐藏**的文本，赋值时转成轻提示。
+                        -->
+                        <TextBlock
+                            x:Name="AssetLibraryDetailStatusText"
+                            Visibility="Collapsed"
+                            TextChanged="AssetLibraryDetailStatusText_TextChanged" />
+
+                        <Button
+                            x:Name="AssetLibraryMetadataButton"
+                            Grid.Column="1"
+                            Width="40"
+                            Height="40"
+                            Padding="0"
+                            CornerRadius="6"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="素材库设置">
+                            <FontIcon FontSize="16" Glyph="&#xE713;" />
+                            <Button.Flyout>
+                                <!--
+                                    原来这块是页面顶部一条常驻的折叠条，白占一行高度。
+                                    现在收进弹窗：小预览开关 + 磁盘占用 + 说明。
+                                    x:Name 保持不变，处理代码一行都不用改。
+                                -->
+                                <Flyout Placement="BottomEdgeAlignedRight">
+                                    <StackPanel Spacing="12" MaxWidth="420">
+                                        <TextBlock Text="素材库设置" Style="{StaticResource SectionTitleStyle}" />
+                                        <CheckBox
+                                            x:Name="AssetLibraryPortraitPreviewEnabledCheckBox"
+                                            Content="本素材库是否启用小预览"
+                                            Checked="AssetLibraryPortraitPreviewEnabledCheckBox_Changed"
+                                            Unchecked="AssetLibraryPortraitPreviewEnabledCheckBox_Changed" />
+                                        <TextBlock x:Name="AssetLibraryDiskUsageText" Style="{StaticResource SubtleTextStyle}" />
+                                        <TextBlock
+                                            Text="启用后，服装、表情和装饰图层需要在右键菜单里设置对应小预览；同步时会写入 LustrationPreview_Image，并落到 DA_LustrationPreviewInfor 的 Infor 表里。"
+                                            Style="{StaticResource SubtleTextStyle}" />
+                                    </StackPanel>
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
+                    </Grid>
+
+                    <!-- 内容区：分类卡 / 素材卡 / 角色详情都在这一格里切换，顶部那行不受影响 -->
                     <Grid Grid.Row="1">
-                        <controls:AssetBrowser
-                            x:Name="AssetBrowserHost" />
+                        <controls:AssetBrowser x:Name="AssetBrowserHost" />
 
                     <Grid
                         x:Name="CharacterDetailPage"
@@ -1377,30 +1416,6 @@
 
                     </Grid>
 
-                    <ScrollViewer
-                        x:Name="AssetLibraryDetailScrollViewer"
-                        Grid.Row="0"
-                        Visibility="Visible"
-                        VerticalScrollBarVisibility="Auto"
-                        PointerWheelChanged="AssetLibraryDetailScrollViewer_PointerWheelChanged">
-                        <StackPanel Spacing="10">
-                            <Expander x:Name="AssetLibraryMetadataExpander" Header="素材库元数据">
-                                <StackPanel Spacing="12">
-                                    <CheckBox
-                                        x:Name="AssetLibraryPortraitPreviewEnabledCheckBox"
-                                        Content="本素材库是否启用小预览"
-                                        Checked="AssetLibraryPortraitPreviewEnabledCheckBox_Changed"
-                                        Unchecked="AssetLibraryPortraitPreviewEnabledCheckBox_Changed" />
-                                    <TextBlock x:Name="AssetLibraryDiskUsageText" Style="{StaticResource SubtleTextStyle}" />
-                                    <TextBlock Text="启用后，服装、表情和装饰图层需要在右键菜单里设置对应小预览；同步时会写入 LustrationPreview_Image，并落到 DA_LustrationPreviewInfor 的 Infor 表里。" Style="{StaticResource SubtleTextStyle}" />
-                                </StackPanel>
-                            </Expander>
-                        </StackPanel>
-                    </ScrollViewer>
-
-                    <Border x:Name="AssetLibraryDetailStatusBorder" Grid.Row="2" Style="{StaticResource PanelBorderStyle}">
-                        <TextBlock x:Name="AssetLibraryDetailStatusText" Padding="14,10" Style="{StaticResource SubtleTextStyle}" />
-                    </Border>
                 </Grid>
 
                 <Grid

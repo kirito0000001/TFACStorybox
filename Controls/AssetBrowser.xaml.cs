@@ -22,10 +22,6 @@ public sealed partial class AssetBrowser : UserControl
     {
         InitializeComponent();
 
-        // 路径栏的行为在这里转发出去，页面照旧只认 AssetBrowser 的事件。
-        PathBarHost.BackRequested += (_, _) => BackRequested?.Invoke(this, EventArgs.Empty);
-        PathBarHost.UpRequested += (_, _) => UpRequested?.Invoke(this, EventArgs.Empty);
-        PathBarHost.OpenFolderRequested += (_, _) => OpenFolderRequested?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -35,35 +31,9 @@ public sealed partial class AssetBrowser : UserControl
     // 名字不能叫 DetailHost：x:Name="DetailHost" 生成的字段已经占用了这个名字。
     public Grid DetailHostPanel => DetailHost;
 
-    /// <summary>
-    /// 路径栏那一整条的高度（含上下 padding）。
-    /// 外面的"子面板"要盖上卡片区时，靠它让出顶部空间 —— 比写死数字稳。
-    /// </summary>
-    // 只取控件自身高度：PathBar 内部那圈 Border 的 padding 已经算在 ActualHeight 里，
-    // 再加 16 就是凭空多出一道缝（2026-11-06 实机看到的就是这个）。
-    public double ChromeHeight => PathBarHost?.ActualHeight ?? 0;
-
     /// <summary>拖拽重排的接线处（CanDragItems / DragItemsStarting / DragItemsCompleted 都挂它）。</summary>
     public GridView CardsHost => CardGrid;
 
-    /// <summary>返回素材库列表（零境是左上角那个返回箭头）。</summary>
-    public event EventHandler? BackRequested;
-
-    /// <summary>上一层（面包屑往上退一格）。</summary>
-    public event EventHandler? UpRequested;
-
-    /// <summary>在资源管理器里打开当前目录。</summary>
-    public event EventHandler? OpenFolderRequested;
-
-    /// <summary>路径栏上那行字（当前目录的完整路径）。</summary>
-    /// <summary>路径栏当前的路径（"在资源管理器打开"要用它）。</summary>
-    public string CurrentPath { get; private set; } = string.Empty;
-
-    public void SetPath(string path)
-    {
-        CurrentPath = path ?? string.Empty;
-        PathBarHost.SetPath(CurrentPath);
-    }
 
     public void SetCards(IEnumerable<object> cards)
     {

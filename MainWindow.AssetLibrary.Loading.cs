@@ -374,6 +374,22 @@ namespace GalExcleTools
             AssetLibraryDiskUsageText.Text = $"当前占用：{FormatFileSize(CountDirectoryBytes(assetLibrary.Path))}";
         }
 
+        /// <summary>
+        /// 旧的"底部状态条"已删除（用户要求底部不再有任何固定 UI）。
+        /// 代码里还有十几处直接赋 Text 的地方，这里把赋值转成一条轻提示，
+        /// 保证信息不丢、又不用改所有调用点。
+        /// </summary>
+        private void AssetLibraryDetailStatusText_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            var text = AssetLibraryDetailStatusText.Text;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            ShowFloatingTip(InfoBarSeverity.Informational, "素材库", text);
+        }
+
         private void AssetLibraryPortraitPreviewEnabledCheckBox_Changed(object sender, RoutedEventArgs e)
         {
             if (_isApplyingAssetLibraryMetadata || _currentAssetLibrary is null)

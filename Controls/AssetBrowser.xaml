@@ -19,22 +19,12 @@
         所以这里只放壳和网格，卡片集合由外面塞（SetCards）。
     -->
     <Grid RowSpacing="12">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-
-        <!-- 路径栏：与角色立绘详情页共用同一份控件（Controls/PathBar） -->
-        <local:PathBar
-            x:Name="PathBarHost"
-            Grid.Row="0" />
-
         <!--
             卡片网格 + 详情宿主。
             详情宿主和卡片区**同一个格子**：外面的"角色详情"这类子面板挂进来，
             物理上就位于路径栏下面，不会再盖住路径栏（2026-11-06 用户报的重叠）。
         -->
-        <Grid Grid.Row="1">
+        <Grid>
             <GridView
                 x:Name="CardGrid"
                 Style="{StaticResource AssetGridViewStyle}"

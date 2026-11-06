@@ -244,8 +244,8 @@ public sealed partial class MainWindow
     private void FillAssetBrowserWithCharacters(Controls.AssetBrowser browser, AssetLibraryInfo assetLibrary)
     {
         var folderPath = GetCharacterFolderPath(assetLibrary);
-        browser.SetPath(folderPath);
-        browser.SetUpEnabled(true);
+        SetAssetLibraryPath(folderPath);
+        SetAssetLibraryUpEnabled(true);
         browser.SetCardsVisible(true);
         // 从角色详情退回来时要重新露出卡片区（详情是盖在它上面的）。
         browser.SetCardsVisible(true);
@@ -303,8 +303,8 @@ public sealed partial class MainWindow
     private void FillAssetBrowserWithCharacterFilters(Controls.AssetBrowser browser, AssetLibraryInfo assetLibrary)
     {
         var folderPath = GetCharacterFilterFolderPath(assetLibrary);
-        browser.SetPath(folderPath);
-        browser.SetUpEnabled(true);
+        SetAssetLibraryPath(folderPath);
+        SetAssetLibraryUpEnabled(true);
         browser.SetCardsVisible(true);
         // 「移动素材」的两个零件：滤镜的条目身份就是 CharacterFilterEntry（卡片 Tag 也是它），
         // 落地走 ApplyCharacterFilterOrderAsync（写清单 + 同步所有章节的 VFX 索引）。
@@ -358,8 +358,8 @@ public sealed partial class MainWindow
     private void FillAssetBrowserWithFunctions(Controls.AssetBrowser browser, AssetLibraryInfo assetLibrary)
     {
         var folderPath = GetFunctionFolderPath(assetLibrary);
-        browser.SetPath(folderPath);
-        browser.SetUpEnabled(true);
+        SetAssetLibraryPath(folderPath);
+        SetAssetLibraryUpEnabled(true);
         browser.SetCardsVisible(true);
 
         // ⚠️ 函数的来源是**素材库自己的函数目录**（StoryFunctionService.ReadFunctions），
@@ -439,8 +439,8 @@ public sealed partial class MainWindow
         var orderedPaths = ImageSetService.GetFilePaths(folderPath);
         // 这行日志原来在旧网格的填充方法里（已退休），挪过来免得用户熟悉的日志消失。
         AppendLog(LogKind.Info, $"已加载道具图片：{orderedPaths.Count} 个文件。");
-        browser.SetPath(folderPath);
-        browser.SetUpEnabled(true);
+        SetAssetLibraryPath(folderPath);
+        SetAssetLibraryUpEnabled(true);
         browser.SetCardsVisible(true);
         // 「移动素材」的两个零件：取道具图片列表 + 只重排编号（无 CSV 同步）。
         ConfigureMoveAsset(
@@ -493,8 +493,8 @@ public sealed partial class MainWindow
         AudioAssetService.DeleteIgnoredSidecarFiles(kind, folderPath);
         var orderedPaths = AudioAssetService.GetFilePaths(folderPath);
         AppendLog(LogKind.Info, $"已加载{AudioAssetService.GetDisplayName(kind)}：{orderedPaths.Count} 个文件。");
-        browser.SetPath(folderPath);
-        browser.SetUpEnabled(true);
+        SetAssetLibraryPath(folderPath);
+        SetAssetLibraryUpEnabled(true);
         browser.SetCardsVisible(true);
         // 「移动素材」的两个零件：取这一类的路径列表 + 用 ApplyAudioOrderAsync 落地
         //（音乐 BGM、环境音 Scene、特殊音效 Scene_n —— 落地方自己按 kind 分）。
@@ -554,9 +554,12 @@ public sealed partial class MainWindow
             return;
         }
 
-        AssetBrowserHost.SetPath(assetLibrary.Path);
+        // 路径栏事件只挂一次；分类层是每次打开库的必经之路，最稳的接线点。
+        EnsureAssetBrowserHandlers();
+
+        SetAssetLibraryPath(assetLibrary.Path);
         AssetBrowserHost.SetCardsVisible(true);
-        AssetBrowserHost.SetUpEnabled(false);
+        SetAssetLibraryUpEnabled(false);
         AssetBrowserHost.SetCards(BuildAssetCategoryCards(assetLibrary));
         // 回到分类层：只翻层标志，**不清 key**（清了会让功能路径的重铺变成 no-op）。
         _isAssetCategoryLayerOpen = true;
@@ -622,13 +625,28 @@ public sealed partial class MainWindow
             return;
         }
 
-        AssetBrowserHost.BackRequested -= AssetBrowser_BackRequested;
-        AssetBrowserHost.BackRequested += AssetBrowser_BackRequested;
-        AssetBrowserHost.UpRequested -= AssetBrowser_UpRequested;
-        AssetBrowserHost.UpRequested += AssetBrowser_UpRequested;
-        // 这个按钮原来**没接线**，点了没反应 —— 顺手补上。
-        AssetBrowserHost.OpenFolderRequested -= AssetBrowser_OpenFolderRequested;
-        AssetBrowserHost.OpenFolderRequested += AssetBrowser_OpenFolderRequested;
+        // 路径栏已经提升到页面级（AssetLibraryPathBar），事件也挂它。
+        AssetLibraryPathBar.BackRequested -= AssetBrowser_BackRequested;
+        AssetLibraryPathBar.BackRequested += AssetBrowser_BackRequested;
+        AssetLibraryPathBar.UpRequested -= AssetBrowser_UpRequested;
+        AssetLibraryPathBar.UpRequested += AssetBrowser_UpRequested;
+        AssetLibraryPathBar.OpenFolderRequested -= AssetBrowser_OpenFolderRequested;
+        AssetLibraryPathBar.OpenFolderRequested += AssetBrowser_OpenFolderRequested;
+    }
+
+    /// <summary>路径栏文字（页面级 PathBar）。</summary>
+    /// <summary>路径栏当前指向的目录（"在资源管理器打开"用它）。</summary>
+    private string _currentAssetLibraryPath = string.Empty;
+
+    private void SetAssetLibraryPath(string path)
+    {
+        AssetLibraryPathBar?.SetPath(path);
+        _currentAssetLibraryPath = path;
+    }
+
+    private void SetAssetLibraryUpEnabled(bool enabled)
+    {
+        AssetLibraryPathBar?.SetUpEnabled(enabled);
     }
 
     private void AssetBrowser_BackRequested(object? sender, EventArgs e)
@@ -651,7 +669,7 @@ public sealed partial class MainWindow
     /// </summary>
     private void AssetBrowser_OpenFolderRequested(object? sender, EventArgs e)
     {
-        var path = AssetBrowserHost?.CurrentPath ?? string.Empty;
+        var path = _currentAssetLibraryPath;
         if (path.Length == 0 || !Directory.Exists(path))
         {
             ShowFloatingTip(InfoBarSeverity.Warning, "目录不存在", path);
