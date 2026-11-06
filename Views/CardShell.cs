@@ -103,10 +103,13 @@ internal static class CardShell
         return button;
     }
 
-    /// <summary>卡片主标题（16 SemiBold、超长省略）。</summary>
-    public static TextBlock CreateTitle(string text)
+    /// <summary>
+    /// 卡片主标题（16 SemiBold、超长省略）。
+    /// <paramref name="color"/> 传 null 就继承主题前景色 —— 角色卡用它上角色主题色。
+    /// </summary>
+    public static TextBlock CreateTitle(string text, Windows.UI.Color? color = null)
     {
-        return new TextBlock
+        var title = new TextBlock
         {
             Text = text,
             FontSize = TitleFontSize,
@@ -114,6 +117,13 @@ internal static class CardShell
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.NoWrap
         };
+
+        if (color is { } value)
+        {
+            title.Foreground = new SolidColorBrush(value);
+        }
+
+        return title;
     }
 
     /// <summary>卡片副标题 / 说明。用**不透明度**压暗，而不是取主题画笔 ——

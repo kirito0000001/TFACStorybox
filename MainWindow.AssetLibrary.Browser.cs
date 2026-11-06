@@ -60,6 +60,37 @@ public sealed partial class MainWindow
     }
 
     /// <summary>把分类卡造出来（280×76 扁平卡：标题 + 数量，照零境的库卡）。</summary>
+    /// <summary>
+    /// 角色主题色。取不到就返回 null（继承主题前景色），
+    /// **绝不**塞一个默认灰 —— 那会在夜间模式下变成看不清的深色。
+    /// </summary>
+    private static Windows.UI.Color? ResolveCharacterTitleColor(CharacterInfo character)
+    {
+        if (string.IsNullOrWhiteSpace(character.ColorHex))
+        {
+            return null;
+        }
+
+        var hex = ColorUtility.NormalizeColorHex(character.ColorHex);
+        if (hex.Length != 7)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Windows.UI.Color.FromArgb(
+                255,
+                Convert.ToByte(hex.Substring(1, 2), 16),
+                Convert.ToByte(hex.Substring(3, 2), 16),
+                Convert.ToByte(hex.Substring(5, 2), 16));
+        }
+        catch (Exception error) when (error is FormatException or OverflowException)
+        {
+            return null;
+        }
+    }
+
     private List<object> BuildAssetCategoryCards(AssetLibraryInfo assetLibrary)
     {
         var cards = new List<object>();
@@ -223,7 +254,9 @@ public sealed partial class MainWindow
                 VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
-                    CardShell.CreateTitle(character.Name),
+                    // 只给名字染色（用户 2026-11-06）：整卡染色会盖掉卡片自己的描边与悬停态，
+                    // 一行彩色文字已经足够把角色区分开。
+                    CardShell.CreateTitle(character.Name, ResolveCharacterTitleColor(character)),
                     CardShell.CreateSubtitle(character.Code)
                 }
             };
