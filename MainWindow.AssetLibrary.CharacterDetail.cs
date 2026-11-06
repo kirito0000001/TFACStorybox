@@ -888,8 +888,10 @@ namespace GalExcleTools
             }
 
             // 让出路径栏高度，再留 4px 呼吸缝。
+            // 底部再往外探 12：状态条虽已折叠，容器自身还留着一点内边距，
+            // 实测那道空隙还有约 18px（用户要求"再少 2/3"）。
             var inset = AssetBrowserHost.ChromeHeight + 4;
-            CharacterDetailPage.Margin = new Thickness(0, inset, 0, 0);
+            CharacterDetailPage.Margin = new Thickness(0, inset, 0, -12);
         }
 
         /// <summary>
@@ -899,7 +901,11 @@ namespace GalExcleTools
         private void HideCharacterDetailPanel()
         {
             CharacterDetailPage.Visibility = Visibility.Collapsed;
-            AssetLibraryDetailStatusBorder.Visibility = Visibility.Visible;
+            // 没有文字就别恢复：空 Border 会显示成一条灰条（用户看到的"底下多出一块 UI"）。
+            AssetLibraryDetailStatusBorder.Visibility =
+                string.IsNullOrWhiteSpace(AssetLibraryDetailStatusText.Text)
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
             if (AssetLibraryDetailPage is { } page)
             {
                 page.RowSpacing = 16;

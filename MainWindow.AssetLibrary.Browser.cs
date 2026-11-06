@@ -593,13 +593,16 @@ public sealed partial class MainWindow
 
     private void AssetBrowser_BackRequested(object? sender, EventArgs e)
     {
-        // 详情开着的时候，"返回"只退详情 —— 否则一次退两层，用户会懵。
+        // 两级语义（用户最早的设计，2026-11-06 又被提了一次）：
+        //   左键「返回」= 回素材主页面（库列表）；
+        //   右键「上一层」= 只在当前库里往上退一级。
+        // 之前两个按钮都接 ReturnToAssetCategoryLayer，等于重复。
         if (TryCloseCharacterDetailOnBack())
         {
             return;
         }
 
-        ReturnToAssetCategoryLayer();
+        ShowAssetLibraryPage();
     }
 
     /// <summary>
@@ -632,6 +635,11 @@ public sealed partial class MainWindow
 
     private void AssetBrowser_UpRequested(object? sender, EventArgs e)
     {
+        if (TryCloseCharacterDetailOnBack())
+        {
+            return;
+        }
+
         ReturnToAssetCategoryLayer();
     }
 }
