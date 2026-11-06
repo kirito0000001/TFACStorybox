@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using GalExcleTools.Services;
@@ -600,10 +602,10 @@ public sealed partial class MainWindow
     /// </summary>
     private void AssetBrowser_OpenFolderRequested(object? sender, EventArgs e)
     {
-        var path = AssetBrowserHost?.CurrentPath;
-        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        var path = AssetBrowserHost?.CurrentPath ?? string.Empty;
+        if (path.Length == 0 || !Directory.Exists(path))
         {
-            ShowFloatingTip(InfoBarSeverity.Warning, "目录不存在", path ?? string.Empty);
+            ShowFloatingTip(InfoBarSeverity.Warning, "目录不存在", path);
             return;
         }
 
