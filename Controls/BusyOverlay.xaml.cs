@@ -50,7 +50,17 @@ public sealed partial class BusyOverlay : UserControl
             ElementCompositionPreview.GetElementVisual(this).Opacity = 0f;
             EnsureAurora();
         };
-        SizeChanged += (_, _) => ResizeAurora();
+        SizeChanged += (_, _) =>
+        {
+            // 首次布局完才会有真实尺寸 —— 这时候才建得出来。
+            if (_auroraVisual is null)
+            {
+                EnsureAurora();
+                return;
+            }
+
+            ResizeAurora();
+        };
     }
 
     /// <summary>当前是否处于"忙碌"状态。</summary>
@@ -167,8 +177,10 @@ public sealed partial class BusyOverlay : UserControl
                 EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
             };
 
-            Storyboard.SetTarget(rise, _bars[index].RenderTransform);
-            Storyboard.SetTargetProperty(rise, "ScaleY");
+            // 必须把**元素**当目标、用属性路径，不能直接把 Transform 当目标 ——
+            // 那样 Storyboard 找不到可动画的属性，静默不动（"动效没了"就是这个）。
+            Storyboard.SetTarget(rise, _bars[index]);
+            Storyboard.SetTargetProperty(rise, "(UIElement.RenderTransform).(ScaleTransform.ScaleY)");
             storyboard.Children.Add(rise);
         }
 
@@ -184,8 +196,15 @@ public sealed partial class BusyOverlay : UserControl
             return;
         }
 
-        var width = (float)Math.Max(AuroraHost.ActualWidth, 2);
-        var height = (float)Math.Max(AuroraHost.ActualHeight, 2);
+        // 还没布局出真实尺寸时不建：建了就是 2×2，极光等于不存在。
+        // SizeChanged 会再来一次。
+        if (AuroraHost.ActualWidth < 2 || AuroraHost.ActualHeight < 2)
+        {
+            return;
+        }
+
+        var width = (float)AuroraHost.ActualWidth;
+        var height = (float)AuroraHost.ActualHeight;
 
         if (_auroraVisual is not null)
         {
@@ -285,9 +304,23 @@ public sealed partial class BusyOverlay : UserControl
             return;
         }
 
-        _auroraVisual.Size = new Vector2(
-            (float)Math.Max(AuroraHost.ActualWidth, 2),
-            (float)Math.Max(AuroraHost.ActualHeight, 2));
+        if (AuroraHost.ActualWidth < 2 || AuroraHost.ActualHeight < 2)
+        {
+            return;
+        }
+
+        var size = new Vector2((float)AuroraHost.ActualWidth, (float)AuroraHost.ActualHeight);
+        _auroraVisual.Size = size;
+
+        // 三团色斑是独立的 SpriteVisual，容器变大不会带着它们变 ——
+        // 不逐个改尺寸的话，窗口一放大极光就只剩左上角一小块。
+        foreach (var child in _auroraVisual.Children)
+        {
+            if (child is SpriteVisual sprite)
+            {
+                sprite.Size = size;
+            }
+        }
     }
 
     // ---------- 淡入淡出 ----------

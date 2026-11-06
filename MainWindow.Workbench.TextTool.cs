@@ -43,7 +43,7 @@ namespace GalExcleTools
 {
     public sealed partial class MainWindow
     {
-        private async void OpenProjectTextTool(ProjectTextToolMode mode, ChapterInfo chapter)
+        private void OpenProjectTextTool(ProjectTextToolMode mode, ChapterInfo chapter)
         {
             if (_currentProject is null)
             {
@@ -66,22 +66,7 @@ namespace GalExcleTools
             CreateAssetLibraryPage.Visibility = Visibility.Collapsed;
             SyncPanel.Visibility = Visibility.Collapsed;
             SettingsPage.Visibility = Visibility.Collapsed;
-
-            // 铺这一页要造几百个控件，实测会顿一下。先让进度条画出来再开工 ——
-            // Task.Yield() 把控制权交回消息循环，否则进度条要到铺完才第一次刷新。
-            ShowGlobalProgress("正在打开文本语音", "加载台词与语音…");
-            await Task.Yield();
-            try
-            {
-                RefreshProjectTextToolPage();
-            }
-            catch (Exception error)
-            {
-                AppendLog(LogKind.Warning, "打开文本语音失败", error);
-            }
-
-            CompleteGlobalProgress("已就绪", $"{_projectTextRows.Count} 行");
-            await HideGlobalProgressAfterDelayAsync();
+            RefreshProjectTextToolPage();
             PlayPageEntrance(ProjectTextToolPage);
         }
 
@@ -940,7 +925,15 @@ namespace GalExcleTools
                 logMessage: $"已更改语音备注：{Path.GetFileName(updatedPath)}");
         }
 
-        private async Task RemoveProjectVoiceAsync(ProjectTextRow row, Button? button = null, Button? previewButton = null)
+        /// <param name="skipConfirm">
+        /// 批量操作时用：确认框由调用方统一弹一次，这里不再逐条问，
+        /// 也不再逐条重铺页面（533 行重铺一次约 1 秒，批量会等到崩溃）。
+        /// </param>
+        private async Task RemoveProjectVoiceAsync(
+            ProjectTextRow row,
+            Button? button = null,
+            Button? previewButton = null,
+            bool skipConfirm = false)
         {
             if (_currentProject is null)
             {
@@ -953,15 +946,18 @@ namespace GalExcleTools
                 return;
             }
 
-            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
-                "移除语音映射",
-                $"确定移除 {Path.GetFileName(voicePath)} 吗？项目 Voice 文件夹中的对应文件也会删除。",
-                "移除",
-                "取消",
-                PrimaryButtonStyle: CreateDestructivePrimaryButtonStyle()));
-            if (!confirmed)
+            if (!skipConfirm)
             {
-                return;
+                var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                    "移除语音映射",
+                    $"确定移除 {Path.GetFileName(voicePath)} 吗？项目 Voice 文件夹中的对应文件也会删除。",
+                    "移除",
+                    "取消",
+                    PrimaryButtonStyle: CreateDestructivePrimaryButtonStyle()));
+                if (!confirmed)
+                {
+                    return;
+                }
             }
 
             var removedPath = _projectVoiceAssetService.RemoveVoice(_currentProject, row, _projectVoiceMapState);
@@ -978,9 +974,16 @@ namespace GalExcleTools
                     UpdateProjectVoicePreviewButton(previewButton, string.Empty);
                 }
             }
-            else
+            else if (!skipConfirm)
             {
                 RefreshProjectTextToolPage();
+            }
+
+            if (skipConfirm)
+            {
+                // 批量：逐条弹提示会刷屏，调用方最后统一给一条。
+                AppendLog(LogKind.Info, $"已移除语音映射：{Path.GetFileName(removedPath ?? voicePath)}");
+                return;
             }
 
             ShowFloatingTip(

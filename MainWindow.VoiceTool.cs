@@ -205,11 +205,6 @@ namespace GalExcleTools
             _voiceDbCells.Clear();
             _voiceButtons.Clear();
             _voiceProgressBars.Clear();
-            _voiceSelectOverlays.Clear();
-            if (_voiceBatchSelectMode)
-            {
-                ExitVoiceBatchMode();
-            }
             // 重建页面后旧的 Border 引用全失效，必须一起清；
             // 批量模式也退出（选中的行可能已经不存在了）。
             _voiceSelectOverlays.Clear();
@@ -1306,19 +1301,25 @@ namespace GalExcleTools
             switch (choice.SelectedIndex)
             {
                 case 0:
+                    // 确认框已经在「批量处理」那一步问过了，逐条再问一遍纯属折磨。
                     foreach (var row in rows)
                     {
-                        await RestoreProjectVoiceOriginalAsync(row);
+                        await RestoreProjectVoiceOriginalAsync(row, skipConfirm: true);
                     }
 
+                    RefreshProjectTextToolPage();
+                    ShowFloatingTip(InfoBarSeverity.Success, "已还原", $"{rows.Count} 条");
                     break;
 
                 case 1:
                     foreach (var row in rows)
                     {
-                        await RemoveProjectVoiceAsync(row);
+                        await RemoveProjectVoiceAsync(row, skipConfirm: true);
                     }
 
+                    // 逐条重铺会 N 次重建整页（533 行 × 1 秒），所以最后统一刷一次。
+                    RefreshProjectTextToolPage();
+                    ShowFloatingTip(InfoBarSeverity.Success, "已移除", $"{rows.Count} 条");
                     break;
 
                 case 2:
@@ -3107,7 +3108,10 @@ namespace GalExcleTools
         /// 还原之后**旧响度结论必须作废**（文件内容变了），所以顺手把它从 DB 字典里删掉，
         /// 那一行退回横线，等用户再点一次检查 —— 不能让它继续显示还原前的数字。
         /// </summary>
-        private async Task RestoreProjectVoiceOriginalAsync(ProjectTextRow row)
+        /// <param name="skipConfirm">
+        /// 批量操作时用：确认框由调用方差一个统一弹，逐条问会把用户问烦。
+        /// </param>
+        private async Task RestoreProjectVoiceOriginalAsync(ProjectTextRow row, bool skipConfirm = false)
         {
             if (_currentProject is null || _selectedTextToolChapter is null)
             {
@@ -3129,15 +3133,18 @@ namespace GalExcleTools
                 return;
             }
 
-            var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
-                "还原最初版",
-                $"把「{Path.GetFileName(voicePath)}」还原成导入时的原始版本？\n"
-                + "当前的响度处理结果会被覆盖（文件名、备注、映射都不变）。",
-                "还原",
-                "取消"));
-            if (!confirmed)
+            if (!skipConfirm)
             {
-                return;
+                var confirmed = await _dialogService.ConfirmAsync(new DialogRequest(
+                    "还原最初版",
+                    $"把「{Path.GetFileName(voicePath)}」还原成导入时的原始版本？\n"
+                    + "当前的响度处理结果会被覆盖（文件名、备注、映射都不变）。",
+                    "还原",
+                    "取消"));
+                if (!confirmed)
+                {
+                    return;
+                }
             }
 
             StopProjectVoicePreview();
