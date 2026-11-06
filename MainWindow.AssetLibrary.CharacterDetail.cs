@@ -894,24 +894,9 @@ namespace GalExcleTools
         /// </summary>
         private void PlayCharacterDetailEntrance()
         {
-            var compositor = ElementCompositionPreview.GetElementVisual(CharacterDetailPage).Compositor;
-            var visual = ElementCompositionPreview.GetElementVisual(CharacterDetailPage);
-
-            var easing = compositor.CreateCubicBezierEasingFunction(
-                new System.Numerics.Vector2(0.1f, 0.9f),
-                new System.Numerics.Vector2(0.2f, 1f));
-
-            var fade = compositor.CreateScalarKeyFrameAnimation();
-            fade.InsertKeyFrame(1f, 1f, easing);
-            fade.Duration = TimeSpan.FromMilliseconds(220);
-            visual.Opacity = 0;
-            visual.StartAnimation("Opacity", fade);
-
-            var slide = compositor.CreateVector3KeyFrameAnimation();
-            slide.InsertKeyFrame(1f, System.Numerics.Vector3.Zero, easing);
-            slide.Duration = TimeSpan.FromMilliseconds(220);
-            visual.Offset = new System.Numerics.Vector3(18f, 0f, 0f);
-            visual.StartAnimation("Offset", slide);
+            // 和"分类 → 素材"那一层用同一套滑入（28px / 220ms），
+            // 这样从库列表一路点到角色详情，每一层的位移手感是连贯的。
+            PlayLayerSlide(CharacterDetailPage, forward: true);
         }
 
         /// <summary>退场：淡出 140ms 后再真正折叠，否则会"啪"地消失。</summary>

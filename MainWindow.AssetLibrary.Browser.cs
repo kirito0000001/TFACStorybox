@@ -172,6 +172,10 @@ public sealed partial class MainWindow
                 AssetLibraryStatusText.Text = "这个分类还没迁移到新骨架。";
                 break;
         }
+
+        // 前进一层：整片内容从右侧滑入。放在 switch 之后 ——
+        // 在填充之前播的话，动画跑的是空卡片。
+        PlayLayerSlide(AssetBrowserHost, forward: true);
     }
 
     /// <summary>
@@ -566,11 +570,47 @@ public sealed partial class MainWindow
     }
 
     /// <summary>退回分类层（路径栏的「上一层」与左侧返回箭头都走这里；已在分类层时等于重铺一次）。</summary>
+    /// <summary>
+    /// 整层切换的入场动画：内容从右（前进）或从左（后退）滑入 + 淡入。
+    ///
+    /// 为什么不是 PlayPageEntrance：素材库内部的"分类 → 素材"根本不切页面，
+    /// 只是重铺卡片；只用页面级动画的话，中间这层永远是"啪"地换掉（用户 2026-11-06）。
+    /// 参数与页面入场对齐：28px、220ms、EaseOut。
+    /// </summary>
+    private void PlayLayerSlide(FrameworkElement element, bool forward)
+    {
+        if (element is null || element.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(element);
+        var compositor = visual.Compositor;
+
+        var easing = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.1f, 0.9f),
+            new System.Numerics.Vector2(0.2f, 1f));
+
+        visual.Offset = new System.Numerics.Vector3(forward ? 28f : -28f, 0f, 0f);
+        visual.Opacity = 0.82f;
+
+        var slide = compositor.CreateVector3KeyFrameAnimation();
+        slide.InsertKeyFrame(1f, System.Numerics.Vector3.Zero, easing);
+        slide.Duration = TimeSpan.FromMilliseconds(220);
+        visual.StartAnimation("Offset", slide);
+
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(1f, 1f, easing);
+        fade.Duration = TimeSpan.FromMilliseconds(220);
+        visual.StartAnimation("Opacity", fade);
+    }
+
     private void ReturnToAssetCategoryLayer()
     {
         if (_currentAssetLibrary is not null)
         {
             FillAssetBrowserWithCategories(_currentAssetLibrary);
+            PlayLayerSlide(AssetBrowserHost, forward: false);
         }
     }
 
