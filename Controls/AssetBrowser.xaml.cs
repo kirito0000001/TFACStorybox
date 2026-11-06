@@ -35,6 +35,12 @@ public sealed partial class AssetBrowser : UserControl
     // 名字不能叫 DetailHost：x:Name="DetailHost" 生成的字段已经占用了这个名字。
     public Grid DetailHostPanel => DetailHost;
 
+    /// <summary>
+    /// 路径栏那一整条的高度（含上下 padding）。
+    /// 外面的"子面板"要盖上卡片区时，靠它让出顶部空间 —— 比写死数字稳。
+    /// </summary>
+    public double ChromeHeight => (PathBarHost?.ActualHeight ?? 0) + 16;
+
     /// <summary>拖拽重排的接线处（CanDragItems / DragItemsStarting / DragItemsCompleted 都挂它）。</summary>
     public GridView CardsHost => CardGrid;
 

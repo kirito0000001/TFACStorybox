@@ -436,29 +436,9 @@ namespace GalExcleTools
             // 异步流程随时可能弹第一条。
             TipToast.Attach(RootGrid);
 
-            // 角色详情面板挂进浏览器的详情宿主：和卡片区同一格、位于路径栏之下。
-            // 放在 XAML 里做不到（它在 UserControl 内部），所以运行期搬一次。
-            //
-            // ⚠️ 必须先**从原父节点摘下来**：一个 UIElement 只能有一个父节点，
-            // 直接 Add 会抛 COMException 0x800F1000（2026-11-06 启动即崩）。
-            if (AssetBrowserHost?.DetailHostPanel is { } detailHost)
-            {
-                try
-                {
-                    if (CharacterDetailPage.Parent is Panel oldParent)
-                    {
-                        oldParent.Children.Remove(CharacterDetailPage);
-                    }
-
-                    detailHost.Children.Add(CharacterDetailPage);
-                }
-                catch (Exception error)
-                {
-                    // 搬不过去也别让程序起不来：详情面板留在原位，只是会盖住路径栏。
-                    AppendLog(LogKind.Warning, "角色详情面板挂载失败，已保留在原位置。", error);
-                }
-            }
-
+            // 角色详情面板**不重挂**：UIElement 换父节点在 WinUI 里会抛 0x800F1000，
+            // 而构造期抛异常 = 启动即退出。改成"给它让出路径栏的高度"，见
+            // ShowCharacterDetailPage 里的 ApplyCharacterDetailInset。
 
             StorySpeakerTextBox.RegisterPropertyChangedCallback(
                 AutoSuggestBox.IsSuggestionListOpenProperty,

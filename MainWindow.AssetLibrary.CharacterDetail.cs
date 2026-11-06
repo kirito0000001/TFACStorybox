@@ -154,6 +154,20 @@ namespace GalExcleTools
                 : GetCharacterFolderPath(_currentAssetLibrary);
             AssetBrowserHost?.SetCardsVisible(false);
             AssetBrowserHost?.SetPath($"{_characterDetailReturnPath}\\{character.Name}（{character.Code}）");
+            if (!_characterDetailInsetHooked && AssetBrowserHost is not null)
+            {
+                // 窗口尺寸变了，路径栏高度会变（字换行/内边距），让位量得跟着走。
+                _characterDetailInsetHooked = true;
+                AssetBrowserHost.SizeChanged += (_, _) =>
+                {
+                    if (CharacterDetailPage.Visibility == Visibility.Visible)
+                    {
+                        ApplyCharacterDetailInset();
+                    }
+                };
+            }
+
+            ApplyCharacterDetailInset();
             CharacterDetailPage.Visibility = Visibility.Visible;
             AppendLog(LogKind.User, $"打开角色详情：{character.Name}");
         }
@@ -845,6 +859,27 @@ namespace GalExcleTools
 
             PlayNegativeSound();
             HideCharacterDetailPanel();
+        }
+
+        /// <summary>
+        /// 给详情面板留出路径栏那一整条的高度。
+        ///
+        /// 为什么不把面板重挂进浏览器的 DetailHost：UIElement 换父节点会抛
+        /// COMException 0x800F1000，而构造期抛异常就是"启动即退出"（2026-11-06 连崩两次）。
+        /// 现在面板仍是原来的兄弟节点，只靠 Margin 让位 —— 高度从控件实际尺寸读，
+        /// 路径栏改高也不用改这里。
+        /// </summary>
+        private bool _characterDetailInsetHooked;
+
+        private void ApplyCharacterDetailInset()
+        {
+            if (AssetBrowserHost is null)
+            {
+                return;
+            }
+
+            var inset = AssetBrowserHost.ChromeHeight + 8;
+            CharacterDetailPage.Margin = new Thickness(0, inset, 0, 0);
         }
 
         /// <summary>
