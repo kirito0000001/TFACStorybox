@@ -1142,7 +1142,8 @@
                         两者互不影响 —— 之前的做法是把元数据条也钉在上面，再靠 Margin 给子面板
                         让位，补来补去都是错位。
                     -->
-                    <Grid ColumnSpacing="8">
+                    <Border Style="{StaticResource PanelBorderStyle}" Padding="8">
+                        <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -1191,7 +1192,8 @@
                             </Button.Flyout>
                             <FontIcon FontSize="16" Glyph="&#xE713;" />
                         </Button>
-                    </Grid>
+                                            </Grid>
+                    </Border>
 
                     <!-- 内容区：分类卡 / 素材卡 / 角色详情都在这一格里切换，顶部那行不受影响 -->
                     <Grid Grid.Row="1">

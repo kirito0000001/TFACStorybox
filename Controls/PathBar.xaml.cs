@@ -17,6 +17,29 @@ public sealed partial class PathBar : UserControl
         InitializeComponent();
     }
 
+    /// <summary>
+    /// 关掉自带的描边/底色/内边距。
+    /// 宿主想把路径栏和别的按钮画进**同一条边框**时用（素材库里 ⚙ 就并在这一行）。
+    /// </summary>
+    public void SetChromeVisible(bool visible)
+    {
+        if (Chrome is null)
+        {
+            return;
+        }
+
+        if (visible)
+        {
+            Chrome.Style = (Style)Application.Current.Resources["PanelBorderStyle"];
+            return;
+        }
+
+        Chrome.Style = null;
+        Chrome.BorderThickness = new Thickness(0);
+        Chrome.Padding = new Thickness(0);
+        Chrome.Background = null;
+    }
+
     public event EventHandler? BackRequested;
 
     public event EventHandler? UpRequested;

@@ -9,7 +9,7 @@
         素材浏览器和角色立绘详情页共用这一份 —— 之前两边各写了一套，
         尺寸（36 vs 40）和圆角（6 vs 6）就不一样，看着像两个软件。
     -->
-    <Border Style="{StaticResource PanelBorderStyle}" Padding="8">
+    <Border x:Name="Chrome" Style="{StaticResource PanelBorderStyle}" Padding="8">
         <Grid ColumnSpacing="8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />

@@ -436,6 +436,9 @@ namespace GalExcleTools
             // 异步流程随时可能弹第一条。
             TipToast.Attach(RootGrid);
 
+            // 素材库的路径栏和 ⚙ 画在同一条边框里，所以关掉 PathBar 自带的框。
+            AssetLibraryPathBar?.SetChromeVisible(false);
+
             // 状态条垫片：把旧代码里的 .Text 赋值转成轻提示（TextBlock 没有 TextChanged 事件）。
             HookAssetLibraryStatusShim();
 
