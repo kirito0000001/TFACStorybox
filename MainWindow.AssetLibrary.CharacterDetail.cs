@@ -167,6 +167,15 @@ namespace GalExcleTools
                 };
             }
 
+            // 底部状态条这一段在详情打开时用不上（它显示的是分类层的信息），
+            // 收掉它，预览就能一直落到窗口底部，不会留一条黑边。
+            AssetLibraryDetailStatusBorder.Visibility = Visibility.Collapsed;
+            // 行距也收掉：状态条隐藏后它还留着 16px 的空档，预览会在底部凭空断开。
+            if (AssetLibraryDetailPage is { } page)
+            {
+                page.RowSpacing = 0;
+            }
+
             ApplyCharacterDetailInset();
             CharacterDetailPage.Visibility = Visibility.Visible;
             AppendLog(LogKind.User, $"打开角色详情：{character.Name}");
@@ -878,7 +887,8 @@ namespace GalExcleTools
                 return;
             }
 
-            var inset = AssetBrowserHost.ChromeHeight + 8;
+            // 让出路径栏高度，再留 4px 呼吸缝。
+            var inset = AssetBrowserHost.ChromeHeight + 4;
             CharacterDetailPage.Margin = new Thickness(0, inset, 0, 0);
         }
 
@@ -889,6 +899,12 @@ namespace GalExcleTools
         private void HideCharacterDetailPanel()
         {
             CharacterDetailPage.Visibility = Visibility.Collapsed;
+            AssetLibraryDetailStatusBorder.Visibility = Visibility.Visible;
+            if (AssetLibraryDetailPage is { } page)
+            {
+                page.RowSpacing = 16;
+            }
+
             ResetCharacterDetailLoadCancellation();
 
             if (AssetBrowserHost is null)
