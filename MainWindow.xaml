@@ -2420,7 +2420,9 @@
             Grid.Row="1"
             Canvas.ZIndex="90"
             Visibility="Collapsed">
-            <Rectangle Fill="#C21B1140" />
+            <!-- 紫底用 #4B2A85（Ultraviolet 那套的 Indigo 一脉），65% 不透明 ——
+                 原来的 #1B1140 太深又偏蓝，看着像蓝色玻璃。 -->
+            <Rectangle Fill="#A64B2A85" />
 
             <!--
                 流光用 Composition 画，不用 Storyboard：

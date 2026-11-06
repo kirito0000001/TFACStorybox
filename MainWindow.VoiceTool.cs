@@ -1122,13 +1122,13 @@ namespace GalExcleTools
                 _voiceBusyOverlayActive = true;
                 VoiceBusyOverlay.Visibility = Visibility.Visible;
                 StartVoiceBusyAnimation();
-                FadeVoiceBusyOverlay(1f, 220, collapseAfter: false);
+                FadeVoiceBusyOverlay(1f, 450, collapseAfter: false);
                 return;
             }
 
             _voiceBusyOverlayActive = false;
             StopVoiceBusyAnimation();
-            FadeVoiceBusyOverlay(0f, 180, collapseAfter: true);
+            FadeVoiceBusyOverlay(0f, 300, collapseAfter: true);
         }
 
         /// <summary>
@@ -1222,22 +1222,24 @@ namespace GalExcleTools
             _voiceBusyStoryboard?.Stop();
             _voiceBusyStoryboard = null;
 
-            _voiceBusySheenVisual?.StopAnimation("Offset");
-            _voiceBusySheenVisual = null;
+            if (_voiceBusySheenVisual?.Brush is Microsoft.UI.Composition.CompositionLinearGradientBrush brush)
+            {
+                brush.StopAnimation("StartPoint");
+                brush.StopAnimation("EndPoint");
+            }
         }
 
         /// <summary>
-        /// 背景流光：一道窄的蓝色高光，斜着从左上扫到右下，7 秒一趟。
+        /// 背景流光。参数对齐两处现成实现：
+        /// · 微软 Fluent 的 Shimmer：CompositionLinearGradientBrush + 动 StartPoint/EndPoint，
+        ///   视觉不放大、强度只有 3~6%；
+        /// · CSS 的 shine sweep：gradient(120deg, transparent 30%, 亮 50%, transparent 70%)。
         ///
-        /// 关键在"用 Composition 而不是 Storyboard"：
-        /// · 渐变画笔是 CompositionLinearGradientBrush，位移是 Vector3KeyFrameAnimation，
-        ///   两者都在合成器线程跑 —— 主线程被 fft/rff 拖住时也不掉帧；
-        /// · Storyboard 版的 Opacity/TranslateTransform 是"依赖动画"，
-        ///   必须 EnableDependentAnimation，实际是主线程逐帧算的，看起来就一顿一顿。
-        ///
-        /// 形状上做了两件事让光更"贵"：
-        /// · 高光核很窄（0.5 处 ±2%），两侧留长而软的过渡，不是一块灰板；
-        /// · 视觉本身比容器大很多并旋转 18°，扫过时看不到矩形的边。
+        /// 另外解决三个"只有第一次才出现"的毛病：
+        /// 1. 视觉**只建一次**并缓存 —— 每次重建会卡一帧，连点两次特别明显；
+        /// 2. 首次显示时容器还没布局，ActualWidth 是 0，视觉会变成 1×1 看不见，
+        ///    所以先挂 SizeChanged，等真实尺寸到了再建；
+        /// 3. 窗口拉伸时按新尺寸更新视觉。
         /// </summary>
         private void StartVoiceBusySheen()
         {
@@ -1246,18 +1248,58 @@ namespace GalExcleTools
                 return;
             }
 
-            var compositor = Compositor;
+            if (VoiceBusySheenHost.ActualWidth < 2 || VoiceBusySheenHost.ActualHeight < 2)
+            {
+                VoiceBusySheenHost.SizeChanged -= VoiceBusySheenHost_SizeChanged;
+                VoiceBusySheenHost.SizeChanged += VoiceBusySheenHost_SizeChanged;
+                return;
+            }
 
-            // 视觉 = 容器尺寸，**一点不放大**。上一版放大到 2.2 倍，
-            // 于是整个屏幕都落在渐变的斜坡上，扫过去就是一片带硬边的斜墙。
-            var width = (float)Math.Max(VoiceBusySheenHost.ActualWidth, 1);
-            var height = (float)Math.Max(VoiceBusySheenHost.ActualHeight, 1);
+            EnsureVoiceBusySheenVisual();
+        }
+
+        private void VoiceBusySheenHost_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (VoiceBusySheenHost.ActualWidth < 2 || VoiceBusySheenHost.ActualHeight < 2)
+            {
+                return;
+            }
+
+            VoiceBusySheenHost.SizeChanged -= VoiceBusySheenHost_SizeChanged;
+
+            if (_voiceBusySheenVisual is null)
+            {
+                EnsureVoiceBusySheenVisual();
+                return;
+            }
+
+            _voiceBusySheenVisual.Size = new System.Numerics.Vector2(
+                (float)VoiceBusySheenHost.ActualWidth,
+                (float)VoiceBusySheenHost.ActualHeight);
+        }
+
+        private void EnsureVoiceBusySheenVisual()
+        {
+            var width = (float)Math.Max(VoiceBusySheenHost.ActualWidth, 2);
+            var height = (float)Math.Max(VoiceBusySheenHost.ActualHeight, 2);
+
+            if (_voiceBusySheenVisual is not null)
+            {
+                _voiceBusySheenVisual.Size = new System.Numerics.Vector2(width, height);
+                if (_voiceBusySheenVisual.Brush is Microsoft.UI.Composition.CompositionLinearGradientBrush cached)
+                {
+                    StartVoiceBusySheenAnimation(cached);
+                }
+
+                return;
+            }
+
+            var compositor = Compositor;
 
             var brush = compositor.CreateLinearGradientBrush();
             brush.MappingMode = Microsoft.UI.Composition.CompositionMappingMode.Relative;
 
-            // 斜轴：X 跨 2 个单位、Y 跨 1.1 个单位 ≈ CSS 的 120deg。
-            // 相对映射，容器多大都不会变形。
+            // 斜轴：X 跨 2 个单位、Y 跨 1.1 个单位 ≈ CSS 的 120deg。相对映射，容器多大都不变形。
             brush.StartPoint = new System.Numerics.Vector2(-3f, -0.55f);
             brush.EndPoint = new System.Numerics.Vector2(-1f, 0.55f);
 
@@ -1265,19 +1307,16 @@ namespace GalExcleTools
             {
                 var stop = compositor.CreateColorGradientStop();
                 stop.Offset = offset;
-                // #4C8DFF：偏冷的蓝，压在紫底上会显青，不会发灰。
-                stop.Color = Windows.UI.Color.FromArgb(alpha, 0x4C, 0x8D, 0xFF);
+                // #B040FF（Ultraviolet 调色板的 Electric Purple）：
+                // 压在紫底上会提亮成淡紫，不像蓝光那样发灰。
+                stop.Color = Windows.UI.Color.FromArgb(alpha, 0xB0, 0x40, 0xFF);
                 brush.ColorStops.Add(stop);
             }
 
-            // 光带 = 0.30 ~ 0.70，占渐变跨度 40%（对齐 CSS 的 30% / 50% / 70%）。
-            // 峰值 alpha 只有 0x1C（约 11%）—— Fluent 的 Shimmer 更低（3~6%），
-            // 我们压在深紫底上，取中间值。
+            // 只有三个有效色标，两端各补一个全透明防止露边。
             AddStop(0.00f, 0x00);
             AddStop(0.30f, 0x00);
-            AddStop(0.40f, 0x0A);
-            AddStop(0.50f, 0x1C);
-            AddStop(0.60f, 0x0A);
+            AddStop(0.50f, 0x26);
             AddStop(0.70f, 0x00);
             AddStop(1.00f, 0x00);
 
@@ -1286,24 +1325,31 @@ namespace GalExcleTools
             visual.Size = new System.Numerics.Vector2(width, height);
             ElementCompositionPreview.SetElementChildVisual(VoiceBusySheenHost, visual);
 
-            // 两个端点**同步平移** +4 单位 X：光带从容器左外侧走到右外侧，6 秒一趟。
-            // 跨度不变 → 带宽恒定；端点始终在屏幕外 → 永远看不到矩形的边。
-            // 这也是 Fluent Shimmer 的做法：动渐变端点，不动视觉。
+            _voiceBusySheenVisual = visual;
+            StartVoiceBusySheenAnimation(brush);
+        }
+
+        /// <summary>
+        /// 两端点同步平移 +4 单位 X：跨度不变，光带宽度恒定；起点终点都在容器外，
+        /// 所以永远看不到矩形边。8 秒一趟 —— 比 Shimmer 的 1.6s 慢，它是加载指示，这里只是氛围。
+        /// </summary>
+        private void StartVoiceBusySheenAnimation(Microsoft.UI.Composition.CompositionLinearGradientBrush brush)
+        {
+            var compositor = Compositor;
+
             var startMove = compositor.CreateVector2KeyFrameAnimation();
             startMove.InsertKeyFrame(1f, new System.Numerics.Vector2(1f, -0.55f),
                 compositor.CreateLinearEasingFunction());
-            startMove.Duration = TimeSpan.FromSeconds(6);
+            startMove.Duration = TimeSpan.FromSeconds(8);
             startMove.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
             brush.StartAnimation("StartPoint", startMove);
 
             var endMove = compositor.CreateVector2KeyFrameAnimation();
             endMove.InsertKeyFrame(1f, new System.Numerics.Vector2(3f, 0.55f),
                 compositor.CreateLinearEasingFunction());
-            endMove.Duration = TimeSpan.FromSeconds(6);
+            endMove.Duration = TimeSpan.FromSeconds(8);
             endMove.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
             brush.StartAnimation("EndPoint", endMove);
-
-            _voiceBusySheenVisual = visual;
         }
 
         // ---------- 批量选择 ----------
