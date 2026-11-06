@@ -32,7 +32,8 @@ public sealed partial class AssetBrowser : UserControl
     /// 详情宿主：路径栏下方那一片，和卡片区重叠。
     /// 页面把"角色详情"这类子面板塞进来，就不用自己算"路径栏多高"。
     /// </summary>
-    public Grid DetailHost => DetailHostGrid;
+    // 名字不能叫 DetailHost：x:Name="DetailHost" 生成的字段已经占用了这个名字。
+    public Grid DetailHostPanel => DetailHost;
 
     /// <summary>拖拽重排的接线处（CanDragItems / DragItemsStarting / DragItemsCompleted 都挂它）。</summary>
     public GridView CardsHost => CardGrid;
