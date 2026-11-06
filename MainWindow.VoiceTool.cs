@@ -1097,7 +1097,14 @@ namespace GalExcleTools
         private Storyboard? _voiceBusyStoryboard;
 
         /// <summary>流光那一层的合成视觉（Composition 画，不是 XAML 图形）。</summary>
-        private Microsoft.UI.Composition.SpriteVisual? _voiceBusySheenVisual;
+        private Microsoft.UI.Composition.ContainerVisual? _voiceBusySheenVisual;
+
+        private List<Microsoft.UI.Composition.CompositionRadialGradientBrush> _voiceBusyAuroraBrushes = [];
+
+        /// <summary>每团色斑的运动参数。复用时按这套原样重建动画，
+        /// 否则第一次和之后几次的观感会不一致。</summary>
+        private List<(System.Numerics.Vector2 From, System.Numerics.Vector2 Via, System.Numerics.Vector2 To, int Seconds, bool Alternate)>
+            _voiceBusyAuroraMotions = [];
 
         private bool _voiceBusyOverlayActive;
 
@@ -1222,24 +1229,25 @@ namespace GalExcleTools
             _voiceBusyStoryboard?.Stop();
             _voiceBusyStoryboard = null;
 
-            if (_voiceBusySheenVisual?.Brush is Microsoft.UI.Composition.CompositionLinearGradientBrush brush)
+            foreach (var brush in _voiceBusyAuroraBrushes)
             {
-                brush.StopAnimation("StartPoint");
-                brush.StopAnimation("EndPoint");
+                brush.StopAnimation("EllipseCenter");
             }
         }
 
         /// <summary>
-        /// 背景流光。参数对齐两处现成实现：
-        /// · 微软 Fluent 的 Shimmer：CompositionLinearGradientBrush + 动 StartPoint/EndPoint，
-        ///   视觉不放大、强度只有 3~6%；
-        /// · CSS 的 shine sweep：gradient(120deg, transparent 30%, 亮 50%, transparent 70%)。
+        /// 背景极光：三团大而柔的色斑各自漂移，没有方向感、没有条带。
         ///
-        /// 另外解决三个"只有第一次才出现"的毛病：
-        /// 1. 视觉**只建一次**并缓存 —— 每次重建会卡一帧，连点两次特别明显；
-        /// 2. 首次显示时容器还没布局，ActualWidth 是 0，视觉会变成 1×1 看不见，
-        ///    所以先挂 SizeChanged，等真实尺寸到了再建；
-        /// 3. 窗口拉伸时按新尺寸更新视觉。
+        /// 为什么不是"一道光扫过"：线性渐变的扫描无论怎么调，边界都会读成"一条东西"；
+        /// 极光靠的是**径向渐变 + 不同周期**，三团错开走，永远不同步，所以看不出周期。
+        ///
+        /// 颜色取自 Ultraviolet 调色板：Pure Violet / Electric Purple / Lavender Glow，
+        /// 再掺一个蓝，压在一起就是那种紫里泛青的夜空感。
+        ///
+        /// 三个"只有第一次才出现"的毛病也在这里处理：
+        /// 1. 首次显示时容器还没布局，ActualWidth = 0 → 先挂 SizeChanged 等尺寸；
+        /// 2. 每次重建视觉会卡一帧 → 只建一次并缓存；
+        /// 3. 窗口拉伸时按新尺寸更新容器。
         /// </summary>
         private void StartVoiceBusySheen()
         {
@@ -1285,71 +1293,120 @@ namespace GalExcleTools
 
             if (_voiceBusySheenVisual is not null)
             {
+                // 复用：只把尺寸和动画重新挂上，重建会卡一帧。
                 _voiceBusySheenVisual.Size = new System.Numerics.Vector2(width, height);
-                if (_voiceBusySheenVisual.Brush is Microsoft.UI.Composition.CompositionLinearGradientBrush cached)
-                {
-                    StartVoiceBusySheenAnimation(cached);
-                }
-
+                StartAuroraAnimations(_voiceBusyAuroraBrushes);
                 return;
             }
 
             var compositor = Compositor;
 
-            var brush = compositor.CreateLinearGradientBrush();
-            brush.MappingMode = Microsoft.UI.Composition.CompositionMappingMode.Relative;
+            // 一个 ContainerVisual 挂三团：XAML 元素只能有一个 child visual。
+            var container = compositor.CreateContainerVisual();
+            container.Size = new System.Numerics.Vector2(width, height);
+            ElementCompositionPreview.SetElementChildVisual(VoiceBusySheenHost, container);
 
-            // 斜轴：X 跨 2 个单位、Y 跨 1.1 个单位 ≈ CSS 的 120deg。相对映射，容器多大都不变形。
-            brush.StartPoint = new System.Numerics.Vector2(-3f, -0.55f);
-            brush.EndPoint = new System.Numerics.Vector2(-1f, 0.55f);
+            var brushes = new List<Microsoft.UI.Composition.CompositionRadialGradientBrush>();
 
-            void AddStop(float offset, byte alpha)
+            void AddBlob(Windows.UI.Color core, float radius, System.Numerics.Vector2 from, System.Numerics.Vector2 via, System.Numerics.Vector2 to, int seconds, bool alternate)
             {
-                var stop = compositor.CreateColorGradientStop();
-                stop.Offset = offset;
-                // #B040FF（Ultraviolet 调色板的 Electric Purple）：
-                // 压在紫底上会提亮成淡紫，不像蓝光那样发灰。
-                stop.Color = Windows.UI.Color.FromArgb(alpha, 0xB0, 0x40, 0xFF);
-                brush.ColorStops.Add(stop);
+                var brush = compositor.CreateRadialGradientBrush();
+                brush.MappingMode = Microsoft.UI.Composition.CompositionMappingMode.Relative;
+                brush.EllipseCenter = from;
+                brush.EllipseRadius = new System.Numerics.Vector2(radius, radius);
+
+                void Stop(float offset, byte alpha)
+                {
+                    var gradientStop = compositor.CreateColorGradientStop();
+                    gradientStop.Offset = offset;
+                    gradientStop.Color = Windows.UI.Color.FromArgb(alpha, core.R, core.G, core.B);
+                    brush.ColorStops.Add(gradientStop);
+                }
+
+                // 中心亮、边缘全透明：半径那圈直接归零，才不会有"圆盘边"。
+                Stop(0.00f, core.A);
+                Stop(0.45f, (byte)(core.A * 0.55));
+                Stop(1.00f, 0x00);
+
+                var visual = compositor.CreateSpriteVisual();
+                visual.Brush = brush;
+                visual.Size = new System.Numerics.Vector2(width, height);
+                container.Children.InsertAtTop(visual);
+
+                var move = compositor.CreateVector2KeyFrameAnimation();
+                move.InsertKeyFrame(0.00f, from);
+                move.InsertKeyFrame(1.00f, to);
+                move.Duration = TimeSpan.FromSeconds(seconds);
+                move.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
+                if (alternate)
+                {
+                    move.Direction = Microsoft.UI.Composition.AnimationDirection.Alternate;
+                }
+
+                // 缓入缓出：极光是漂，不是匀速平移。
+                var easing = compositor.CreateCubicBezierEasingFunction(
+                    new System.Numerics.Vector2(0.4f, 0f),
+                    new System.Numerics.Vector2(0.6f, 1f));
+                move.InsertKeyFrame(0.45f, via, easing);
+
+                brush.StartAnimation("EllipseCenter", move);
+                brushes.Add(brush);
+                _voiceBusyAuroraMotions.Add((from, via, to, seconds, alternate));
             }
 
-            // 只有三个有效色标，两端各补一个全透明防止露边。
-            AddStop(0.00f, 0x00);
-            AddStop(0.30f, 0x00);
-            AddStop(0.50f, 0x26);
-            AddStop(0.70f, 0x00);
-            AddStop(1.00f, 0x00);
+            _voiceBusyAuroraMotions.Clear();
 
-            var visual = compositor.CreateSpriteVisual();
-            visual.Brush = brush;
-            visual.Size = new System.Numerics.Vector2(width, height);
-            ElementCompositionPreview.SetElementChildVisual(VoiceBusySheenHost, visual);
+            // 颜色与周期都错开：三个不同步，眼睛就看不出循环。
+            AddBlob(Windows.UI.Color.FromArgb(0x34, 0x7B, 0x00, 0xD4), 0.62f,
+                new System.Numerics.Vector2(0.22f, 0.28f),
+                new System.Numerics.Vector2(0.45f, 0.55f),
+                new System.Numerics.Vector2(0.30f, 0.80f), 26, true);
 
-            _voiceBusySheenVisual = visual;
-            StartVoiceBusySheenAnimation(brush);
+            AddBlob(Windows.UI.Color.FromArgb(0x2A, 0x3B, 0x82, 0xF6), 0.70f,
+                new System.Numerics.Vector2(0.82f, 0.34f),
+                new System.Numerics.Vector2(0.55f, 0.62f),
+                new System.Numerics.Vector2(0.78f, 0.86f), 34, false);
+
+            AddBlob(Windows.UI.Color.FromArgb(0x22, 0xE0, 0xA0, 0xFF), 0.52f,
+                new System.Numerics.Vector2(0.50f, 0.72f),
+                new System.Numerics.Vector2(0.25f, 0.45f),
+                new System.Numerics.Vector2(0.66f, 0.22f), 19, true);
+
+            _voiceBusyAuroraBrushes = brushes;
+            _voiceBusySheenVisual = container;
         }
 
-        /// <summary>
-        /// 两端点同步平移 +4 单位 X：跨度不变，光带宽度恒定；起点终点都在容器外，
-        /// 所以永远看不到矩形边。8 秒一趟 —— 比 Shimmer 的 1.6s 慢，它是加载指示，这里只是氛围。
-        /// </summary>
-        private void StartVoiceBusySheenAnimation(Microsoft.UI.Composition.CompositionLinearGradientBrush brush)
+        private void StartAuroraAnimations(List<Microsoft.UI.Composition.CompositionRadialGradientBrush> brushes)
         {
+            // 复用路径：视觉还在，动画在隐藏时被停掉了，这里按原参数重建一遍，
+            // 保证"第一次"和"之后几次"的观感完全一致。
+            if (brushes.Count == 0 || _voiceBusyAuroraMotions.Count != brushes.Count)
+            {
+                return;
+            }
+
             var compositor = Compositor;
+            var easing = compositor.CreateCubicBezierEasingFunction(
+                new System.Numerics.Vector2(0.4f, 0f),
+                new System.Numerics.Vector2(0.6f, 1f));
 
-            var startMove = compositor.CreateVector2KeyFrameAnimation();
-            startMove.InsertKeyFrame(1f, new System.Numerics.Vector2(1f, -0.55f),
-                compositor.CreateLinearEasingFunction());
-            startMove.Duration = TimeSpan.FromSeconds(8);
-            startMove.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
-            brush.StartAnimation("StartPoint", startMove);
+            for (var index = 0; index < brushes.Count; index++)
+            {
+                var (from, via, to, seconds, alternate) = _voiceBusyAuroraMotions[index];
 
-            var endMove = compositor.CreateVector2KeyFrameAnimation();
-            endMove.InsertKeyFrame(1f, new System.Numerics.Vector2(3f, 0.55f),
-                compositor.CreateLinearEasingFunction());
-            endMove.Duration = TimeSpan.FromSeconds(8);
-            endMove.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
-            brush.StartAnimation("EndPoint", endMove);
+                var move = compositor.CreateVector2KeyFrameAnimation();
+                move.InsertKeyFrame(0.00f, from);
+                move.InsertKeyFrame(0.45f, via, easing);
+                move.InsertKeyFrame(1.00f, to, easing);
+                move.Duration = TimeSpan.FromSeconds(seconds);
+                move.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
+                if (alternate)
+                {
+                    move.Direction = Microsoft.UI.Composition.AnimationDirection.Alternate;
+                }
+
+                brushes[index].StartAnimation("EllipseCenter", move);
+            }
         }
 
         // ---------- 批量选择 ----------
