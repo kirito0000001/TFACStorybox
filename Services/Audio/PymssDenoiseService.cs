@@ -43,6 +43,17 @@ internal sealed class PymssDenoiseService
 
     private const double WorkingLufs = -18.0;
 
+    /// <summary>
+    /// 混回原始的比例（0 = 纯去噪，1 = 纯原始）。
+    ///
+    /// UVR 是把"噪声 + 瞬态"一起拿走的 —— 底噪没了，但字头、气口、齿音的边缘
+    /// 也被抹平，听感是"黏糊了一层"。用户 2026-11-06 实际 A/B 后定为 0.25：
+    /// 混回四分之一原始，字头回来了，嘶声回升约 2 dB，仍可接受。
+    ///
+    /// 这是取舍不是优化：混得越多越清晰、底噪也越多，没有两全。
+    /// </summary>
+    private const double OriginalBlend = 0.25;
+
     public static string? LocateCli() => CandidateCli.FirstOrDefault(File.Exists);
 
     public static string? LocateModelDir() => CandidateModelDirs.FirstOrDefault(Directory.Exists);
@@ -132,6 +143,17 @@ internal sealed class PymssDenoiseService
             try
             {
                 var temp = source + ".denoised.wav";
+
+                if (OriginalBlend > 0.001 &&
+                    await TryBlendWithOriginalAsync(ffmpegPath, clean, source, temp, cancellationToken)
+                        .ConfigureAwait(false))
+                {
+                    File.Move(temp, source, overwrite: true);
+                    succeeded.Add(source);
+                    continue;
+                }
+
+                // 混音失败（量不出响度等）就退回纯去噪结果，不因小失大。
                 File.Copy(clean, temp, overwrite: true);
                 File.Move(temp, source, overwrite: true);
                 succeeded.Add(source);
@@ -145,6 +167,44 @@ internal sealed class PymssDenoiseService
         onProgress?.Invoke(1d, $"回写完成：{succeeded.Count} 条成功"
             + (failed.Count > 0 ? $"，{failed.Count} 条失败" : string.Empty));
         return new DenoiseBatchResult(succeeded, failed);
+    }
+
+    /// <summary>
+    /// 把去噪结果和**原始文件**按 <see cref="OriginalBlend"/> 混合。
+    ///
+    /// 两边响度差得很远（去噪结果来自 -18 LUFS 的临时副本，原始是自然电平），
+    /// 直接 amix 等于在调音量，所以先把原始拉到与去噪结果同级再混。
+    /// </summary>
+    private static async Task<bool> TryBlendWithOriginalAsync(
+        string ffmpegPath,
+        string cleanPath,
+        string originalPath,
+        string outputPath,
+        CancellationToken cancellationToken)
+    {
+        var cleanLufs = await MeasureLufsAsync(ffmpegPath, cleanPath, cancellationToken).ConfigureAwait(false);
+        var originalLufs = await MeasureLufsAsync(ffmpegPath, originalPath, cancellationToken).ConfigureAwait(false);
+        if (double.IsNaN(cleanLufs) || double.IsNaN(originalLufs))
+        {
+            return false;
+        }
+
+        var gain = Math.Clamp(cleanLufs - originalLufs, -30d, 30d);
+        var wet = 1d - OriginalBlend;
+
+        var filter = $"[1:a]volume={gain.ToString("0.0", CultureInfo.InvariantCulture)}dB[dry];"
+            + $"[0:a][dry]amix=inputs=2:weights='{wet.ToString("0.00", CultureInfo.InvariantCulture)} "
+            + $"{OriginalBlend.ToString("0.00", CultureInfo.InvariantCulture)}':normalize=0";
+
+        await RunFfmpegAsync(
+            ffmpegPath,
+            ["-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+             "-i", cleanPath, "-i", originalPath,
+             "-filter_complex", filter,
+             "-ar", "48000", "-c:a", "pcm_s16le", outputPath],
+            cancellationToken).ConfigureAwait(false);
+
+        return File.Exists(outputPath) && new FileInfo(outputPath).Length > 1024;
     }
 
     private static async Task<int> RunInferAsync(
