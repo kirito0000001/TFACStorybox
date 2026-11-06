@@ -655,6 +655,12 @@ public sealed partial class MainWindow
         //   左键「返回」= 回素材主页面（库列表）；
         //   右键「上一层」= 只在当前库里往上退一级。
         // 之前两个按钮都接 ReturnToAssetCategoryLayer，等于重复。
+        // 层级：图层浏览 → 角色详情 → 分类层 → 库列表，一次退一层。
+        if (TryCloseCharacterLayerBrowse())
+        {
+            return;
+        }
+
         if (TryCloseCharacterDetailOnBack())
         {
             return;
@@ -693,6 +699,11 @@ public sealed partial class MainWindow
 
     private void AssetBrowser_UpRequested(object? sender, EventArgs e)
     {
+        if (TryCloseCharacterLayerBrowse())
+        {
+            return;
+        }
+
         if (TryCloseCharacterDetailOnBack())
         {
             return;

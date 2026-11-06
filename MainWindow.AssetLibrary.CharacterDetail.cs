@@ -155,6 +155,9 @@ namespace GalExcleTools
                 : GetCharacterFolderPath(_currentAssetLibrary);
             AssetBrowserHost?.SetCardsVisible(false);
             SetAssetLibraryPath($"{_characterDetailReturnPath}\\{character.Name}（{character.Code}）");
+            // 重新进详情时清掉"正在浏览图层"的状态，否则返回逻辑会以为还在浏览层。
+            _browsingCharacterLayer = null;
+
             // 顶部那行是页面级的固定路径栏，详情只占下面的内容区 —— 不需要让位了。
             _characterDetailAnimToken++;
             CharacterDetailPage.Visibility = Visibility.Visible;
@@ -314,19 +317,20 @@ namespace GalExcleTools
 
         private void UpdateCharacterLayerExpanderHeader(CharacterLayerKind layerKind, int count)
         {
+            // 展开器已折叠（下一轮删），这里同步更新的是**按钮**上的文字。
             switch (layerKind)
             {
                 case CharacterLayerKind.Cloth:
-                    CharacterClothExpander.Header = $"服装 DN_Cloth [数量：{count}]";
+                    SetCharacterSettingButton(CharacterClothButton, "服装 DN_Cloth", $"{count} 项");
                     break;
                 case CharacterLayerKind.Face:
-                    CharacterFaceExpander.Header = $"表情 FC_Face [数量：{count}]";
+                    SetCharacterSettingButton(CharacterFaceButton, "表情 FC_Face", $"{count} 项");
                     break;
                 case CharacterLayerKind.Adorn:
-                    CharacterAdornExpander.Header = $"装饰 AD_Adorn [数量：{count}]";
+                    SetCharacterSettingButton(CharacterAdornButton, "装饰 AD_Adorn", $"{count} 项");
                     break;
                 case CharacterLayerKind.Vfx:
-                    CharacterVfxExpander.Header = $"VFX 滤镜 [数量：{count}]";
+                    SetCharacterSettingButton(CharacterVfxButton, "VFX 滤镜", $"{count} 项");
                     break;
             }
         }
@@ -353,6 +357,65 @@ namespace GalExcleTools
                 CharacterLayerKind.Vfx => CharacterVfxExpander.IsExpanded,
                 _ => false
             };
+        }
+
+        /// <summary>当前正在浏览哪个图层的卡片（null = 不在浏览层）。</summary>
+        private CharacterLayerKind? _browsingCharacterLayer;
+
+        private string _layerBrowseReturnPath = string.Empty;
+
+        private void CharacterClothButton_Click(object sender, RoutedEventArgs e) => OpenCharacterLayerBrowse(CharacterLayerKind.Cloth);
+
+        private void CharacterFaceButton_Click(object sender, RoutedEventArgs e) => OpenCharacterLayerBrowse(CharacterLayerKind.Face);
+
+        private void CharacterAdornButton_Click(object sender, RoutedEventArgs e) => OpenCharacterLayerBrowse(CharacterLayerKind.Adorn);
+
+        private void CharacterVfxButton_Click(object sender, RoutedEventArgs e) => OpenCharacterLayerBrowse(CharacterLayerKind.Vfx);
+
+        /// <summary>
+        /// 进入某个图层的浏览层：卡片网格复用背景图那套（缩略图、点击查看、右键菜单），
+        /// 卡片内容由 <see cref="CreateCharacterImageLayerCard"/> 生成 —— 与原来展开器里是**同一批卡片**，
+        /// 所以交互（查看 / 改备注 / 替换 / 删除 / 设置预览）一行都不用重写。
+        /// </summary>
+        private void OpenCharacterLayerBrowse(CharacterLayerKind layerKind)
+        {
+            if (_currentCharacter is null || AssetBrowserHost is null)
+            {
+                return;
+            }
+
+            var folderPath = CharacterLayerAssetService.GetCharacterFolderPath(_currentCharacter, layerKind);
+            Directory.CreateDirectory(folderPath);
+            var imagePaths = CharacterLayerAssetService.GetImagePaths(folderPath);
+
+            _browsingCharacterLayer = layerKind;
+            _layerBrowseReturnPath = _currentAssetLibraryPath;
+
+            CharacterDetailPage.Visibility = Visibility.Collapsed;
+            AssetBrowserHost.SetCards(imagePaths.Select(path => CreateCharacterImageLayerCard(path, layerKind)));
+            AssetBrowserHost.SetCardsVisible(true);
+            SetAssetLibraryPath(folderPath);
+            SetAssetLibraryUpEnabled(true);
+            PlayLayerSlide(AssetBrowserHost, forward: true);
+
+            AppendLog(LogKind.User, $"查看图层：{layerKind}（{imagePaths.Count} 项）");
+        }
+
+        /// <summary>从图层浏览层退回角色详情。返回 true 表示这次返回被这里消费掉了。</summary>
+        private bool TryCloseCharacterLayerBrowse()
+        {
+            if (_browsingCharacterLayer is null || _currentCharacter is null)
+            {
+                return false;
+            }
+
+            _browsingCharacterLayer = null;
+            AssetBrowserHost?.SetCardsVisible(false);
+            SetAssetLibraryPath(_layerBrowseReturnPath);
+
+            CharacterDetailPage.Visibility = Visibility.Visible;
+            PlayCharacterDetailEntrance();
+            return true;
         }
 
         private GridViewItem CreateCharacterImageLayerCard(string imagePath, CharacterLayerKind layerKind)

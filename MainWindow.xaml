@@ -1303,7 +1303,29 @@
                                         </StackPanel>
                                     </Border>
 
-                                <Expander x:Name="CharacterClothExpander" Header="服装 DN_Cloth">
+                                <!--
+                                    四个图层改成**按钮式**：点击进入该图层的浏览层（复用卡片网格）。
+                                    原来的 Expander 先折叠保留 —— 里面的 GridView 还被加载逻辑引用着，
+                                    等浏览层的拖入导入补齐后再整段删除（2026-11-06）。
+                                -->
+                                <Button
+                                    x:Name="CharacterClothButton"
+                                    Style="{StaticResource CharacterSettingButtonStyle}"
+                                    Click="CharacterClothButton_Click" />
+                                <Button
+                                    x:Name="CharacterFaceButton"
+                                    Style="{StaticResource CharacterSettingButtonStyle}"
+                                    Click="CharacterFaceButton_Click" />
+                                <Button
+                                    x:Name="CharacterAdornButton"
+                                    Style="{StaticResource CharacterSettingButtonStyle}"
+                                    Click="CharacterAdornButton_Click" />
+                                <Button
+                                    x:Name="CharacterVfxButton"
+                                    Style="{StaticResource CharacterSettingButtonStyle}"
+                                    Click="CharacterVfxButton_Click" />
+
+                                <Expander x:Name="CharacterClothExpander" Visibility="Collapsed" Header="服装 DN_Cloth">
                                     <StackPanel
                                         x:Name="CharacterClothDropZone"
                                         Spacing="8"
@@ -1336,7 +1358,7 @@
                                             SelectionMode="None" />
                                     </StackPanel>
                                 </Expander>
-                                <Expander x:Name="CharacterFaceExpander" Header="表情 FC_Face">
+                                <Expander x:Name="CharacterFaceExpander" Visibility="Collapsed" Header="表情 FC_Face">
                                     <StackPanel
                                         x:Name="CharacterFaceDropZone"
                                         Spacing="8"
@@ -1369,7 +1391,7 @@
                                             SelectionMode="None" />
                                     </StackPanel>
                                 </Expander>
-                                <Expander x:Name="CharacterAdornExpander" Header="装饰 AD_Adorn">
+                                <Expander x:Name="CharacterAdornExpander" Visibility="Collapsed" Header="装饰 AD_Adorn">
                                     <StackPanel
                                         x:Name="CharacterAdornDropZone"
                                         Spacing="8"
@@ -1402,7 +1424,7 @@
                                             SelectionMode="None" />
                                     </StackPanel>
                                 </Expander>
-                                <Expander x:Name="CharacterVfxExpander" Header="VFX 滤镜">
+                                <Expander x:Name="CharacterVfxExpander" Visibility="Collapsed" Header="VFX 滤镜">
                                     <StackPanel Spacing="8">
                                         <TextBlock Text="滤镜默认全服装可用。这里作为索引显示，不打开详情页。" Style="{StaticResource SubtleTextStyle}" />
                                         <GridView x:Name="CharacterVfxGridView" Padding="14,8,24,16" HorizontalAlignment="Stretch" SelectionMode="None" />
