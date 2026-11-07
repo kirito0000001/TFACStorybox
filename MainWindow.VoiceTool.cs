@@ -24,7 +24,7 @@ namespace GalExcleTools
 {
     /// <summary>
     /// 文本语音页的「响度规范」两块：
-    /// · <b>检查DB规范</b> —— 只量不改，按游戏语音口径（−12 LUFS ±2、真峰值 ≤ −3 dBTP）
+    /// · <b>检查DB规范</b> —— 只量不改，按游戏音频口径（−18 LUFS ±2、真峰值 ≤ −1 dBTP）
     ///   把当前章节的语音判成「达标 / 贴边 / 超差 / 峰值超」，并额外报同类离散度；
     /// · <b>一键规整语音</b> —— 两遍 loudnorm 就地拉平，<b>先整章备份再动手</b>。
     ///
@@ -971,7 +971,7 @@ namespace GalExcleTools
                 new TextBlock
                 {
                     Text = "高通去隆隆 · 250Hz 减浑浊 · 3kHz 提贴脸 · 去齿音 · 3:1 压缩，"
-                        + "最后仍归一到 -12 LUFS / -3 dBTP。",
+                        + "最后仍归一到 -18 LUFS / -1 dBTP。",
                     TextWrapping = TextWrapping.Wrap,
                     Foreground = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush
                 });
@@ -1541,172 +1541,10 @@ namespace GalExcleTools
             File.Move(tempPath, targetPath, overwrite: true);
         }
 
-        /// <summary>跑一次 ffmpeg，失败把 stderr 抛出来。</summary>
-        private static async Task RunFfmpegAsync(
-            string ffmpegPath,
-            string[] arguments,
-            CancellationToken cancellationToken)
-        {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = ffmpegPath,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            foreach (var argument in arguments)
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-
-            using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("ffmpeg 启动失败");
-
-            // stderr 必须边跑边读：等退出再 ReadToEnd 会因为缓冲区满而卡死。
-            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            var errorText = await errorTask.ConfigureAwait(false);
-
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException(errorText.Trim());
-            }
-        }
-
-        /// <summary>用 loudnorm 测一条素材的整体响度（和检查按钮同一把尺子）。</summary>
-        private static async Task<double> MeasureLufsAsync(
-            string ffmpegPath,
-            string path,
-            CancellationToken cancellationToken)
-        {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = ffmpegPath,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            foreach (var argument in new[]
-                     {
-                         "-hide_banner", "-nostats", "-i", path,
-                         "-af", "loudnorm=I=-12:TP=-3:print_format=json",
-                         "-f", "null", "-"
-                     })
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-
-            using var process = Process.Start(startInfo);
-            if (process is null)
-            {
-                return double.NaN;
-            }
-
-            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            var text = await errorTask.ConfigureAwait(false);
-
-            var match = Regex.Match(text, "\"input_i\"\\s*:\\s*\"(-?[\\d.]+)\"");
-            return match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
-                ? value
-                : double.NaN;
-        }
-
         /// <summary>
         /// 对单条素材推满到目标响度：迭代求增益（限幅会吃掉一部分，所以要复量重试）。
         /// 链路固定为 volume → alimiter → loudnorm → alimiter（末端保险，保证真峰值）。
         /// </summary>
-        private static async Task<(bool Succeeded, string Message, bool Changed)> PushLimitToTargetAsync(
-            string ffmpegPath,
-            string sourcePath,
-            string outputPath,
-            CancellationToken cancellationToken)
-        {
-            const double targetLufs = -12.0;
-            const double preLimit = 0.55;   // ≈ −5.2 dBFS
-
-            // ⚠️ 这条链路里**绝对不能出现 loudnorm**（2026-11-07 用户实听确认）：
-            // 它的单遍模式按约 3 秒块做时变增益，在"说话—停顿—说话"的素材上
-            // 会把停顿抬起来、字尾拉长，听感就是"回音 / 空间变大"。
-            //
-            // 只用：一次性增益 + 带前视的限幅器。增益用**二分**求 ——
-            // 增益和响度在这条链里是单调的（加增益 → 压得更狠 → 更响），
-            // 所以可以直接夹逼，而不是像上一版那样只会往上加、冲过头还判成功
-            // （2026-11-07 实机：Vo-419 冲到 −9.9 却报"完成"）。
-            // ⚠️ 先量源文件：已经达标的**绝对不能再推**。
-            // 2026-11-07 实机事故：对已经归一过的文件再跑一次规整，这条链路把它从 −12 推到 −9.9，
-            // 因为"加增益→更响"对任何输入都成立，它不会自己认出"这已经是成品"。
-            var sourceLufs = await MeasureLufsAsync(ffmpegPath, sourcePath, cancellationToken).ConfigureAwait(false);
-            if (!double.IsNaN(sourceLufs) && sourceLufs >= targetLufs - 0.3)
-            {
-                return (true, $"{sourceLufs:0.00} LUFS（源已达标，跳过）", false);
-            }
-
-            var low = 0.0;
-            var high = 60.0;
-            var bestGain = low;
-            var bestLufs = double.NaN;
-
-            for (var round = 0; round < 7; round++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var gain = (low + high) / 2;
-                var chain =
-                    $"volume={gain.ToString("0.0", CultureInfo.InvariantCulture)}dB,"
-                    + $"alimiter=limit={preLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false";
-
-                await RunFfmpegAsync(
-                    ffmpegPath,
-                    ["-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-                     "-i", sourcePath, "-af", chain,
-                     "-ar", "48000", "-c:a", "pcm_s16le", outputPath],
-                    cancellationToken).ConfigureAwait(false);
-
-                var measured = await MeasureLufsAsync(ffmpegPath, outputPath, cancellationToken).ConfigureAwait(false);
-                if (double.IsNaN(measured))
-                {
-                    return (false, "复量失败", false);
-                }
-
-                // 记住"最接近目标"的那一次，最后用它重渲染一遍（避免停在偏离的一侧）。
-                if (double.IsNaN(bestLufs) || Math.Abs(measured - targetLufs) < Math.Abs(bestLufs - targetLufs))
-                {
-                    bestLufs = measured;
-                    bestGain = gain;
-                }
-
-                if (Math.Abs(measured - targetLufs) <= 0.25)
-                {
-                    return (true, $"{measured:0.00} LUFS", true);
-                }
-
-                if (measured < targetLufs)
-                {
-                    low = gain;      // 太轻：再加
-                }
-                else
-                {
-                    high = gain;     // 太响：减回去
-                }
-            }
-
-            // 用最接近的那次收尾，保证交付的不是"夹逼区间里的随便一端"。
-            var finalChain =
-                $"volume={bestGain.ToString("0.0", CultureInfo.InvariantCulture)}dB,"
-                + $"alimiter=limit={preLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false";
-            await RunFfmpegAsync(
-                ffmpegPath,
-                ["-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-                 "-i", sourcePath, "-af", finalChain,
-                 "-ar", "48000", "-c:a", "pcm_s16le", outputPath],
-                cancellationToken).ConfigureAwait(false);
-
-            return (true, $"{bestLufs:0.00} LUFS（二分收尾）", true);
-        }
-
         private void ApplyVoiceLoudnessReport(VoiceComplianceReport report, IReadOnlyList<string> files)
         {
             // 重新检查 = 重新开始一次判断：上一轮"压过也不达标"的拉黑记录全部作废。

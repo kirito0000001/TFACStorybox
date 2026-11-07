@@ -45,9 +45,16 @@ internal enum VoiceConsistencyVerdict
 /// <summary>
 /// 一条口径。**这是唯一的事实来源**，判定、文案、规整目标都从它取。
 ///
-/// 语音只有一档：游戏业界惯例的<b>对白锚点</b>（−12 LUFS ±2 LU、真峰值 ≤ −3 dBTP）。
-/// 隔壁的预设表里还有电影/EBU 那套（−23 LUFS、−1 dBTP），本项目没搬 ——
-/// 这里做的是 Galgame 语音，按广播口径压到 −23 只会让语音比 BGM（−16）低一大截。
+/// 2026-11-07 按游戏音频标准重定：<b>−18 LUFS ±2 LU、真峰值 ≤ −1 dBTP</b>。
+///
+/// 依据（用户整理的业界口径）：
+///   · 便携/移动端 −18 LUFS、主机 −23 LUFS，真峰值统一 ≤ −1 dBTP；
+///   · 独立"对话"参考值就在 −18 LUFS 附近；
+///   · 视觉小说是单句对白，LRA 低反而是优点（音量稳定、不打断沉浸）。
+///
+/// 为什么从 −12 调下来：−12 是"偏响"的一档，这批素材（原始 −26 ~ −36 LUFS、
+/// 峰均比 17~19）要硬推到 −12 得压 8~10 dB，必然发闷；改到 −18 之后
+/// 大多数素材只需 10~16 dB 的**纯增益**，压缩几乎用不上。
 /// </summary>
 internal sealed record VoiceLoudnessPreset(
     string DisplayName,
@@ -58,12 +65,12 @@ internal sealed record VoiceLoudnessPreset(
     string Evidence)
 {
     public static VoiceLoudnessPreset GameDialogue { get; } = new(
-        "游戏语音 · 对白锚点",
-        -12d,
+        "游戏语音 · 视觉小说对白",
+        -18d,
         2d,
-        -3d,
-        "按游戏业界惯例建议范围检测（该口径没有官方标准，不说「合规」）",
-        "【惯】两套中文参考量一致：语音 −12 LUFS、峰值全类 ≤ −3 dBTP");
+        -1d,
+        "按游戏音频业界口径检测（便携端 −18 / 主机 −23，真峰值 ≤ −1 dBTP）",
+        "【惯】Wwise/IESD 分层标准：便携 −18 LUFS、主机 −23 LUFS、真峰值 ≤ −1 dBTP；独立对白参考值 −18 LUFS");
 
     /// <summary>口径的一句话摘要，报告第一行就用它。</summary>
     public string Summary =>

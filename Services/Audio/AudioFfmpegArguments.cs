@@ -166,19 +166,19 @@ internal static class AudioFfmpegArguments
     /// "说话—停顿—说话"的语音会把停顿抬起来、字尾拉长，听感是"回音"。
     /// 用户拿 Pymss 的响度匹配对比后确认：**只做一次增益 + 前瞻限幅**最干净。
     ///
-    /// 参数对齐 Pymss 那套（前瞻 12ms / 释放 50ms / 天花板 −3 dBTP）：
-    /// 实测同一条素材，ffmpeg 出 −14.52 LUFS，Pymss 出 −14.53 LUFS。
-    /// 代价是**到不了 −12**（限幅吃掉了一部分增益），这是真实的物理上限，不再补救。
+    /// 参数沿用 Pymss 那套（前瞻 12ms / 释放 50ms），天花板按新口径抬到 −1 dBTP：
+    /// 目标是 −18 LUFS、真峰值 ≤ −1 dBTP（游戏音频便携端标准）。
+    /// 这个组合下大多数素材只需要**纯增益**，限幅器基本不参与 —— 音色几乎不动。
     /// </summary>
     private static string BuildGainLimitFilter(VoiceLoudnessPreset preset, VoiceLoudnessMeasurement measurement)
     {
         var gain = preset.TargetLufs - measurement.IntegratedLufs;
 
-        // limit=0.65 ≈ −3.7 dBFS：比 −3 dBTP 的天花板留 0.7 dB 余量，
-        // 因为 16bit 落盘后真峰值会再涨一点（实测 −2.8 → −3.2）。
+        // limit=0.85 ≈ −1.4 dBFS：比 −1 dBTP 的天花板留 0.4 dB 余量，
+        // 因为 16bit 落盘后真峰值会再涨一点。目标改成 −18 之后这个限幅器很少触发。
         return string.Concat(
             "volume=", FormatNumber(gain), "dB,",
-            "alimiter=limit=0.65:attack=12:release=50:level=false");
+            "alimiter=limit=0.85:attack=12:release=50:level=false");
     }
 
     /// <summary>
