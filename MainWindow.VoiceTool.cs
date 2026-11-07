@@ -2940,6 +2940,15 @@ namespace GalExcleTools
             {
                 trackScale.ScaleX = 0;
             }
+
+            // 收起这条线时，必须同时忘掉"它是上次播完的那条"。
+            // 否则任何一次行刷新（拖入新文件、清悬停、重铺列表）都会走
+            // RestoreVoiceProgressVisual，把它按"已完成"重新点亮 ——
+            // 表现就是"给别行拖文件，上一条又变绿了"（2026-11-07 用户报的）。
+            if (string.Equals(_voiceCompletedRowId, rowId, StringComparison.Ordinal))
+            {
+                _voiceCompletedRowId = null;
+            }
         }
 
         private void SetVoicePreviewButtonGlyph(string rowId, bool isPlaying)
