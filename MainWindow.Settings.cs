@@ -24,6 +24,7 @@ using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -111,6 +112,146 @@ namespace GalExcleTools
                     ? LogKind.Warning
                     : LogKind.Info;
             AppendLog(logKind, $"{title}：{message}");
+        }
+
+        private DispatcherQueueTimer? _mixerSaveTimer;
+
+        // ---------------------------------------------------------------------
+        // 音频合成器：11 个通道，实际音量 = 主音量 × 通道音量
+        // ---------------------------------------------------------------------
+
+        /// <summary>把设置里的值灌进界面（启动、切换项目后都要刷一次）。</summary>
+        private void InitializeMixerControls()
+        {
+            var mixer = Settings.Mixer ??= new VoiceMixerSettings();
+
+            void Apply(double value, Slider slider, TextBlock label)
+            {
+                slider.Value = Math.Clamp(value, 0, 100);
+                label.Text = ((int)Math.Round(slider.Value)).ToString();
+            }
+
+            Apply(mixer.Master, MixerMasterSlider, MixerMasterValue);
+            Apply(mixer.Voice, MixerVoiceSlider, MixerVoiceValue);
+            Apply(mixer.SystemVoice, MixerSystemVoiceSlider, MixerSystemVoiceValue);
+            Apply(mixer.Bgm, MixerBgmSlider, MixerBgmValue);
+            Apply(mixer.BgmDuringVoice, MixerBgmDuringVoiceSlider, MixerBgmDuringVoiceValue);
+            Apply(mixer.SystemSe, MixerSystemSeSlider, MixerSystemSeValue);
+            Apply(mixer.SceneSe, MixerSceneSeSlider, MixerSceneSeValue);
+            Apply(mixer.Movie, MixerMovieSlider, MixerMovieValue);
+            Apply(mixer.Performance, MixerPerformanceSlider, MixerPerformanceValue);
+            Apply(mixer.BgvNormal, MixerBgvNormalSlider, MixerBgvNormalValue);
+            Apply(mixer.BgvScene, MixerBgvSceneSlider, MixerBgvSceneValue);
+
+            MixerKeepBgmCheckBox.IsChecked = mixer.KeepBgmDuringVoice;
+            ApplyMixerVolumes();
+        }
+
+        private void MixerSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+        {
+            if (sender is not Slider slider || slider.Tag is not string key)
+            {
+                return;
+            }
+
+            var percent = Math.Round(e.NewValue);
+            var mixer = Settings.Mixer ??= new VoiceMixerSettings();
+
+            switch (key)
+            {
+                case "Master": mixer.Master = percent; break;
+                case "Voice": mixer.Voice = percent; break;
+                case "SystemVoice": mixer.SystemVoice = percent; break;
+                case "Bgm": mixer.Bgm = percent; break;
+                case "BgmDuringVoice": mixer.BgmDuringVoice = percent; break;
+                case "SystemSe": mixer.SystemSe = percent; break;
+                case "SceneSe": mixer.SceneSe = percent; break;
+                case "Movie": mixer.Movie = percent; break;
+                case "Performance": mixer.Performance = percent; break;
+                case "BgvNormal": mixer.BgvNormal = percent; break;
+                case "BgvScene": mixer.BgvScene = percent; break;
+                default: return;
+            }
+
+            UpdateMixerValueLabel(key, percent);
+            ApplyMixerVolumes();
+            ScheduleMixerSettingsSave();
+        }
+
+        private void MixerKeepBgmCheckBox_Changed(object sender, RoutedEventArgs e)
+        {
+            if (Settings.Mixer is null)
+            {
+                return;
+            }
+
+            Settings.Mixer.KeepBgmDuringVoice = MixerKeepBgmCheckBox.IsChecked == true;
+            ApplyMixerVolumes();
+            ScheduleMixerSettingsSave();
+        }
+
+        private void UpdateMixerValueLabel(string key, double percent)
+        {
+            var text = ((int)percent).ToString();
+            switch (key)
+            {
+                case "Master": MixerMasterValue.Text = text; break;
+                case "Voice": MixerVoiceValue.Text = text; break;
+                case "SystemVoice": MixerSystemVoiceValue.Text = text; break;
+                case "Bgm": MixerBgmValue.Text = text; break;
+                case "BgmDuringVoice": MixerBgmDuringVoiceValue.Text = text; break;
+                case "SystemSe": MixerSystemSeValue.Text = text; break;
+                case "SceneSe": MixerSceneSeValue.Text = text; break;
+                case "Movie": MixerMovieValue.Text = text; break;
+                case "Performance": MixerPerformanceValue.Text = text; break;
+                case "BgvNormal": MixerBgvNormalValue.Text = text; break;
+                case "BgvScene": MixerBgvSceneValue.Text = text; break;
+            }
+        }
+
+        /// <summary>
+        /// 把百分比算成 0~1 的媒体音量。**主音量是乘数**，各通道再乘一次 ——
+        /// 这样"主音量拉到 0 全部静音"和"单独调 BGM"同时成立。
+        /// </summary>
+        private void ApplyMixerVolumes()
+        {
+            var mixer = Settings.Mixer ??= new VoiceMixerSettings();
+            static double P(double percent) => Math.Clamp(percent / 100d, 0d, 1d);
+
+            var master = P(mixer.Master);
+
+            _projectVoicePreviewPlayer.Volume = master * P(mixer.Voice);
+
+            if (MusicPlayerElement is not null)
+            {
+                var bgmPercent = _voicePlayingRowId is not null && !mixer.KeepBgmDuringVoice
+                    ? mixer.BgmDuringVoice
+                    : mixer.Bgm;
+                MusicPlayerElement.MediaPlayer.Volume = master * P(bgmPercent);
+            }
+
+            _uiSoundService.Volume = master * P(mixer.SystemSe);
+        }
+
+        /// <summary>
+        /// 滑块的 ValueChanged 会连发几十次，写盘必须防抖 ——
+        /// 否则拖一次音量条就是几十次 JSON 落盘。
+        /// </summary>
+        private void ScheduleMixerSettingsSave()
+        {
+            _mixerSaveTimer ??= DispatcherQueue.CreateTimer();
+            _mixerSaveTimer.Interval = TimeSpan.FromMilliseconds(400);
+            _mixerSaveTimer.IsRepeating = false;
+            _mixerSaveTimer.Tick -= MixerSaveTimer_Tick;
+            _mixerSaveTimer.Tick += MixerSaveTimer_Tick;
+            _mixerSaveTimer.Stop();
+            _mixerSaveTimer.Start();
+        }
+
+        private void MixerSaveTimer_Tick(DispatcherQueueTimer sender, object args)
+        {
+            sender.Stop();
+            SaveAppSettings();
         }
 
         private void SaveAppSettings()

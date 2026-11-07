@@ -617,6 +617,7 @@ namespace GalExcleTools
             ApplyThemeSettings();
             AttachUpdateHost();
             _uiSoundService.IsEnabled = Settings.UiSoundEnabled;
+            InitializeMixerControls();
             UpdateLogOptionEnabledState();
             UpdateAuxiliaryDisplayVisibility();
             ApplyUnrealSyncSettingsToUi();
