@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using GalExcleTools.Controls;
@@ -1537,16 +1538,20 @@ namespace GalExcleTools
             File.Move(tempPath, targetPath, overwrite: true);
         }
 
-        private async Task<List<string>> RescueStillOffWithSoundCraftAsync(VoiceNormalizeResult result, string ffmpegPath)
+        /// <summary>
+        /// 最后一级：只对"卡在真峰值天花板上、怎么都到不了目标"的素材，
+        /// 用 ffmpeg 自己推满再限幅。
+        ///
+        /// 为什么不继续用 SoundCraft（2026-11-07 用户实测）：
+        /// 那套是 de_esser → 增益 → Maximizer 反复弹 3×4 轮，ceiling 一路压到 −6，
+        /// 一旦触发就"整条发闷"。用户逐条 A/B 后确认：触发抢救的 381 闷，没触发的 390 正常。
+        ///
+        /// 现在这条链：一次推增益 → alimiter（带前视）→ loudnorm → 末端再限一次。
+        /// 没有 de_esser、不反复重弹。实测 Vo-390 能到 −12.3 / 真峰 −3.1，用户听感认可。
+        /// </summary>
+        private async Task<List<string>> PushLimitedToTargetAsync(VoiceNormalizeResult result, string ffmpegPath)
         {
-            // 开关关掉就整段跳过：这一级是"锦上添花"，不是必需。
-            if (!_voiceTrackSettings.UseSoundCraftRescue)
-            {
-                return [];
-            }
-
-            var cliPath = SoundCraftRescueService.LocateCli();
-            if (cliPath is null || _currentProject is null || _selectedTextToolChapter is null)
+            if (_currentProject is null || _selectedTextToolChapter is null)
             {
                 return [];
             }
@@ -1569,44 +1574,166 @@ namespace GalExcleTools
                 return [];
             }
 
-            // 抢救要覆盖原文件；本地试听播放器可能还占着句柄，先停掉。
             StopProjectVoicePreview();
 
-            var service = new SoundCraftRescueService();
-            var rescued = new List<string>();
+            var fixedPaths = new List<string>();
             for (var index = 0; index < targets.Count; index++)
             {
                 var path = targets[index];
                 ReportVoiceStep(
-                    "正在抢救（SoundCraft 限幅）",
+                    "正在推限幅（补齐响度）",
                     (double)index / targets.Count,
                     $"{index + 1} / {targets.Count} · {(double)index / targets.Count * 100:0}% · {Path.GetFileName(path)}");
 
-                var tempPath = path + ".rescue.wav";
+                var tempPath = path + ".pushlim.wav";
                 try
                 {
-                    var (succeeded, message) = await service.RescueAsync(
-                        cliPath, ffmpegPath, path, tempPath, GetGlobalProgressCancellationToken());
+                    var (succeeded, message) = await PushLimitToTargetAsync(
+                        ffmpegPath, path, tempPath, GetGlobalProgressCancellationToken());
 
                     if (!succeeded)
                     {
                         AtomicFileWriter.TryDelete(tempPath);
-                        AppendLog(LogKind.Warning, $"SoundCraft 救援未成：{Path.GetFileName(path)}（{message}）");
+                        AppendLog(LogKind.Warning, $"推限幅未成：{Path.GetFileName(path)}（{message}）");
                         continue;
                     }
 
                     TryOverwriteWithRetry(tempPath, path);
-                    rescued.Add(path);
-                    AppendLog(LogKind.Info, $"SoundCraft 救援：{Path.GetFileName(path)} → {message}");
+                    fixedPaths.Add(path);
+                    AppendLog(LogKind.Info, $"推限幅：{Path.GetFileName(path)} → {message}");
                 }
                 catch (Exception error) when (error is not OperationCanceledException)
                 {
                     AtomicFileWriter.TryDelete(tempPath);
-                    AppendLog(LogKind.Warning, $"SoundCraft 救援失败：{Path.GetFileName(path)}", error);
+                    AppendLog(LogKind.Warning, $"推限幅失败：{Path.GetFileName(path)}", error);
                 }
             }
 
-            return rescued;
+            return fixedPaths;
+        }
+
+        /// <summary>跑一次 ffmpeg，失败把 stderr 抛出来。</summary>
+        private static async Task RunFfmpegAsync(
+            string ffmpegPath,
+            string[] arguments,
+            CancellationToken cancellationToken)
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = ffmpegPath,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            foreach (var argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("ffmpeg 启动失败");
+
+            // stderr 必须边跑边读：等退出再 ReadToEnd 会因为缓冲区满而卡死。
+            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            var errorText = await errorTask.ConfigureAwait(false);
+
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(errorText.Trim());
+            }
+        }
+
+        /// <summary>用 loudnorm 测一条素材的整体响度（和检查按钮同一把尺子）。</summary>
+        private static async Task<double> MeasureLufsAsync(
+            string ffmpegPath,
+            string path,
+            CancellationToken cancellationToken)
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = ffmpegPath,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            foreach (var argument in new[]
+                     {
+                         "-hide_banner", "-nostats", "-i", path,
+                         "-af", "loudnorm=I=-12:TP=-3:print_format=json",
+                         "-f", "null", "-"
+                     })
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return double.NaN;
+            }
+
+            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            var text = await errorTask.ConfigureAwait(false);
+
+            var match = Regex.Match(text, "\"input_i\"\\s*:\\s*\"(-?[\\d.]+)\"");
+            return match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+                ? value
+                : double.NaN;
+        }
+
+        /// <summary>
+        /// 对单条素材推满到目标响度：迭代求增益（限幅会吃掉一部分，所以要复量重试）。
+        /// 链路固定为 volume → alimiter → loudnorm → alimiter（末端保险，保证真峰值）。
+        /// </summary>
+        private static async Task<(bool Succeeded, string Message)> PushLimitToTargetAsync(
+            string ffmpegPath,
+            string sourcePath,
+            string outputPath,
+            CancellationToken cancellationToken)
+        {
+            const double targetLufs = -12.0;
+            const double preLimit = 0.55;   // ≈ −5.2 dBFS，先把峰压平
+            const double finalLimit = 0.69; // ≈ −3.2 dBFS，收尾保险
+
+            var gain = 18.0;
+            for (var round = 0; round < 4; round++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var chain =
+                    $"volume={gain.ToString("0.0", CultureInfo.InvariantCulture)}dB,"
+                    + $"alimiter=limit={preLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false,"
+                    + $"loudnorm=I={targetLufs.ToString("0.0", CultureInfo.InvariantCulture)}:TP=-3,"
+                    + $"alimiter=limit={finalLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false";
+
+                await RunFfmpegAsync(
+                    ffmpegPath,
+                    ["-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                     "-i", sourcePath, "-af", chain,
+                     "-ar", "48000", "-c:a", "pcm_s16le", outputPath],
+                    cancellationToken).ConfigureAwait(false);
+
+                var measured = await MeasureLufsAsync(ffmpegPath, outputPath, cancellationToken).ConfigureAwait(false);
+                if (double.IsNaN(measured))
+                {
+                    return (false, "复量失败");
+                }
+
+                if (Math.Abs(measured - targetLufs) <= 0.3)
+                {
+                    return (true, $"{measured:0.0} LUFS");
+                }
+
+                // 限幅会把增益吃掉一部分，所以按差值补，并且限制单步幅度，避免来回震荡。
+                gain += Math.Clamp(targetLufs - measured, -6d, 6d);
+            }
+
+            var last = await MeasureLufsAsync(ffmpegPath, outputPath, cancellationToken).ConfigureAwait(false);
+            return (true, $"{last:0.0} LUFS（四轮未完全命中）");
         }
 
         private void ApplyVoiceLoudnessReport(VoiceComplianceReport report, IReadOnlyList<string> files)
@@ -2296,11 +2423,11 @@ namespace GalExcleTools
             // 而这正是素材页那份问题清单里反复挨骂的一条。
             ApplyVoiceNormalizeResult(result);
 
-            // ② 第二套：ffmpeg 拉不动的（撞在真峰值天花板上），交给 SoundCraft 的 Maximizer。
-            //    它的限幅器有前视与释放曲线，比 ffmpeg 能多压 1~2 dB（2026-11-05 实测 25/26 达标）。
+            // ② 第二套：ffmpeg 的 loudnorm 拉不动的（撞真峰值天花板），用 volume + alimiter 推满。
+            //    注意：这一级**会压缩动态**，只在"确实到不了目标"时才对少数素材生效。
             _voiceStepBasePercent = 96;
             _voiceStepSpanPercent = 3;
-            var rescuedPaths = await RescueStillOffWithSoundCraftAsync(result, ffmpegPath);
+            var rescuedPaths = await PushLimitedToTargetAsync(result, ffmpegPath);
             if (rescuedPaths.Count > 0)
             {
                 // 换过文件内容 → 必须重新量一遍，否则 DB 列显示的还是旧值。
