@@ -16,9 +16,6 @@ internal sealed class UiSoundService : IUiSoundService, IDisposable
 
     public bool IsEnabled { get; set; } = true;
 
-    /// <summary>0~1 的全局音量（由「音频合成器」的 主音量 × 系统音效 算出来）。</summary>
-    public double Volume { get; set; } = 1d;
-
     public void Play(UiSoundKind kind)
     {
         if (!IsEnabled)
@@ -34,7 +31,6 @@ internal sealed class UiSoundService : IUiSoundService, IDisposable
                 return;
             }
 
-            player.Volume = Math.Clamp(Volume, 0d, 1d);
             player.PlaybackSession.Position = TimeSpan.Zero;
             player.Play();
         }

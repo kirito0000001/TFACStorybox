@@ -2390,8 +2390,6 @@ namespace GalExcleTools
         private void AwaitVoicePlaybackStart()
         {
             _voiceAwaitingPlayback = true;
-            // 语音开播：BGM 按「语音播放时」的档位压低（音频合成器里的 ducking）。
-            ApplyMixerVolumes();
             StopVoiceProgressTimer();
 
             _voiceStartWatchdog ??= CreateVoiceStartWatchdog();
@@ -2824,7 +2822,6 @@ namespace GalExcleTools
             _voicePlayingRowId = null;
             _voicePreviewPaused = false;
             _voiceAwaitingPlayback = false;
-            ApplyMixerVolumes();
             _voiceStartWatchdog?.Stop();
             StopVoiceProgressTimer();
         }
@@ -2847,7 +2844,6 @@ namespace GalExcleTools
             }
 
             _voiceCompletedRowId = _voicePlayingRowId;
-            ApplyMixerVolumes();
             SetVoicePreviewButtonGlyph(_voicePlayingRowId, isPlaying: false);
             _voicePreviewPaused = false;
             _voiceAwaitingPlayback = false;
