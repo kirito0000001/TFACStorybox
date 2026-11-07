@@ -1588,13 +1588,21 @@ namespace GalExcleTools
                 var tempPath = path + ".pushlim.wav";
                 try
                 {
-                    var (succeeded, message) = await PushLimitToTargetAsync(
+                    var (succeeded, message, changed) = await PushLimitToTargetAsync(
                         ffmpegPath, path, tempPath, GetGlobalProgressCancellationToken());
 
                     if (!succeeded)
                     {
                         AtomicFileWriter.TryDelete(tempPath);
                         AppendLog(LogKind.Warning, $"推限幅未成：{Path.GetFileName(path)}（{message}）");
+                        continue;
+                    }
+
+                    if (!changed)
+                    {
+                        // 源已达标：没有产出新文件，保持原样。
+                        AtomicFileWriter.TryDelete(tempPath);
+                        AppendLog(LogKind.Info, $"推限幅跳过：{Path.GetFileName(path)}（{message}）");
                         continue;
                     }
 
@@ -1689,7 +1697,7 @@ namespace GalExcleTools
         /// 对单条素材推满到目标响度：迭代求增益（限幅会吃掉一部分，所以要复量重试）。
         /// 链路固定为 volume → alimiter → loudnorm → alimiter（末端保险，保证真峰值）。
         /// </summary>
-        private static async Task<(bool Succeeded, string Message)> PushLimitToTargetAsync(
+        private static async Task<(bool Succeeded, string Message, bool Changed)> PushLimitToTargetAsync(
             string ffmpegPath,
             string sourcePath,
             string outputPath,
@@ -1699,18 +1707,32 @@ namespace GalExcleTools
             const double preLimit = 0.55;   // ≈ −5.2 dBFS
 
             // ⚠️ 这条链路里**绝对不能出现 loudnorm**（2026-11-07 用户实听确认）：
-            // 它的单遍模式按约 3 秒一块做时变增益，遇到"说话—停顿—说话"的素材，
-            // 停顿被抬起、字尾被拉长，听感就是"回音 / 空间变大"，用户形容"太灾难了"。
+            // 它的单遍模式按约 3 秒块做时变增益，在"说话—停顿—说话"的素材上
+            // 会把停顿抬起来、字尾拉长，听感就是"回音 / 空间变大"。
             //
-            // 现在只用：一次性增益 + 一个带前视的限幅器。增益迭代是为了补偿限幅吃掉的部分，
-            // 每次只调 volume，不引入任何时变处理。
-            var gain = 24.0;
+            // 只用：一次性增益 + 带前视的限幅器。增益用**二分**求 ——
+            // 增益和响度在这条链里是单调的（加增益 → 压得更狠 → 更响），
+            // 所以可以直接夹逼，而不是像上一版那样只会往上加、冲过头还判成功
+            // （2026-11-07 实机：Vo-419 冲到 −9.9 却报"完成"）。
+            // ⚠️ 先量源文件：已经达标的**绝对不能再推**。
+            // 2026-11-07 实机事故：对已经归一过的文件再跑一次规整，这条链路把它从 −12 推到 −9.9，
+            // 因为"加增益→更响"对任何输入都成立，它不会自己认出"这已经是成品"。
+            var sourceLufs = await MeasureLufsAsync(ffmpegPath, sourcePath, cancellationToken).ConfigureAwait(false);
+            if (!double.IsNaN(sourceLufs) && sourceLufs >= targetLufs - 0.3)
+            {
+                return (true, $"{sourceLufs:0.00} LUFS（源已达标，跳过）", false);
+            }
+
+            var low = 0.0;
+            var high = 60.0;
+            var bestGain = low;
             var bestLufs = double.NaN;
 
-            for (var round = 0; round < 5; round++)
+            for (var round = 0; round < 7; round++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                var gain = (low + high) / 2;
                 var chain =
                     $"volume={gain.ToString("0.0", CultureInfo.InvariantCulture)}dB,"
                     + $"alimiter=limit={preLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false";
@@ -1725,27 +1747,43 @@ namespace GalExcleTools
                 var measured = await MeasureLufsAsync(ffmpegPath, outputPath, cancellationToken).ConfigureAwait(false);
                 if (double.IsNaN(measured))
                 {
-                    return (false, "复量失败");
+                    return (false, "复量失败", false);
                 }
 
-                if (Math.Abs(measured - targetLufs) <= 0.3)
+                // 记住"最接近目标"的那一次，最后用它重渲染一遍（避免停在偏离的一侧）。
+                if (double.IsNaN(bestLufs) || Math.Abs(measured - targetLufs) < Math.Abs(bestLufs - targetLufs))
                 {
-                    return (true, $"{measured:0.00} LUFS");
+                    bestLufs = measured;
+                    bestGain = gain;
                 }
 
-                // 限幅器饱和后，再加增益几乎不涨响度（实测 +4 dB 换 0.3 dB），
-                // 这种情况继续加只会更压 —— 直接收在能到的最大值。
-                if (!double.IsNaN(bestLufs) && measured - bestLufs < 0.08)
+                if (Math.Abs(measured - targetLufs) <= 0.25)
                 {
-                    return (true, $"{measured:0.00} LUFS（已到该素材上限）");
+                    return (true, $"{measured:0.00} LUFS", true);
                 }
 
-                bestLufs = measured;
-                gain += Math.Min(Math.Max((targetLufs - measured) * 1.5, 0.5), 6d);
+                if (measured < targetLufs)
+                {
+                    low = gain;      // 太轻：再加
+                }
+                else
+                {
+                    high = gain;     // 太响：减回去
+                }
             }
 
-            var last = await MeasureLufsAsync(ffmpegPath, outputPath, cancellationToken).ConfigureAwait(false);
-            return (true, $"{last:0.00} LUFS（五轮）");
+            // 用最接近的那次收尾，保证交付的不是"夹逼区间里的随便一端"。
+            var finalChain =
+                $"volume={bestGain.ToString("0.0", CultureInfo.InvariantCulture)}dB,"
+                + $"alimiter=limit={preLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false";
+            await RunFfmpegAsync(
+                ffmpegPath,
+                ["-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                 "-i", sourcePath, "-af", finalChain,
+                 "-ar", "48000", "-c:a", "pcm_s16le", outputPath],
+                cancellationToken).ConfigureAwait(false);
+
+            return (true, $"{bestLufs:0.00} LUFS（二分收尾）", true);
         }
 
         private void ApplyVoiceLoudnessReport(VoiceComplianceReport report, IReadOnlyList<string> files)
