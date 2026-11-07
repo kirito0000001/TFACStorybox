@@ -281,6 +281,13 @@ namespace GalExcleTools
                 OffContent = "跳过去噪"
             };
 
+            var rescueSwitch = new ToggleSwitch
+            {
+                IsOn = _voiceTrackSettings.UseSoundCraftRescue,
+                OnContent = "到不了目标时用 SoundCraft 抢救",
+                OffContent = "只走 ffmpeg（可能停在 -14 LUFS）"
+            };
+
             var dropPreviewSwitch = new ToggleSwitch
             {
                 IsOn = _voiceTrackSettings.PlayAfterDropImport,
@@ -301,6 +308,11 @@ namespace GalExcleTools
                     "UVR 降噪",
                     denoiseSwitch,
                     "用 PyMSS 的 UVR-DeNoise 去掉底噪。一条要 1~2 分钟，赶时间可以关。"),
+                ToolboxDialog.BuildField(
+                    "SoundCraft 抢救",
+                    rescueSwitch,
+                    "ffmpeg 拉不到 -12 LUFS 时，用 SoundCraft 的限幅器再压一轮。"
+                    + "它串了去齿音与大增益，实测会让声音发闷 —— 怀疑音色被改时先关掉它。"),
                 ToolboxDialog.BuildField(
                     "拖入试听",
                     dropPreviewSwitch,
@@ -335,6 +347,7 @@ namespace GalExcleTools
             _voiceTrackSettings.SyncPlayback = syncPlaybackSwitch.IsOn;
             _voiceTrackSettings.PlayAfterDropImport = dropPreviewSwitch.IsOn;
             _voiceTrackSettings.UseUvrDenoise = denoiseSwitch.IsOn;
+            _voiceTrackSettings.UseSoundCraftRescue = rescueSwitch.IsOn;
             // 只写**当前章**：别的章的勾选原样留着。
             _voiceTrackSettings.SetSpeakers(
                 _selectedTextToolChapter?.Code ?? string.Empty,

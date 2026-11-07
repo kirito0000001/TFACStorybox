@@ -47,6 +47,15 @@ internal sealed class VoiceTrackSettings
     public bool UseUvrDenoise { get; set; } = true;
 
     /// <summary>
+    /// 规整末尾是否用 SoundCraft 抢救"ffmpeg 到不了目标"的素材。
+    ///
+    /// 默认开：ffmpeg 的 loudnorm 只有弱限幅，峰均比高的素材到不了 -12 LUFS。
+    /// 但它会串 去齿音 + 大增益 + Maximizer 三级，用户 2026-11-07 实测听感发闷，
+    /// 所以留一个能一键关掉的开关（关掉后那批素材会停在 -14 左右）。
+    /// </summary>
+    public bool UseSoundCraftRescue { get; set; } = true;
+
+    /// <summary>
     /// 每章"有语音"的说话人（角色名，来自 CSV 的 TalkChar）。
     ///
     /// ⚠️ **必须按章节分开**：同一个名字在不同章可能指的不是同一个人，

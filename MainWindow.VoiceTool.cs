@@ -1508,8 +1508,43 @@ namespace GalExcleTools
             return string.Join(" · ", parts);
         }
 
+        /// <summary>
+        /// 用临时文件覆盖原文件，遇到"被占用 / 只读"时重试一次。
+        ///
+        /// 用户 2026-11-07 碰到过 `Access to the path is denied`：
+        /// 多半是试听播放器或杀毒正好占着这个文件。重试 + 清只读属性基本都能过去；
+        /// 真过不去就把路径和原因抛给调用方，别只留一句英文。
+        /// </summary>
+        private void TryOverwriteWithRetry(string tempPath, string targetPath)
+        {
+            try
+            {
+                File.Move(tempPath, targetPath, overwrite: true);
+                return;
+            }
+            catch (Exception error) when (error is UnauthorizedAccessException or IOException)
+            {
+                AppendLog(LogKind.Warning, $"覆盖失败，清只读后重试：{Path.GetFileName(targetPath)}（{error.Message}）");
+            }
+
+            var attributes = File.GetAttributes(targetPath);
+            if ((attributes & FileAttributes.ReadOnly) != 0)
+            {
+                File.SetAttributes(targetPath, attributes & ~FileAttributes.ReadOnly);
+            }
+
+            Thread.Sleep(150);
+            File.Move(tempPath, targetPath, overwrite: true);
+        }
+
         private async Task<List<string>> RescueStillOffWithSoundCraftAsync(VoiceNormalizeResult result, string ffmpegPath)
         {
+            // 开关关掉就整段跳过：这一级是"锦上添花"，不是必需。
+            if (!_voiceTrackSettings.UseSoundCraftRescue)
+            {
+                return [];
+            }
+
             var cliPath = SoundCraftRescueService.LocateCli();
             if (cliPath is null || _currentProject is null || _selectedTextToolChapter is null)
             {
@@ -1534,6 +1569,9 @@ namespace GalExcleTools
                 return [];
             }
 
+            // 抢救要覆盖原文件；本地试听播放器可能还占着句柄，先停掉。
+            StopProjectVoicePreview();
+
             var service = new SoundCraftRescueService();
             var rescued = new List<string>();
             for (var index = 0; index < targets.Count; index++)
@@ -1557,7 +1595,7 @@ namespace GalExcleTools
                         continue;
                     }
 
-                    File.Move(tempPath, path, overwrite: true);
+                    TryOverwriteWithRetry(tempPath, path);
                     rescued.Add(path);
                     AppendLog(LogKind.Info, $"SoundCraft 救援：{Path.GetFileName(path)} → {message}");
                 }
