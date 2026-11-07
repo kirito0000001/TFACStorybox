@@ -1699,8 +1699,13 @@ namespace GalExcleTools
             const double preLimit = 0.55;   // ≈ −5.2 dBFS，先把峰压平
             const double finalLimit = 0.69; // ≈ −3.2 dBFS，收尾保险
 
+            // gain 负责"压"（会吃掉动态），trim 负责"对齐音量"（纯线性，不压）。
+            // 分清楚这两件事很重要：冲过头时如果去减 gain，等于**重新压一遍**，
+            // 越修越糟（2026-11-07 用户实测：381 落到 −11.5，听着比之前更严重）。
             var gain = 18.0;
-            for (var round = 0; round < 4; round++)
+            var trim = 0.0;
+
+            for (var round = 0; round < 6; round++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -1708,7 +1713,10 @@ namespace GalExcleTools
                     $"volume={gain.ToString("0.0", CultureInfo.InvariantCulture)}dB,"
                     + $"alimiter=limit={preLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false,"
                     + $"loudnorm=I={targetLufs.ToString("0.0", CultureInfo.InvariantCulture)}:TP=-3,"
-                    + $"alimiter=limit={finalLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false";
+                    + $"alimiter=limit={finalLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false"
+                    + (Math.Abs(trim) < 0.05
+                        ? string.Empty
+                        : $",volume={trim.ToString("0.00", CultureInfo.InvariantCulture)}dB");
 
                 await RunFfmpegAsync(
                     ffmpegPath,
@@ -1723,17 +1731,26 @@ namespace GalExcleTools
                     return (false, "复量失败");
                 }
 
-                if (Math.Abs(measured - targetLufs) <= 0.3)
+                var diff = targetLufs - measured;
+                if (Math.Abs(diff) <= 0.15)
                 {
-                    return (true, $"{measured:0.0} LUFS");
+                    return (true, $"{measured:0.00} LUFS");
                 }
 
-                // 限幅会把增益吃掉一部分，所以按差值补，并且限制单步幅度，避免来回震荡。
-                gain += Math.Clamp(targetLufs - measured, -6d, 6d);
+                if (diff < 0)
+                {
+                    // 冲过头了：只降音量，绝不再压。
+                    trim += diff;
+                }
+                else
+                {
+                    // 还差得远：继续加压，但单步不超过 6 dB。
+                    gain += Math.Min(diff, 6d);
+                }
             }
 
             var last = await MeasureLufsAsync(ffmpegPath, outputPath, cancellationToken).ConfigureAwait(false);
-            return (true, $"{last:0.0} LUFS（四轮未完全命中）");
+            return (Math.Abs(last - targetLufs) <= 0.3, $"{last:0.00} LUFS");
         }
 
         private void ApplyVoiceLoudnessReport(VoiceComplianceReport report, IReadOnlyList<string> files)
