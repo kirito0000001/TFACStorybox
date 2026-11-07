@@ -155,12 +155,16 @@ namespace GalExcleTools
                 : GetCharacterFolderPath(_currentAssetLibrary);
             AssetBrowserHost?.SetCardsVisible(false);
             SetAssetLibraryPath($"{_characterDetailReturnPath}\\{character.Name}（{character.Code}）");
-            // 重新进详情时清掉"正在浏览图层"的状态，否则返回逻辑会以为还在浏览层。
-            _browsingCharacterLayer = null;
+            // 压栈（回放上一层时不压）。
+            PushAssetLayerEntry(new AssetLibraryLayerEntry(
+                AssetLibraryLayerKind.CharacterDetail,
+                Character: character));
 
-            // 顶部那行是页面级的固定路径栏，详情只占下面的内容区 —— 不需要让位了。
             CharacterDetailPage.Visibility = Visibility.Visible;
-            PlayCharacterDetailEntrance();
+            if (!_suppressAssetLayerPush)
+            {
+                PlayCharacterDetailEntrance();
+            }
             AppendLog(LogKind.User, $"打开角色详情：{character.Name}");
         }
 
@@ -358,11 +362,6 @@ namespace GalExcleTools
             };
         }
 
-        /// <summary>当前正在浏览哪个图层的卡片（null = 不在浏览层）。</summary>
-        private CharacterLayerKind? _browsingCharacterLayer;
-
-        private string _layerBrowseReturnPath = string.Empty;
-
         private void CharacterClothButton_Click(object sender, RoutedEventArgs e) => OpenCharacterLayerBrowse(CharacterLayerKind.Cloth);
 
         private void CharacterFaceButton_Click(object sender, RoutedEventArgs e) => OpenCharacterLayerBrowse(CharacterLayerKind.Face);
@@ -387,34 +386,22 @@ namespace GalExcleTools
             Directory.CreateDirectory(folderPath);
             var imagePaths = CharacterLayerAssetService.GetImagePaths(folderPath);
 
-            _browsingCharacterLayer = layerKind;
-            _layerBrowseReturnPath = _currentAssetLibraryPath;
+            PushAssetLayerEntry(new AssetLibraryLayerEntry(
+                AssetLibraryLayerKind.LayerBrowse,
+                Character: _currentCharacter,
+                LayerKind: layerKind));
 
             CharacterDetailPage.Visibility = Visibility.Collapsed;
             AssetBrowserHost.SetCards(imagePaths.Select(path => CreateCharacterImageLayerCard(path, layerKind)));
             AssetBrowserHost.SetCardsVisible(true);
             SetAssetLibraryPath(folderPath);
             SetAssetLibraryUpEnabled(true);
-            PlayLayerSlide(AssetBrowserHost, forward: true);
-
-            AppendLog(LogKind.User, $"查看图层：{layerKind}（{imagePaths.Count} 项）");
-        }
-
-        /// <summary>从图层浏览层退回角色详情。返回 true 表示这次返回被这里消费掉了。</summary>
-        private bool TryCloseCharacterLayerBrowse()
-        {
-            if (_browsingCharacterLayer is null || _currentCharacter is null)
+            if (!_suppressAssetLayerPush)
             {
-                return false;
+                PlayLayerSlide(AssetBrowserHost, forward: true);
             }
 
-            _browsingCharacterLayer = null;
-            AssetBrowserHost?.SetCardsVisible(false);
-            SetAssetLibraryPath(_layerBrowseReturnPath);
-
-            CharacterDetailPage.Visibility = Visibility.Visible;
-            PlayCharacterDetailEntrance();
-            return true;
+            AppendLog(LogKind.User, $"查看图层：{layerKind}（{imagePaths.Count} 项）");
         }
 
         private GridViewItem CreateCharacterImageLayerCard(string imagePath, CharacterLayerKind layerKind)
@@ -902,63 +889,10 @@ namespace GalExcleTools
             return true;
         }
 
-        private void CloseCharacterDetailButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_currentAssetLibrary is null)
-            {
-                return;
-            }
-
-            PlayNegativeSound();
-            HideCharacterDetailPanel();
-        }
-
         /// <summary>详情入场：和"分类 → 素材"那一层共用同一套滑入（28px / 220ms）。</summary>
         private void PlayCharacterDetailEntrance()
         {
             PlayLayerSlide(CharacterDetailPage, forward: true);
-        }
-
-        /// <summary>
-        /// 收起角色详情：卡片区回来，并**按当前分类重新铺卡**。
-        ///
-        /// 之前只是把 SetCardsVisible(true)，卡片内容还停在上一层（例如服装图层的十张图），
-        /// 于是"返回后看到的是服装卡、路径却写着立绘"（用户 2026-11-06 报的错位）。
-        /// 动画也统一成滑入，不再用淡出 —— 层级切换应该同一种手感。
-        /// </summary>
-        private void HideCharacterDetailPanel()
-        {
-            _browsingCharacterLayer = null;
-
-            CharacterDetailPage.Visibility = Visibility.Collapsed;
-            ResetCharacterDetailLoadCancellation();
-
-            if (AssetBrowserHost is null)
-            {
-                return;
-            }
-
-            AssetBrowserHost.SetCardsVisible(true);
-            if (!string.IsNullOrEmpty(_characterDetailReturnPath))
-            {
-                SetAssetLibraryPath(_characterDetailReturnPath);
-            }
-
-            // 重新铺当前分类的卡片：不然卡片还停留在上一个图层的内容上。
-            RunAssetLibraryLoad(RefreshCurrentAssetCategoryAsync());
-            PlayLayerSlide(AssetBrowserHost, forward: false);
-        }
-
-        /// <summary>角色详情打开时，路径栏的"返回"先退详情，而不是直接退回库列表。</summary>
-        private bool TryCloseCharacterDetailOnBack()
-        {
-            if (CharacterDetailPage.Visibility != Visibility.Visible)
-            {
-                return false;
-            }
-
-            CloseCharacterDetailButton_Click(this, new RoutedEventArgs());
-            return true;
         }
 
         private async void CharacterDetailRenameButton_Click(object sender, RoutedEventArgs e)

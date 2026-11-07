@@ -133,6 +133,7 @@ public sealed partial class MainWindow
         // （这个 key 在回到分类层时**不清空**，只把下面的层标志翻回分类层。）
         _currentAssetCategoryKey = key;
         _isAssetCategoryLayerOpen = false;
+        PushAssetLayerEntry(new AssetLibraryLayerEntry(AssetLibraryLayerKind.CategoryItems, CategoryKey: key));
 
         switch (key)
         {
@@ -175,7 +176,10 @@ public sealed partial class MainWindow
 
         // 前进一层：整片内容从右侧滑入。放在 switch 之后 ——
         // 在填充之前播的话，动画跑的是空卡片。
-        PlayLayerSlide(AssetBrowserHost, forward: true);
+        if (!_suppressAssetLayerPush)
+        {
+            PlayLayerSlide(AssetBrowserHost, forward: true);
+        }
     }
 
     /// <summary>
@@ -557,6 +561,12 @@ public sealed partial class MainWindow
         // 路径栏事件只挂一次；分类层是每次打开库的必经之路，最稳的接线点。
         EnsureAssetBrowserHandlers();
 
+        // 分类层就是栈底。回放它时栈已经在正确状态，不要重置（否则会把上面的层清掉）。
+        if (!_suppressAssetLayerPush)
+        {
+            ResetAssetLayerStack();
+        }
+
         SetAssetLibraryPath(assetLibrary.Path);
         AssetBrowserHost.SetCardsVisible(true);
         SetAssetLibraryUpEnabled(false);
@@ -608,6 +618,112 @@ public sealed partial class MainWindow
         visual.StartAnimation("Opacity", fade);
     }
 
+    // ---------------- 层级返回栈 ----------------
+    //
+    // 用户 2026-11-06："逻辑应该是一个箭头式的啊，回到上一个页面不就行了？"
+    // 之前用三个布尔（_isAssetCategoryLayerOpen / _currentAssetCategoryKey /
+    // _browsingCharacterLayer）推断"现在在哪一层"，漏一个就错位。
+    //
+    // 现在：**进入哪一层就把那一层压栈**，返回 = 弹栈，然后重新执行"进入上一层"的同一个方法。
+    // 之所以不重写一套渲染，是因为进入方法本来就负责"填数据 + 设路径 + 摆可见性" ——
+    // 复用它，就不会出现"两个地方各说各话"的错位。
+
+    private enum AssetLibraryLayerKind
+    {
+        Categories,
+        CategoryItems,
+        CharacterDetail,
+        LayerBrowse
+    }
+
+    private sealed record AssetLibraryLayerEntry(
+        AssetLibraryLayerKind Kind,
+        string? CategoryKey = null,
+        CharacterInfo? Character = null,
+        CharacterLayerKind? LayerKind = null);
+
+    private readonly List<AssetLibraryLayerEntry> _assetLayerStack = [];
+
+    /// <summary>回放上一层时置 true：此时不再压栈、也不再播"前进"动画。</summary>
+    private bool _suppressAssetLayerPush;
+
+    private bool CanPopAssetLayer => _assetLayerStack.Count > 1;
+
+    private void PushAssetLayerEntry(AssetLibraryLayerEntry entry)
+    {
+        if (_suppressAssetLayerPush)
+        {
+            return;
+        }
+
+        // 同一层连着压两次没有意义（比如重复点同一张卡）。
+        if (_assetLayerStack.Count > 0 && _assetLayerStack[^1] == entry)
+        {
+            return;
+        }
+
+        _assetLayerStack.Add(entry);
+    }
+
+    private void ResetAssetLayerStack()
+    {
+        _assetLayerStack.Clear();
+        _assetLayerStack.Add(new AssetLibraryLayerEntry(AssetLibraryLayerKind.Categories));
+    }
+
+    /// <summary>弹一层并回放上一层。</summary>
+    private async Task GoBackOneAssetLayerAsync()
+    {
+        if (!CanPopAssetLayer)
+        {
+            return;
+        }
+
+        _assetLayerStack.RemoveAt(_assetLayerStack.Count - 1);
+        await ReplayAssetLayerAsync(_assetLayerStack[^1]);
+    }
+
+    /// <summary>按栈顶那一项重新执行"进入它"的逻辑，并播反向滑入。</summary>
+    private async Task ReplayAssetLayerAsync(AssetLibraryLayerEntry entry)
+    {
+        if (_currentAssetLibrary is null)
+        {
+            return;
+        }
+
+        _suppressAssetLayerPush = true;
+        try
+        {
+            switch (entry.Kind)
+            {
+                case AssetLibraryLayerKind.Categories:
+                    FillAssetBrowserWithCategories(_currentAssetLibrary);
+                    break;
+
+                case AssetLibraryLayerKind.CategoryItems when entry.CategoryKey is { } key:
+                    await OpenAssetCategoryAsync(key);
+                    break;
+
+                case AssetLibraryLayerKind.CharacterDetail when entry.Character is { } character:
+                    ShowCharacterDetailPage(character);
+                    break;
+
+                case AssetLibraryLayerKind.LayerBrowse when entry.LayerKind is { } layer:
+                    OpenCharacterLayerBrowse(layer);
+                    break;
+            }
+        }
+        finally
+        {
+            _suppressAssetLayerPush = false;
+        }
+
+        // 回来是"向左滑入"，方向和前进相反。
+        PlayLayerSlide(
+            entry.Kind == AssetLibraryLayerKind.CharacterDetail ? CharacterDetailPage : AssetBrowserHost,
+            forward: false);
+    }
+
     private void ReturnToAssetCategoryLayer()
     {
         if (_currentAssetLibrary is not null)
@@ -655,17 +771,7 @@ public sealed partial class MainWindow
         //   左键「返回」= 回素材主页面（库列表）；
         //   右键「上一层」= 只在当前库里往上退一级。
         // 之前两个按钮都接 ReturnToAssetCategoryLayer，等于重复。
-        // 层级：图层浏览 → 角色详情 → 分类层 → 库列表，一次退一层。
-        if (TryCloseCharacterLayerBrowse())
-        {
-            return;
-        }
-
-        if (TryCloseCharacterDetailOnBack())
-        {
-            return;
-        }
-
+        // 左侧「返回」= 离开这个库，回素材库列表。
         ShowAssetLibraryPage();
     }
 
@@ -697,18 +803,8 @@ public sealed partial class MainWindow
         }
     }
 
-    private void AssetBrowser_UpRequested(object? sender, EventArgs e)
+    private async void AssetBrowser_UpRequested(object? sender, EventArgs e)
     {
-        if (TryCloseCharacterLayerBrowse())
-        {
-            return;
-        }
-
-        if (TryCloseCharacterDetailOnBack())
-        {
-            return;
-        }
-
-        ReturnToAssetCategoryLayer();
+        await GoBackOneAssetLayerAsync();
     }
 }
