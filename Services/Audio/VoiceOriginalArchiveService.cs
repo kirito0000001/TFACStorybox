@@ -58,6 +58,15 @@ internal sealed class VoiceOriginalArchiveService
             return;
         }
 
+        // 还没有原始版 = 这条语音从来没被处理过，工作文件就是最初版，
+        // 再存一份纯属占地方（用户 2026-11-07：「没处理就不该有源文件」）。
+        // 已经有原始版时必须覆盖：用户换了一份更好的素材，"还原"应该回到**新**的这份，
+        // 而不是上一版早就被替换掉的旧录音。
+        if (!File.Exists(targetPath))
+        {
+            return;
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
         // 内容取**用户选的原文件**（工作版可能刚被重命名/移动，也可能已经被别的东西改过）。
         File.Copy(sourcePath, targetPath, overwrite: true);
