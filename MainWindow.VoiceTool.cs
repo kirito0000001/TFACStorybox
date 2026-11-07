@@ -1696,27 +1696,24 @@ namespace GalExcleTools
             CancellationToken cancellationToken)
         {
             const double targetLufs = -12.0;
-            const double preLimit = 0.55;   // ≈ −5.2 dBFS，先把峰压平
-            const double finalLimit = 0.69; // ≈ −3.2 dBFS，收尾保险
+            const double preLimit = 0.55;   // ≈ −5.2 dBFS
 
-            // gain 负责"压"（会吃掉动态），trim 负责"对齐音量"（纯线性，不压）。
-            // 分清楚这两件事很重要：冲过头时如果去减 gain，等于**重新压一遍**，
-            // 越修越糟（2026-11-07 用户实测：381 落到 −11.5，听着比之前更严重）。
-            var gain = 18.0;
-            var trim = 0.0;
+            // ⚠️ 这条链路里**绝对不能出现 loudnorm**（2026-11-07 用户实听确认）：
+            // 它的单遍模式按约 3 秒一块做时变增益，遇到"说话—停顿—说话"的素材，
+            // 停顿被抬起、字尾被拉长，听感就是"回音 / 空间变大"，用户形容"太灾难了"。
+            //
+            // 现在只用：一次性增益 + 一个带前视的限幅器。增益迭代是为了补偿限幅吃掉的部分，
+            // 每次只调 volume，不引入任何时变处理。
+            var gain = 24.0;
+            var bestLufs = double.NaN;
 
-            for (var round = 0; round < 6; round++)
+            for (var round = 0; round < 5; round++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var chain =
                     $"volume={gain.ToString("0.0", CultureInfo.InvariantCulture)}dB,"
-                    + $"alimiter=limit={preLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false,"
-                    + $"loudnorm=I={targetLufs.ToString("0.0", CultureInfo.InvariantCulture)}:TP=-3,"
-                    + $"alimiter=limit={finalLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false"
-                    + (Math.Abs(trim) < 0.05
-                        ? string.Empty
-                        : $",volume={trim.ToString("0.00", CultureInfo.InvariantCulture)}dB");
+                    + $"alimiter=limit={preLimit.ToString("0.00", CultureInfo.InvariantCulture)}:level=false";
 
                 await RunFfmpegAsync(
                     ffmpegPath,
@@ -1731,31 +1728,24 @@ namespace GalExcleTools
                     return (false, "复量失败");
                 }
 
-                var diff = targetLufs - measured;
-
-                // 容差 0.5 而不是 0.15：这条素材（原始 −26 LUFS、真峰 −12 dBTP）在
-                // 真峰值 −3 的约束下物理上就到不了 −12 —— 实测卡在 −12.4 左右。
-                // 硬要更响只能继续压缩，结果是 −11.5 / LRA 1.4，用户听着"更严重"。
-                // 所以：够接近就收，宁可少 0.5 dB 也不要多压一层。
-                if (Math.Abs(diff) <= 0.5)
+                if (Math.Abs(measured - targetLufs) <= 0.3)
                 {
                     return (true, $"{measured:0.00} LUFS");
                 }
 
-                if (diff < 0)
+                // 限幅器饱和后，再加增益几乎不涨响度（实测 +4 dB 换 0.3 dB），
+                // 这种情况继续加只会更压 —— 直接收在能到的最大值。
+                if (!double.IsNaN(bestLufs) && measured - bestLufs < 0.08)
                 {
-                    // 冲过头了：只降音量，绝不再压。
-                    trim += diff;
+                    return (true, $"{measured:0.00} LUFS（已到该素材上限）");
                 }
-                else
-                {
-                    // 还差得远：继续加压，但单步不超过 6 dB。
-                    gain += Math.Min(diff, 6d);
-                }
+
+                bestLufs = measured;
+                gain += Math.Min(Math.Max((targetLufs - measured) * 1.5, 0.5), 6d);
             }
 
             var last = await MeasureLufsAsync(ffmpegPath, outputPath, cancellationToken).ConfigureAwait(false);
-            return (Math.Abs(last - targetLufs) <= 0.3, $"{last:0.00} LUFS");
+            return (true, $"{last:0.00} LUFS（五轮）");
         }
 
         private void ApplyVoiceLoudnessReport(VoiceComplianceReport report, IReadOnlyList<string> files)
