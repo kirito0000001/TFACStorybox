@@ -1423,6 +1423,14 @@ namespace GalExcleTools
                     }
                 }
 
+                // 还原完 = 工作文件就是最初版，还原点已经没有意义，直接清掉。
+                // 顺手把"够不着"的孤儿也删了（改名/删除留下的残骸，永远不可能被还原）。
+                var purged = archive.PurgeUnreachable(_currentProject, chapter.Code, files.Select(Path.GetFileName).ToList());
+                if (purged > 0)
+                {
+                    AppendLog(LogKind.Info, $"已清理 {purged} 个无主的原始版文件（{chapter.Code}）。");
+                }
+
                 // 缓存全清：文件内容回到最初，任何旧的测量/去噪结论都不再成立。
                 TryDeleteFile(Path.Combine(
                     _currentProject.Path, WorkspacePathUtility.ToolsFolderName, "VoiceDenoise", chapter.Code + ".json"));
@@ -2033,6 +2041,17 @@ namespace GalExcleTools
             }
 
             var allFiles = GetCurrentChapterVoiceFiles();
+
+            // 规整前顺手清掉"够不着"的原始版：它们按工作文件名找不到对应语音，
+            // 永远不可能被还原，只会在 Tools/VoiceOriginals 里越堆越多。
+            var code = _selectedTextToolChapter.Code;
+            var purgedOriginals = new VoiceOriginalArchiveService()
+                .PurgeUnreachable(_currentProject, code, allFiles.Select(Path.GetFileName).ToList());
+            if (purgedOriginals > 0)
+            {
+                AppendLog(LogKind.Info, $"清理了 {purgedOriginals} 个无主的语音原始版（{code}）。");
+            }
+
             if (allFiles.Count == 0)
             {
                 ShowFloatingTip(

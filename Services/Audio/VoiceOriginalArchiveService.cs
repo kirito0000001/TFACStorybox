@@ -133,6 +133,46 @@ internal sealed class VoiceOriginalArchiveService
         }
     }
 
+    /// <summary>
+    /// 清理「够不着」的原始版：目录里存在、但没有同名工作文件的那些。
+    ///
+    /// 它们只可能来自两种情况：语音被删掉却没走 <see cref="DeleteOriginal"/>（旧版本），
+    /// 或者工作文件改了名、原始版没跟着搬（<see cref="RenameOriginal"/> 失败）。
+    /// 无论哪种，`TryRestore` 都是按**工作文件名**找的，这些文件永远不可能被用到 ——
+    /// 留着只会让 Tools/VoiceOriginals 越堆越乱（2026-11-07 实测 283 个 / 324 MB）。
+    /// </summary>
+    /// <returns>删掉的数量。</returns>
+    public int PurgeUnreachable(ProjectInfo project, string chapterCode, IReadOnlyCollection<string> liveWorkFileNames)
+    {
+        var folder = WorkspacePathUtility.GetProjectVoiceOriginalsFolderPath(project, chapterCode);
+        if (!Directory.Exists(folder))
+        {
+            return 0;
+        }
+
+        var live = new HashSet<string>(liveWorkFileNames, StringComparer.OrdinalIgnoreCase);
+        var removed = 0;
+        foreach (var path in Directory.EnumerateFiles(folder))
+        {
+            if (live.Contains(Path.GetFileName(path)))
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Delete(path);
+                removed++;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                ToolboxLog.Warn($"清理孤儿原始版失败：{path}", error);
+            }
+        }
+
+        return removed;
+    }
+
     /// <summary>把原始版复制回工作文件。没有原始版返回 false（调用方据此提示，而不是静默成功）。</summary>
     public bool TryRestore(ProjectInfo project, string chapterCode, string workPath)
     {
