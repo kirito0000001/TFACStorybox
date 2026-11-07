@@ -1732,7 +1732,12 @@ namespace GalExcleTools
                 }
 
                 var diff = targetLufs - measured;
-                if (Math.Abs(diff) <= 0.15)
+
+                // 容差 0.5 而不是 0.15：这条素材（原始 −26 LUFS、真峰 −12 dBTP）在
+                // 真峰值 −3 的约束下物理上就到不了 −12 —— 实测卡在 −12.4 左右。
+                // 硬要更响只能继续压缩，结果是 −11.5 / LRA 1.4，用户听着"更严重"。
+                // 所以：够接近就收，宁可少 0.5 dB 也不要多压一层。
+                if (Math.Abs(diff) <= 0.5)
                 {
                     return (true, $"{measured:0.00} LUFS");
                 }
