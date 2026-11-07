@@ -174,11 +174,12 @@ internal static class AudioFfmpegArguments
     {
         var gain = preset.TargetLufs - measurement.IntegratedLufs;
 
-        // limit=0.85 ≈ −1.4 dBFS：比 −1 dBTP 的天花板留 0.4 dB 余量，
-        // 因为 16bit 落盘后真峰值会再涨一点。目标改成 −18 之后这个限幅器很少触发。
+        // limit=0.89 ≈ −1.0 dBFS：对齐参考作品（实测真峰中位 −1.10，48% 还在 −1 以上）。
+        // 之前用 0.85（−1.4）是比商业成品更保守 —— 没必要。
+        // 目标 −18 之后这个限幅器本来就很少触发，放宽只是让"确实需要压"的那几条少压一点。
         return string.Concat(
             "volume=", FormatNumber(gain), "dB,",
-            "alimiter=limit=0.85:attack=12:release=50:level=false");
+            "alimiter=limit=0.89:attack=12:release=50:level=false");
     }
 
     /// <summary>
