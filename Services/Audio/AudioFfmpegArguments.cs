@@ -87,7 +87,9 @@ internal static class AudioFfmpegArguments
             "-i", inputPath,
             "-af", compressFirst
                 ? BuildCompressThenLoudnormFilter(preset)
-                : BuildLoudnormFilter(preset, printJson: false, measurement)
+                : measurement is { IsUsable: true } usable
+                    ? BuildGainLimitFilter(preset, usable)
+                    : BuildLoudnormFilter(preset, printJson: false, measurement)
         };
 
         if (sampleRate > 0)
@@ -152,21 +154,31 @@ internal static class AudioFfmpegArguments
             return string.Concat(parts);
         }
 
-        if (measurement is { } measured)
-        {
-            // 两遍法：linear=true + 全套 measured_*，这一遍是**线性套增益**，不做动态压缩。
-            // measured_thresh 缺了增益会算错，所以测量那一步必须把门限一起读出来。
-            parts.Add(":linear=true");
-            parts.Add(":measured_I=" + FormatNumber(measured.IntegratedLufs));
-            parts.Add(":measured_TP=" + FormatNumber(measured.TruePeakDb));
-            parts.Add(":measured_LRA=" + FormatNumber(measured.LoudnessRangeLu));
-            parts.Add(":measured_thresh=" + FormatNumber(measured.ThresholdLufs));
-            parts.Add(":offset=" + FormatNumber(measured.TargetOffsetLu));
-        }
-
-        // measurement 为 null → 什么都不加，让它走自带的单遍动态模式。
+        // measurement 为 null → 什么都不加（调用方会另走增益+限幅那条）。
         // **不要传 linear=false**：那个写法在某些版本上会被当成「显式要求动态」，行为反而更跳。
         return string.Concat(parts);
+    }
+
+    /// <summary>
+    /// 「一次增益 + 一个限幅器」—— 2026-11-07 起规整的唯一落盘链。
+    ///
+    /// 为什么不用 loudnorm：它的单遍模式按约 3 秒块做时变增益，遇到
+    /// "说话—停顿—说话"的语音会把停顿抬起来、字尾拉长，听感是"回音"。
+    /// 用户拿 Pymss 的响度匹配对比后确认：**只做一次增益 + 前瞻限幅**最干净。
+    ///
+    /// 参数对齐 Pymss 那套（前瞻 12ms / 释放 50ms / 天花板 −3 dBTP）：
+    /// 实测同一条素材，ffmpeg 出 −14.52 LUFS，Pymss 出 −14.53 LUFS。
+    /// 代价是**到不了 −12**（限幅吃掉了一部分增益），这是真实的物理上限，不再补救。
+    /// </summary>
+    private static string BuildGainLimitFilter(VoiceLoudnessPreset preset, VoiceLoudnessMeasurement measurement)
+    {
+        var gain = preset.TargetLufs - measurement.IntegratedLufs;
+
+        // limit=0.65 ≈ −3.7 dBFS：比 −3 dBTP 的天花板留 0.7 dB 余量，
+        // 因为 16bit 落盘后真峰值会再涨一点（实测 −2.8 → −3.2）。
+        return string.Concat(
+            "volume=", FormatNumber(gain), "dB,",
+            "alimiter=limit=0.65:attack=12:release=50:level=false");
     }
 
     /// <summary>

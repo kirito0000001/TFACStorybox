@@ -1541,88 +1541,6 @@ namespace GalExcleTools
             File.Move(tempPath, targetPath, overwrite: true);
         }
 
-        /// <summary>
-        /// 最后一级：只对"卡在真峰值天花板上、怎么都到不了目标"的素材，
-        /// 用 ffmpeg 自己推满再限幅。
-        ///
-        /// 为什么不继续用 SoundCraft（2026-11-07 用户实测）：
-        /// 那套是 de_esser → 增益 → Maximizer 反复弹 3×4 轮，ceiling 一路压到 −6，
-        /// 一旦触发就"整条发闷"。用户逐条 A/B 后确认：触发抢救的 381 闷，没触发的 390 正常。
-        ///
-        /// 现在这条链：一次推增益 → alimiter（带前视）→ loudnorm → 末端再限一次。
-        /// 没有 de_esser、不反复重弹。实测 Vo-390 能到 −12.3 / 真峰 −3.1，用户听感认可。
-        /// </summary>
-        private async Task<List<string>> PushLimitedToTargetAsync(VoiceNormalizeResult result, string ffmpegPath)
-        {
-            if (_currentProject is null || _selectedTextToolChapter is null)
-            {
-                return [];
-            }
-
-            var targets = new List<string>();
-            foreach (var outcome in result.Outcomes.Where(item => item.Succeeded))
-            {
-                var name = Path.GetFileName(outcome.SourcePath);
-                if (_chapterVoiceLoudness.TryGetValue(name, out var entry) &&
-                    entry.Measurement.IsUsable &&
-                    entry.NeedsFix &&
-                    entry.IsPeakLimited)
-                {
-                    targets.Add(outcome.SourcePath);
-                }
-            }
-
-            if (targets.Count == 0)
-            {
-                return [];
-            }
-
-            StopProjectVoicePreview();
-
-            var fixedPaths = new List<string>();
-            for (var index = 0; index < targets.Count; index++)
-            {
-                var path = targets[index];
-                ReportVoiceStep(
-                    "正在推限幅（补齐响度）",
-                    (double)index / targets.Count,
-                    $"{index + 1} / {targets.Count} · {(double)index / targets.Count * 100:0}% · {Path.GetFileName(path)}");
-
-                var tempPath = path + ".pushlim.wav";
-                try
-                {
-                    var (succeeded, message, changed) = await PushLimitToTargetAsync(
-                        ffmpegPath, path, tempPath, GetGlobalProgressCancellationToken());
-
-                    if (!succeeded)
-                    {
-                        AtomicFileWriter.TryDelete(tempPath);
-                        AppendLog(LogKind.Warning, $"推限幅未成：{Path.GetFileName(path)}（{message}）");
-                        continue;
-                    }
-
-                    if (!changed)
-                    {
-                        // 源已达标：没有产出新文件，保持原样。
-                        AtomicFileWriter.TryDelete(tempPath);
-                        AppendLog(LogKind.Info, $"推限幅跳过：{Path.GetFileName(path)}（{message}）");
-                        continue;
-                    }
-
-                    TryOverwriteWithRetry(tempPath, path);
-                    fixedPaths.Add(path);
-                    AppendLog(LogKind.Info, $"推限幅：{Path.GetFileName(path)} → {message}");
-                }
-                catch (Exception error) when (error is not OperationCanceledException)
-                {
-                    AtomicFileWriter.TryDelete(tempPath);
-                    AppendLog(LogKind.Warning, $"推限幅失败：{Path.GetFileName(path)}", error);
-                }
-            }
-
-            return fixedPaths;
-        }
-
         /// <summary>跑一次 ffmpeg，失败把 stderr 抛出来。</summary>
         private static async Task RunFfmpegAsync(
             string ffmpegPath,
@@ -2258,10 +2176,6 @@ namespace GalExcleTools
             _voiceProgressWatch.Restart();
             ShowGlobalProgress("语音规整", "准备中…");
 
-            // ① 去噪（PyMSS UVR-DeNoise）。放在最前面：噪声要先清掉，
-            //    后面拉响度才不会被一起推高（底噪跟着涨是这批素材最初的问题）。
-            var (denoised, denoiseFailed) = await RunVoiceDenoiseAsync();
-
             var (formatConverted, formatFailed) = await UnifyVoiceFormatsAsync();
             if (formatConverted > 0 || formatFailed > 0)
             {
@@ -2295,7 +2209,6 @@ namespace GalExcleTools
             //   · 没测过的（DB 显示横线）不能瞎改 —— 不知道原来是多少，改完也没法证明变好了。
             //   判定沿用与 DB 列同一把尺子（NeedsFix = 响度出容差 或 峰值超标）。
             var targets = new List<string>();
-            var compressTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var skippedCompliant = 0;
             var skippedUnmeasured = 0;
             var skippedBlocked = 0;
@@ -2322,11 +2235,9 @@ namespace GalExcleTools
 
                     targets.Add(file);
 
-                    // 被峰值卡住的：只套增益必然撞回上限，先压动态才有机会到目标。
-                    if (item.IsPeakLimited)
-                    {
-                        compressTargets.Add(file);
-                    }
+                    // 不再单独标记"先压缩"的素材：
+                    // 那条链用的是动态 loudnorm，正是"回音"的来源（2026-11-07 实听确认）。
+                    // 现在统一走 volume + alimiter，压缩与否由限幅器自己决定。
                 }
                 else
                 {
@@ -2418,7 +2329,7 @@ namespace GalExcleTools
                     preset,
                     progress,
                     GetGlobalProgressCancellationToken(),
-                    compressTargets);
+                    compressFirstFiles: null);
             }
             catch (OperationCanceledException)
             {
@@ -2463,12 +2374,20 @@ namespace GalExcleTools
                 ? string.Empty
                 : $"（未处理：{string.Join("、", skipParts)}）";
 
+            // 就地更新 DB 列（规整后实测值），不重铺页面 —— 重铺会把滚动位置打回顶部，
+            // 而这正是素材页那份问题清单里反复挨骂的一条。
+            ApplyVoiceNormalizeResult(result);
+
+            // ② 去噪（PyMSS UVR-DeNoise）——**放在最后**，用户 2026-11-07 定的顺序：
+            //    先去噪会把底噪和细节一起抹掉，再拉响度等于把"抹平"的部分放大；
+            //    先匹配响度、再去噪，听感最接近原始。开关在「语音设置」里。
+            var (denoised, denoiseFailed) = await RunVoiceDenoiseAsync();
+
             var summary = (orphanCount > 0 ? $"清理 {orphanCount} 个多余文件；" : string.Empty)
                 + (renamedCount > 0 ? $"已规范 {renamedCount} 个文件名；" : string.Empty)
                 + (denoised > 0 ? $"去噪 {denoised} 条；" : string.Empty)
                 + (denoiseFailed > 0 ? $"去噪失败 {denoiseFailed} 条；" : string.Empty)
                 + (formatConverted > 0 ? $"统一 {formatConverted} 个文件格式；" : string.Empty)
-                + (compressTargets.Count > 0 ? $"{compressTargets.Count} 条先压缩再拉响度；" : string.Empty)
                 + $"成功 {result.SuccessCount} / {result.Outcomes.Count} 条"
                 + (result.FailureCount > 0 ? $"，失败 {result.FailureCount} 条" : string.Empty)
                 + (formatFailed > 0 ? $"，{formatFailed} 条格式转换失败（详见 Log）" : string.Empty)
@@ -2476,25 +2395,6 @@ namespace GalExcleTools
             CompleteGlobalProgress("规整完成", summary);
             AppendLog(LogKind.Info, $"规整语音（{chapterCode}）：{summary}");
 
-            // 就地更新 DB 列（规整后实测值），不重铺页面 —— 重铺会把滚动位置打回顶部，
-            // 而这正是素材页那份问题清单里反复挨骂的一条。
-            ApplyVoiceNormalizeResult(result);
-
-            // ② 第二套：ffmpeg 的 loudnorm 拉不动的（撞真峰值天花板），用 volume + alimiter 推满。
-            //    注意：这一级**会压缩动态**，只在"确实到不了目标"时才对少数素材生效。
-            _voiceStepBasePercent = 96;
-            _voiceStepSpanPercent = 3;
-            var rescuedPaths = await PushLimitedToTargetAsync(result, ffmpegPath);
-            if (rescuedPaths.Count > 0)
-            {
-                // 换过文件内容 → 必须重新量一遍，否则 DB 列显示的还是旧值。
-                var rescueReport = await _voiceBatchProcessor.MeasureAsync(
-                    ffmpegPath, rescuedPaths, preset, null, GetGlobalProgressCancellationToken());
-                // ⚠️ 第二个参数是"要写进缓存的文件列表"，不是"这次量了哪些"。
-                // 只传被救的那几条的话，整章缓存会被覆盖成只剩它们。
-                ApplyVoiceLoudnessReport(rescueReport, GetCurrentChapterVoiceFiles());
-                AppendLog(LogKind.Info, $"SoundCraft 救援：{rescuedPaths.Count} 条已重做并复测。");
-            }
 
             // 这一轮压完仍超差的，记下来：本次运行不要再把它们选进目标。
             // 否则就是"点一次做一遍、屏幕上看不出任何变化、按钮还亮着"的死循环 ——
