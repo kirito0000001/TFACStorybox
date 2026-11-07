@@ -1373,6 +1373,9 @@ namespace GalExcleTools
 
             var chapter = _selectedTextToolChapter;
             var archive = new VoiceOriginalArchiveService();
+
+            // 整章还原后，之前"压过但仍不达标"的拉黑记录全部作废。
+            _voiceNormalizeBlocked.Clear();
             var files = GetCurrentChapterVoiceFiles();
 
             var confirm = ToolboxDialog.BuildForm(
@@ -1788,6 +1791,10 @@ namespace GalExcleTools
 
         private void ApplyVoiceLoudnessReport(VoiceComplianceReport report, IReadOnlyList<string> files)
         {
+            // 重新检查 = 重新开始一次判断：上一轮"压过也不达标"的拉黑记录全部作废。
+            // （文件可能已经被还原/替换，继续拉黑会让「规整语音」永远点不亮。）
+            _voiceNormalizeBlocked.Clear();
+
             foreach (var item in report.Items)
             {
                 _chapterVoiceLoudness[item.FileName] = item;
@@ -3371,8 +3378,12 @@ namespace GalExcleTools
                     return;
                 }
 
-                _chapterVoiceLoudness.Remove(Path.GetFileName(voicePath));
+                var restoredName = Path.GetFileName(voicePath);
+                _chapterVoiceLoudness.Remove(restoredName);
+                // 还原等于"这条又能修了"：必须解除拉黑，否则「规整语音」会一直是灰的。
+                _voiceNormalizeBlocked.Remove(restoredName);
                 UpdateVoiceDbCells();
+                UpdateVoiceNormalizeButtonsState();
                 AppendLog(LogKind.Info, $"已还原语音原始版：{Path.GetFileName(voicePath)}");
                 PlaySelectionSound();
                 ShowFloatingTip(
